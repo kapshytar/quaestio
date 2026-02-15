@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Aggregator - Инструкция</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 40px 20px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        
+        .subtitle {
+            text-align: center;
+            opacity: 0.9;
+            margin-bottom: 40px;
+        }
+        
+        h2 {
+            font-size: 1.8em;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            color: #ffd700;
+        }
+        
+        .step {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border-left: 4px solid #ffd700;
+        }
+        
+        .step-number {
+            display: inline-block;
+            background: #ffd700;
+            color: #333;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        code {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        
+        .command {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            overflow-x: auto;
+        }
+        
+        .feature {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 12px;
+            border-radius: 20px;
+            margin: 5px;
+            font-size: 0.9em;
+        }
+        
+        .warning {
+            background: rgba(255, 193, 7, 0.2);
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        
+        .success {
+            background: rgba(76, 175, 80, 0.2);
+            border-left: 4px solid #4caf50;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        
+        ul {
+            margin-left: 20px;
+            margin-top: 10px;
+        }
+        
+        li {
+            margin-bottom: 8px;
+        }
+        
+        .keyboard-shortcut {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Chat Aggregator v0.1</h1>
+        <p class="subtitle">Работай с 4 AI одновременно</p>
+        
+        <div class="success">
+            <strong>✨ Что это?</strong><br>
+            Electron-приложение для одновременной работы с ChatGPT, Claude, Gemini и Grok
+        </div>
+        
+        <h2>📦 Установка и запуск</h2>
+        
+        <div class="step">
+            <span class="step-number">1</span>
+            <strong>Установите Node.js</strong> (если ещё нет)<br>
+            Скачайте с <a href="https://nodejs.org/" style="color: #ffd700;">nodejs.org</a> (версия 18 или выше)
+        </div>
+        
+        <div class="step">
+            <span class="step-number">2</span>
+            <strong>Запустите приложение</strong><br>
+            <strong>Windows:</strong> Дважды кликните <code>start.bat</code><br>
+            <strong>Linux/Mac:</strong> Выполните <code>./start.sh</code><br>
+            <br>
+            Или вручную:
+            <div class="command">npm install<br>npm start</div>
+        </div>
+        
+        <div class="step">
+            <span class="step-number">3</span>
+            <strong>Импортируйте cookies</strong><br>
+            Нажмите кнопку "Import 🍪" и выберите файл cookies.json<br>
+            <small>(Экспортируйте cookies из расширения Cookie-Editor)</small>
+        </div>
+        
+        <h2>✨ Возможности</h2>
+        
+        <div class="feature">✅ Отправка во все чаты</div>
+        <div class="feature">✅ Импорт cookies</div>
+        <div class="feature">✅ Редактируемые URL</div>
+        <div class="feature">✅ Управление масштабом</div>
+        <div class="feature">✅ Навигация (back/forward)</div>
+        <div class="feature">✅ Компактный UI</div>
+        
+        <h2>⌨️ Горячие клавиши</h2>
+        
+        <ul>
+            <li><span class="keyboard-shortcut">Enter</span> — отправить сообщение</li>
+            <li><span class="keyboard-shortcut">Shift+Enter</span> — новая строка</li>
+            <li><span class="keyboard-shortcut">Ctrl+I</span> — импорт cookies</li>
+            <li><span class="keyboard-shortcut">Ctrl+R</span> — перезагрузить все окна</li>
+            <li><span class="keyboard-shortcut">F12</span> — открыть DevTools</li>
+            <li><span class="keyboard-shortcut">Ctrl+Plus/Minus</span> — изменить масштаб</li>
+            <li><span class="keyboard-shortcut">Ctrl+0</span> — сбросить масштаб</li>
+        </ul>
+        
+        <h2>🍪 Как получить cookies?</h2>
+        
+        <div class="step">
+            <span class="step-number">1</span>
+            Установите расширение <strong>Cookie-Editor</strong> для вашего браузера
+        </div>
+        
+        <div class="step">
+            <span class="step-number">2</span>
+            Зайдите на нужный AI-сервис и авторизуйтесь
+        </div>
+        
+        <div class="step">
+            <span class="step-number">3</span>
+            Откройте Cookie-Editor → Export → JSON
+        </div>
+        
+        <div class="step">
+            <span class="step-number">4</span>
+            Сохраните файл и импортируйте в Chat Aggregator
+        </div>
+        
+        <h2>⚠️ Известные проблемы</h2>
+        
+        <div class="warning">
+            <strong>Gemini зацикливается</strong><br>
+            На gemini.google.com может быть бесконечный редирект.<br>
+            Используется aistudio.google.com вместо этого.
+        </div>
+        
+        <div class="warning">
+            <strong>Селекторы могут устареть</strong><br>
+            Если AI-сервисы обновят интерфейс, может потребоваться обновление селекторов в коде.
+        </div>
+        
+        <h2>📁 Файлы проекта</h2>
+        
+        <ul>
+            <li><code>main.js</code> — главный процесс Electron</li>
+            <li><code>index.html</code> — интерфейс приложения</li>
+            <li><code>renderer.js</code> — логика фронтенда</li>
+            <li><code>preload.js</code> — безопасный мост IPC</li>
+            <li><code>cookie-import-simple.js</code> — импорт cookies</li>
+            <li><code>package.json</code> — конфигурация проекта</li>
+        </ul>
+        
+        <div class="success" style="margin-top: 40px; text-align: center;">
+            <strong>Готово к работе! 🎉</strong><br>
+            Подробная документация в <code>README.md</code>
+        </div>
+    </div>
+</body>
+</html>

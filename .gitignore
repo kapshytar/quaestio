@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+dist/
+out/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+
+# Electron
+*.electron/
+
+# Cookie/session files (sensitive data)
+*cookie*.json
+*cookies*.json
+
+# Claude Code worktrees
+.claude/
+
+# Old/backup files
+*-old.*
