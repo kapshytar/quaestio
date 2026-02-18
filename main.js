@@ -5,8 +5,9 @@ const fs = require('fs');
 // Lock userData path so renaming the app doesn't wipe sessions/cookies
 app.setPath('userData', path.join(app.getPath('appData'), 'chat-aggregator'));
 
-// Disable GPU acceleration to fix white screen issues on some Windows systems
-app.disableHardwareAcceleration();
+// GPU acceleration enabled by default — needed for 4 webviews to not melt CPU.
+// If you see a white screen on launch, uncomment the next line:
+// app.disableHardwareAcceleration();
 
 // Add switches to fix white screen / isolation issues
 app.commandLine.appendSwitch('disable-site-isolation-trials');
@@ -14,10 +15,34 @@ app.commandLine.appendSwitch('ignore-certificate-errors');
 app.commandLine.appendSwitch('enable-mixed-content');
 app.commandLine.appendSwitch('allow-running-insecure-content');
 
+// Throttle background rendering to reduce idle CPU usage
+app.commandLine.appendSwitch('disable-background-timer-throttling', 'false');
+app.commandLine.appendSwitch('disable-renderer-backgrounding', 'false');
+
 const { importCookiesFromJSON } = require('./cookie-import-simple');
 
 let mainWindow;
 let googleAuthWindow = null;
+
+// Throttle all webviews when app is minimized/hidden to save CPU
+function setAllWebviewsBackgrounded(backgrounded) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    const { webContents } = require('electron');
+    const allContents = webContents.getAllWebContents();
+    for (const wc of allContents) {
+      if (wc.getType() === 'webview') {
+        // Electron's built-in throttling: slows timers, rAF, etc. when backgrounded
+        wc.setBackgroundThrottling(true);
+        // Mute audio when minimized (optional comfort)
+        wc.setAudioMuted(backgrounded);
+      }
+    }
+    console.log(`[Throttle] Webviews backgrounded=${backgrounded}, count=${allContents.filter(w => w.getType() === 'webview').length}`);
+  } catch (err) {
+    console.warn('[Throttle] Error:', err.message);
+  }
+}
 const MAX_COOKIE_IMPORT_SIZE_BYTES = 5 * 1024 * 1024;
 const CHROME_LIKE_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
 
@@ -134,7 +159,8 @@ async function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       webviewTag: true,
-      webSecurity: false
+      webSecurity: false,
+      backgroundThrottling: true
     },
     backgroundColor: '#1a1a1a',
     title: 'Gunshi (alpha)',
@@ -142,6 +168,20 @@ async function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
+
+  // ---- Throttle webviews when window is hidden/minimized to save CPU ----
+  mainWindow.on('minimize', () => {
+    setAllWebviewsBackgrounded(true);
+  });
+  mainWindow.on('restore', () => {
+    setAllWebviewsBackgrounded(false);
+  });
+  mainWindow.on('hide', () => {
+    setAllWebviewsBackgrounded(true);
+  });
+  mainWindow.on('show', () => {
+    setAllWebviewsBackgrounded(false);
+  });
 
   mainWindow.webContents.on('console-message', (event, level, message) => {
     const levelTag = ['LOG', 'WARN', 'ERR'][level] || 'LOG';
