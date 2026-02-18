@@ -1,0 +1,478 @@
+// ========== MERGE API CLIENT ==========
+// Ported from Android MergeApiClient.kt
+
+const MERGE_PROVIDERS = {
+  CHATGPT: {
+    id: 'chatgpt_api',
+    title: 'ChatGPT API',
+    defaultEndpoint: 'https://api.openai.com/v1/chat/completions',
+    defaultModel: 'gpt-4o-mini'
+  },
+  DEEPSEEK: {
+    id: 'deepseek_api',
+    title: 'DeepSeek API',
+    defaultEndpoint: 'https://api.deepseek.com/v1/chat/completions',
+    defaultModel: 'deepseek-chat'
+  },
+  GEMINI: {
+    id: 'gemini_api',
+    title: 'Gemini API',
+    defaultEndpoint: 'https://generativelanguage.googleapis.com/v1beta',
+    defaultModel: 'gemini-2.0-flash'
+  },
+  PERPLEXITY: {
+    id: 'perplexity_api',
+    title: 'Perplexity API',
+    defaultEndpoint: 'https://api.perplexity.ai/chat/completions',
+    defaultModel: 'sonar'
+  },
+  CLAUDE: {
+    id: 'claude_api',
+    title: 'Claude API',
+    defaultEndpoint: 'https://api.anthropic.com/v1/messages',
+    defaultModel: 'claude-3-5-sonnet-latest'
+  },
+  OPENROUTER: {
+    id: 'openrouter_api',
+    title: 'OpenRouter API',
+    defaultEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    defaultModel: 'openai/gpt-4o-mini'
+  },
+  HUGGINGFACE: {
+    id: 'huggingface_api',
+    title: 'Hugging Face API',
+    defaultEndpoint: 'https://router.huggingface.co/v1/chat/completions',
+    defaultModel: ''
+  },
+  CUSTOM: {
+    id: 'custom_api',
+    title: 'Custom OpenAI-Compatible',
+    defaultEndpoint: '',
+    defaultModel: ''
+  }
+};
+
+const DEFAULT_MERGE_INSTRUCTIONS = `You are a neutral synthesis engine.
+Analyze the model responses below and return strictly in markdown.
+
+IMPORTANT: Use double line breaks between every bullet point and every section to ensure a wide, readable vertical layout.
+
+Output format:
+## Consensus
+
+- ...
+
+- ...
+
+## Disagreements
+
+### Topic A
+
+- ModelX: ...
+
+- ModelY: ...
+
+Keep it concise and factual.`;
+
+class MergeApiClient {
+  constructor() {
+    this.provider = MERGE_PROVIDERS.CHATGPT;
+    this.apiKey = '';
+    this.endpoint = '';
+    this.model = '';
+    this.fallbackModels = [];
+    this.mergeInstructions = '';
+    this.clarificationInstructions = '';
+    this.mergeHistory = '';
+    this.lastSourcePrompt = '';
+    this.lastOriginalResponses = {};
+    this.onLog = null; // (message, type, detail) => void — set by renderer
+  }
+
+  _log(message, type = 'info', detail = null) {
+    if (typeof this.onLog === 'function') this.onLog(message, type, detail);
+    console.log(`[MergeApiClient][${type}] ${message}`);
+  }
+
+  async merge(responses, isClarification = false, clarificationText = '', previousSummary = '') {
+    // Save BEFORE building config so config.originalResponses is always up to date
+    if (!isClarification && Object.keys(responses).length > 0) {
+      this.lastOriginalResponses = responses;
+    }
+
+    const config = {
+      provider: this.provider,
+      apiKey: this.apiKey,
+      endpoint: this.endpoint || this.provider.defaultEndpoint,
+      model: this.model || this.provider.defaultModel,
+      fallbackModels: this.fallbackModels,
+      instructions: this.mergeInstructions || DEFAULT_MERGE_INSTRUCTIONS,
+      clarificationInstructions: this.clarificationInstructions,
+      sourcePrompt: this.lastSourcePrompt,
+      isClarification: isClarification,
+      clarificationText: clarificationText,
+      previousSummary: previousSummary,
+      originalResponses: this.lastOriginalResponses || {}
+    };
+
+    const prompt = this.buildPrompt(config, responses);
+
+    const systemPrompt = config.isClarification
+      ? (config.clarificationInstructions || 'You are a helpful assistant continuing a conversation. Respond naturally and helpfully.')
+      : 'Synthesize multi-model output.';
+
+    // For clarification: build chat history with original scraped responses as context
+    const chatHistory = config.isClarification
+      ? this.buildClarificationHistory(config.previousSummary, config.originalResponses, config.sourcePrompt)
+      : null;
+
+    // Log the full outgoing payload
+    const messages = this._buildMessagesPreview(systemPrompt, chatHistory, prompt, config);
+    this._log(
+      `→ ${isClarification ? 'Follow-up' : 'Merge'} → POST ${config.endpoint}  [${config.model}]`,
+      'send',
+      { endpoint: config.endpoint, model: config.model, messages }
+    );
+
+    try {
+      let result;
+      if (config.provider.id === 'claude_api') {
+        result = await this.callClaude(config, prompt, systemPrompt, chatHistory);
+      } else if (config.provider.id === 'gemini_api') {
+        result = await this.callGemini(config, prompt, systemPrompt, chatHistory);
+      } else {
+        result = await this.callOpenAiWithFallbacks(config, prompt, systemPrompt, chatHistory);
+      }
+
+      const fullResponse = this.appendMetadata(result, config.provider);
+      this._log(`← OK  [${result.modelUsed || config.model}]  ${fullResponse.length} chars`, 'recv', fullResponse);
+      return { success: true, text: fullResponse };
+    } catch (error) {
+      this._log(`✗ ${error.message}`, 'error');
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Build a preview of the messages array for debug logging (masks api key)
+  _buildMessagesPreview(systemPrompt, chatHistory, prompt, config) {
+    const msgs = [{ role: 'system', content: systemPrompt }];
+    if (chatHistory && chatHistory.length > 0) msgs.push(...chatHistory);
+    msgs.push({ role: 'user', content: prompt });
+    return msgs;
+  }
+
+  // Build clarification chat history: original responses as context + conversation turns
+  buildClarificationHistory(historyStr, originalResponses, sourcePrompt) {
+    // Parse history first — starts with "Assistant: <summary>..."
+    const historyMsgs = this.parseHistoryToMessages(historyStr);
+
+    const hasOriginal = originalResponses && Object.keys(originalResponses).length > 0;
+    const responsesBlock = hasOriginal
+      ? Object.entries(originalResponses)
+          .map(([model, text]) => `### ${model}\n${text.slice(0, 4000)}`)
+          .join('\n\n')
+      : null;
+
+    const messages = [];
+
+    // user: original user question + scraped LLM responses as context
+    if (responsesBlock) {
+      const originalQuestionPrefix = sourcePrompt
+        ? `The user's original question was: "${sourcePrompt}"\n\nHere are the AI model responses to that question:\n\n`
+        : `Here are the original AI model responses to synthesize:\n\n`;
+      messages.push({
+        role: 'user',
+        content: `${originalQuestionPrefix}${responsesBlock}\n\n(Your first task, shown below, was to synthesize these responses — identifying consensus and disagreements, and presenting a unified answer.)`
+      });
+    } else if (sourcePrompt) {
+      messages.push({
+        role: 'user',
+        content: `The user's original question was: "${sourcePrompt}"\n\n(Your first task, shown below, was to synthesize all AI responses to that question — identifying consensus and disagreements, and presenting a unified answer.)`
+      });
+    }
+
+    // Merge the first Assistant turn (the synthesis) with the context reply,
+    // so we never get two assistant messages in a row.
+    // historyMsgs[0] is always role:assistant (the synthesis result)
+    let firstAssistantContent = historyMsgs.length > 0 && historyMsgs[0].role === 'assistant'
+      ? historyMsgs[0].content
+      : null;
+
+    if (firstAssistantContent) {
+      messages.push({ role: 'assistant', content: firstAssistantContent });
+      // Append the rest of the conversation (User/Assistant turns after the first synthesis)
+      messages.push(...historyMsgs.slice(1));
+    } else {
+      // No synthesis yet — just push all history
+      messages.push(...historyMsgs);
+    }
+
+    return messages;
+  }
+
+  // Parse "User: ...\n\nAssistant: ..." history string into [{role, content}] array
+  // Drops the last entry if it's a User turn (it will be sent as the current prompt)
+  parseHistoryToMessages(historyStr) {
+    if (!historyStr) return [];
+    const messages = [];
+    const parts = historyStr.split(/\n\n(?=User:|Assistant:)/);
+    for (const part of parts) {
+      if (part.startsWith('User:')) {
+        messages.push({ role: 'user', content: part.slice('User:'.length).trim() });
+      } else if (part.startsWith('Assistant:')) {
+        messages.push({ role: 'assistant', content: part.slice('Assistant:'.length).trim() });
+      }
+    }
+    // If history already ends with the user's latest message, drop it (sent separately as prompt)
+    if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
+      messages.pop();
+    }
+    return messages;
+  }
+
+  buildPrompt(config, responses) {
+    if (config.isClarification) {
+      // Just the latest user message — history is passed as proper chat turns
+      return config.clarificationText;
+    }
+
+    const languageRule = config.sourcePrompt
+      ? `Write output in the same language as this original user question: "${config.sourcePrompt}".`
+      : 'Write output in the dominant language used in the source responses.';
+
+    return `${config.instructions}
+
+${languageRule}
+
+Responses:
+${Object.entries(responses).map(([model, text]) => `### ${model}\n${text.slice(0, 6000)}\n`).join('\n')}`;
+  }
+
+  async callOpenAiWithFallbacks(config, prompt, systemPrompt, chatHistory = null) {
+    const models = [config.model, ...this.parseFallbackModels(config.fallbackModels)].filter(m => m);
+    let lastError = null;
+    const attempted = [];
+
+    for (const model of models) {
+      attempted.push(model);
+      try {
+        console.log(`[MergeApiClient] Trying model: ${model}`);
+        const result = await this.callOpenAi(config, prompt, model, systemPrompt, chatHistory);
+        return { ...result, attemptedModels: attempted };
+      } catch (error) {
+        lastError = error;
+        const canRetry = this.isRateLimitedError(error);
+        console.warn(`[MergeApiClient] Model ${model} failed: ${error.message}, canRetry=${canRetry}`);
+        if (!canRetry || model === models[models.length - 1]) {
+          throw error;
+        }
+      }
+    }
+    throw lastError || new Error('All fallback models failed');
+  }
+
+  async callOpenAi(config, prompt, model, systemPrompt, chatHistory = null) {
+    // Build messages: system + history (if any) + current user message
+    const messages = [{ role: 'system', content: systemPrompt }];
+    if (chatHistory && chatHistory.length > 0) {
+      messages.push(...chatHistory);
+    }
+    messages.push({ role: 'user', content: prompt });
+
+    const payload = {
+      model: model,
+      messages: messages,
+      temperature: 0.2
+    };
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`
+    };
+
+    // OpenRouter extra headers
+    if (config.provider.id === 'openrouter_api') {
+      headers['HTTP-Referer'] = 'https://github.com/kvitaliq-maker/chat-aggregator-android';
+      headers['X-Title'] = 'Gunshi';
+    }
+
+    const response = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${data.error?.message || 'Request failed'}`);
+    }
+
+    const text = data.choices?.[0]?.message?.content?.trim();
+    if (!text) throw new Error('Empty response from provider');
+
+    return {
+      text: text,
+      modelUsed: data.model || model
+    };
+  }
+
+  async callClaude(config, prompt, systemPrompt, chatHistory = null) {
+    const messages = [];
+    if (chatHistory && chatHistory.length > 0) {
+      messages.push(...chatHistory);
+    }
+    messages.push({ role: 'user', content: prompt });
+
+    const payload = {
+      model: config.model || 'claude-3-5-sonnet-latest',
+      max_tokens: 1200,
+      system: systemPrompt,
+      messages: messages
+    };
+
+    const response = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': config.apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${data.error?.message || 'Request failed'}`);
+    }
+
+    const text = data.content?.[0]?.text?.trim();
+    if (!text) throw new Error('Empty response from Claude');
+
+    return {
+      text: text,
+      modelUsed: data.model || config.model
+    };
+  }
+
+  async callGemini(config, prompt, systemPrompt, chatHistory = null) {
+    const model = config.model || 'gemini-2.0-flash';
+    const endpoint = `${config.endpoint.replace(/\/$/, '')}/models/${model}:generateContent?key=${config.apiKey}`;
+
+    // Gemini uses 'user'/'model' roles (not 'assistant')
+    const contents = [];
+    if (chatHistory && chatHistory.length > 0) {
+      for (const msg of chatHistory) {
+        contents.push({
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: msg.content }]
+        });
+      }
+    }
+    contents.push({ role: 'user', parts: [{ text: prompt }] });
+
+    const payload = {
+      system_instruction: {
+        parts: [{ text: systemPrompt }]
+      },
+      contents: contents,
+      generationConfig: {
+        temperature: 0.2
+      }
+    };
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${data.error?.message || 'Request failed'}`);
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (!text) throw new Error('Empty response from Gemini');
+
+    return {
+      text: text,
+      modelUsed: data.modelVersion || model
+    };
+  }
+
+  appendMetadata(result, provider) {
+    const attempted = result.attemptedModels || [result.modelUsed];
+    const fallbackUsed = attempted.length > 1;
+
+    return `${result.text.trim()}
+
+---
+Merge provider: \`${provider.id}\`
+LLM used: \`${result.modelUsed}\`
+Fallback used: \`${fallbackUsed ? 'yes' : 'no'}\`
+Attempted models: \`${attempted.join(' -> ')}\``;
+  }
+
+  parseFallbackModels(raw) {
+    if (!raw) return [];
+    return raw.split(/[,\n;]/).map(m => m.trim()).filter(m => m);
+  }
+
+  isRateLimitedError(error) {
+    const msg = (error.message || '').toLowerCase();
+    return msg.includes('429') || msg.includes('rate limit') || msg.includes('too many requests');
+  }
+
+  // Config persistence
+  saveConfig() {
+    const providerSelect = document.getElementById('merge-provider');
+    const apiKeyInput = document.getElementById('merge-api-key');
+    const endpointInput = document.getElementById('merge-endpoint');
+    const modelInput = document.getElementById('merge-model');
+    const fallbackInput = document.getElementById('merge-fallback-models');
+    const instructionsInput = document.getElementById('merge-instructions');
+    const clarificationInstructionsInput = document.getElementById('clarification-instructions');
+
+    if (providerSelect) this.provider = Object.values(MERGE_PROVIDERS).find(p => p.id === providerSelect.value) || MERGE_PROVIDERS.CHATGPT;
+    if (apiKeyInput) this.apiKey = apiKeyInput.value.trim();
+    if (endpointInput) this.endpoint = endpointInput.value.trim();
+    if (modelInput) this.model = modelInput.value.trim();
+    if (fallbackInput) this.fallbackModels = fallbackInput.value.trim();
+    if (instructionsInput) this.mergeInstructions = instructionsInput.value.trim();
+    if (clarificationInstructionsInput) this.clarificationInstructions = clarificationInstructionsInput.value.trim();
+
+    const config = {
+      providerId: this.provider.id,
+      apiKey: this.apiKey,
+      endpoint: this.endpoint,
+      model: this.model,
+      fallbackModels: this.fallbackModels,
+      mergeInstructions: this.mergeInstructions,
+      clarificationInstructions: this.clarificationInstructions
+    };
+    localStorage.setItem('merge-config', JSON.stringify(config));
+  }
+
+  loadConfig() {
+    const saved = localStorage.getItem('merge-config');
+    if (!saved) return;
+
+    try {
+      const config = JSON.parse(saved);
+      this.provider = Object.values(MERGE_PROVIDERS).find(p => p.id === config.providerId) || MERGE_PROVIDERS.CHATGPT;
+      this.apiKey = config.apiKey || '';
+      this.endpoint = config.endpoint || '';
+      this.model = config.model || '';
+      this.fallbackModels = config.fallbackModels || [];
+      this.mergeInstructions = config.mergeInstructions || '';
+      this.clarificationInstructions = config.clarificationInstructions || '';
+    } catch (e) {
+      console.error('[MergeApiClient] Failed to load config:', e);
+    }
+  }
+}
+
+// Global instance
+window.mergeApiClient = new MergeApiClient();

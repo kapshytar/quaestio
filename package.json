@@ -1,7 +1,7 @@
 {
-  "name": "chat-aggregator",
+  "name": "gunshi",
   "version": "0.1.0",
-  "description": "Multi-chat aggregator for ChatGPT, Claude, Gemini, and Grok",
+  "description": "Gunshi — multi-AI chat aggregator",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -11,16 +11,26 @@
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"
   },
-  "keywords": ["chat", "ai", "aggregator", "chatgpt", "claude", "gemini", "grok"],
+  "keywords": [
+    "chat",
+    "ai",
+    "aggregator",
+    "chatgpt",
+    "claude",
+    "gemini",
+    "grok"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "electron": "^28.0.0",
-    "electron-builder": "^24.9.1"
+    "electron-builder": "^24.9.1",
+    "jimp": "^1.6.0",
+    "png-to-ico": "^3.0.1"
   },
   "build": {
-    "appId": "com.chataggregator.app",
-    "productName": "Chat Aggregator",
+    "appId": "com.gunshi.app",
+    "productName": "Gunshi",
     "directories": {
       "output": "dist"
     },
@@ -33,7 +43,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "icon.ico"
@@ -44,7 +56,9 @@
       "category": "public.app-category.productivity"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "icon.png",
       "category": "Utility"
     },

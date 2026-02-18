@@ -3,483 +3,490 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Aggregator</title>
+  <title>Gunshi (alpha)</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    html, body {
-      height: 100%;
-    }
-
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #1a1a1a;
-      color: #fff;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
+      background: #1a1a1a; color: #fff;
+      display: flex; flex-direction: row;
     }
-
+    #main-content { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+    #main-content.with-panel { width: calc(100% - 420px); }
+    #main-content.full-width { width: 100%; }
+    #webview-grid {
+      display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+      flex: 1; gap: 2px; background: #000; padding: 2px;
+    }
+    webview { width: 100%; height: 100%; background: #fff; }
+    .webview-container {
+      position: relative; background: #2a2a2a; border-radius: 4px;
+      overflow: hidden; display: flex; flex-direction: column;
+    }
+    .webview-header {
+      background: #1a1a1a; padding: 4px 8px; display: flex;
+      align-items: center; gap: 6px; border-bottom: 1px solid #333; min-height: 28px;
+    }
+    .webview-header.hidden { display: none; }
+    .service-select {
+      background: #333; border: 1px solid #555; border-radius: 3px;
+      color: #ccc; font-size: 10px; padding: 2px 4px; cursor: pointer; min-width: 70px;
+    }
+    .service-select:focus { outline: none; border-color: #0066ff; }
+    .webview-label { font-size: 10px; font-weight: 600; color: #999; min-width: 20px; }
+    .nav-btn {
+      background: #333; border: 1px solid #555; border-radius: 3px;
+      color: #aaa; font-size: 11px; padding: 2px 6px; cursor: pointer;
+      line-height: 1; min-width: 22px; text-align: center;
+    }
+    .nav-btn:hover { background: #444; color: #fff; }
+    .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .webview-url {
+      flex: 1; background: #2a2a2a; border: 1px solid #444; border-radius: 3px;
+      padding: 2px 8px; font-size: 10px; color: #ccc; font-family: 'Consolas', monospace; cursor: text;
+    }
+    .webview-url:focus { outline: none; border-color: #0066ff; background: #333; color: #fff; }
+    .webview-controls { display: flex; gap: 4px; align-items: center; margin-left: 6px; }
+    .zoom-btn {
+      background: #333; border: 1px solid #555; border-radius: 3px;
+      color: #fff; font-size: 10px; padding: 2px 6px; cursor: pointer; line-height: 1;
+    }
+    .zoom-btn:hover { background: #444; }
+    .zoom-level { font-size: 10px; color: #999; min-width: 35px; text-align: center; }
+    .webview-wrapper { flex: 1; position: relative; }
     #bottom-panel {
-      padding: 8px 15px;
-      background: #2a2a2a;
-      border-top: 2px solid #444;
-      flex-shrink: 0;
+      padding: 8px 15px; background: #2a2a2a; border-top: 2px solid #444; flex-shrink: 0;
     }
-
-    #input-container {
-      display: flex;
-      gap: 8px;
-      margin-top: 8px;
-    }
-
+    #input-container { display: flex; gap: 8px; margin-top: 8px; }
     #message-input {
-      flex: 1;
-      padding: 10px 14px;
-      font-size: 14px;
-      background: #333;
-      border: 2px solid #555;
-      border-radius: 8px;
-      color: #fff;
-      outline: none;
-      font-family: inherit;
-      transition: border-color 0.2s;
+      flex: 1; padding: 10px 14px; font-size: 14px; background: #333;
+      border: 2px solid #555; border-radius: 8px; color: #fff;
+      outline: none; font-family: inherit; transition: border-color 0.2s;
     }
-
-    #message-input:focus {
-      border-color: #0066ff;
-    }
-
+    #message-input:focus { border-color: #0066ff; }
     #send-btn {
-      padding: 10px 28px;
-      background: #0066ff;
-      border: none;
-      border-radius: 8px;
-      color: #fff;
-      font-weight: 600;
-      font-size: 14px;
-      cursor: pointer;
+      padding: 10px 28px; background: #0066ff; border: none; border-radius: 8px;
+      color: #fff; font-weight: 600; font-size: 14px; cursor: pointer;
       transition: all 0.2s;
     }
-
-    #send-btn:hover {
-      background: #0052cc;
-      transform: translateY(-1px);
-    }
-
-    #send-btn:active {
-      transform: translateY(0);
-    }
-
+    #send-btn:hover { background: #0052cc; transform: translateY(-1px); }
+    #send-btn:active { transform: translateY(0); }
     #collapse-toolbar {
-      padding: 10px 16px;
-      background: #333;
-      border: 1px solid #555;
-      border-radius: 8px;
-      color: #fff;
-      cursor: pointer;
-      font-size: 16px;
-      transition: all 0.2s;
+      padding: 10px 16px; background: #333; border: 1px solid #555;
+      border-radius: 8px; color: #fff; cursor: pointer; font-size: 16px; transition: all 0.2s;
     }
-
-    #collapse-toolbar:hover {
-      background: #444;
-    }
-
-    #toggles {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
-    #toggles.hidden {
-      display: none !important;
-    }
-
+    #collapse-toolbar:hover { background: #444; }
+    #toggles { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    #toggles.hidden { display: none !important; }
     .toggle {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 3px 8px;
-      background: #333;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: background 0.2s;
-      font-size: 11px;
+      display: flex; align-items: center; gap: 4px; padding: 3px 8px;
+      background: #333; border-radius: 4px; cursor: pointer;
+      transition: background 0.2s; font-size: 11px;
     }
-
-    .toggle:hover {
-      background: #3a3a3a;
-    }
-
-    .toggle input {
-      width: 14px;
-      height: 14px;
-      cursor: pointer;
-      accent-color: #0066ff;
-    }
-
-    .toggle label {
-      cursor: pointer;
-      user-select: none;
-      font-size: 11px;
-      font-weight: 500;
-    }
-
-    .status {
-      margin-left: 2px;
-      font-size: 11px;
-      min-width: 12px;
-      text-align: center;
-    }
-
+    .toggle:hover { background: #3a3a3a; }
+    .toggle input { width: 14px; height: 14px; cursor: pointer; accent-color: #0066ff; }
+    .toggle label { cursor: pointer; user-select: none; font-size: 11px; font-weight: 500; }
+    .status { margin-left: 2px; font-size: 11px; min-width: 12px; text-align: center; }
     .status.success { color: #00ff00; }
     .status.pending { color: #ffaa00; }
     .status.error { color: #ff0000; }
-
+    .status.shimmer { color: #00aaff; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     .control-btn {
-      padding: 3px 10px;
-      background: #333;
-      border: 1px solid #555;
-      border-radius: 4px;
-      color: #ccc;
-      cursor: pointer;
-      font-size: 11px;
-      transition: background 0.2s;
+      padding: 3px 10px; background: #333; border: 1px solid #555;
+      border-radius: 4px; color: #ccc; cursor: pointer; font-size: 11px; transition: background 0.2s;
     }
-
-    .control-btn:hover {
-      background: #444;
-      color: #fff;
-    }
-
-    #webview-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: 1fr 1fr;
-      flex: 1;
-      gap: 2px;
-      background: #000;
-      padding: 2px;
-    }
-
-    webview {
-      width: 100%;
-      height: 100%;
-      background: #fff;
-    }
-
-    .webview-container {
-      position: relative;
-      background: #2a2a2a;
-      border-radius: 4px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .webview-header {
-      background: #1a1a1a;
-      padding: 4px 8px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      border-bottom: 1px solid #333;
-      min-height: 28px;
-    }
-
-    .webview-header.hidden {
-      display: none;
-    }
-
-    .service-select {
-      background: #333;
-      border: 1px solid #555;
-      border-radius: 3px;
-      color: #ccc;
-      font-size: 10px;
-      padding: 2px 4px;
-      cursor: pointer;
-      min-width: 70px;
-    }
-
-    .service-select:focus {
-      outline: none;
-      border-color: #0066ff;
-    }
-
-    .webview-label {
-      font-size: 10px;
-      font-weight: 600;
-      color: #999;
-      min-width: 20px;
-    }
-
-    .nav-btn {
-      background: #333;
-      border: 1px solid #555;
-      border-radius: 3px;
-      color: #aaa;
-      font-size: 11px;
-      padding: 2px 6px;
-      cursor: pointer;
-      line-height: 1;
-      min-width: 22px;
-      text-align: center;
-    }
-
-    .nav-btn:hover {
-      background: #444;
-      color: #fff;
-    }
-
-    .nav-btn:disabled {
-      opacity: 0.3;
-      cursor: not-allowed;
-    }
-
-    .webview-url {
-      flex: 1;
-      background: #2a2a2a;
-      border: 1px solid #444;
-      border-radius: 3px;
-      padding: 2px 8px;
-      font-size: 10px;
-      color: #ccc;
-      font-family: 'Consolas', monospace;
-      cursor: text;
-    }
-
-    .webview-url:focus {
-      outline: none;
-      border-color: #0066ff;
-      background: #333;
-      color: #fff;
-    }
-
-    .webview-controls {
-      display: flex;
-      gap: 4px;
-      align-items: center;
-      margin-left: 6px;
-    }
-
-    .zoom-btn {
-      background: #333;
-      border: 1px solid #555;
-      border-radius: 3px;
-      color: #fff;
-      font-size: 10px;
-      padding: 2px 6px;
-      cursor: pointer;
-      line-height: 1;
-    }
-
-    .zoom-btn:hover {
-      background: #444;
-    }
-
-    .zoom-level {
-      font-size: 10px;
-      color: #999;
-      min-width: 35px;
-      text-align: center;
-    }
-
-    .webview-wrapper {
-      flex: 1;
+    .control-btn:hover { background: #444; color: #fff; }
+    #side-panel-wrapper { display: flex; flex-shrink: 0; position: relative; }
+    #side-panel {
+      width: 420px; min-width: 300px; max-width: 45vw;
+      background: #2a2a2a; border-left: 2px solid #444;
+      display: flex; flex-direction: column; overflow: hidden;
+      transition: transform 0.3s ease;
       position: relative;
     }
-
-    #import-cookies-btn {
-      margin-left: auto;
-      padding: 6px 16px;
-      background: #333;
-      border: 1px solid #555;
-      border-radius: 6px;
-      color: #fff;
-      cursor: pointer;
-      font-size: 12px;
+    #side-panel.collapsed {
+      transform: translateX(100%);
+      position: absolute;
+      right: 0; top: 0; height: 100%;
+      z-index: 100;
+      box-shadow: -2px 0 10px rgba(0,0,0,0.5);
     }
-
-    #import-cookies-btn:hover {
-      background: #444;
+    #side-panel-header {
+      padding: 12px 16px; background: #1a1a1a; border-bottom: 1px solid #333;
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
     }
+    #side-panel-title { font-size: 14px; font-weight: 600; color: #fff; }
+    #side-panel-toggle {
+      background: transparent; border: none; color: #aaa; cursor: pointer;
+      font-size: 18px; padding: 4px 8px; border-radius: 4px;
+    }
+    #side-panel-toggle:hover { background: #333; color: #fff; }
+    #side-panel-content {
+      flex: 1; overflow-y: auto; padding: 16px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    #side-panel-content::-webkit-scrollbar { width: 8px; }
+    #side-panel-content::-webkit-scrollbar-track { background: #1a1a1a; }
+    #side-panel-content::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+    /* ---- Config Tabs ---- */
+    #config-tabs-panel { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+    #config-tabs-bar {
+      display: flex; align-items: center; background: #222; border-bottom: 1px solid #3a3a3a;
+      gap: 1px; padding: 2px 4px;
+    }
+    .cfg-tab {
+      flex: 1; padding: 4px 6px; background: transparent; border: none;
+      color: #666; font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.4px; cursor: pointer; border-radius: 4px; transition: all 0.15s;
+    }
+    .cfg-tab:hover { color: #aaa; background: #2a2a2a; }
+    .cfg-tab.active { color: #fff; background: #383838; }
+    #config-tabs-collapse {
+      margin-left: auto; padding: 3px 7px; background: transparent; border: none;
+      color: #555; font-size: 10px; cursor: pointer; border-radius: 4px; transition: all 0.15s; flex-shrink: 0;
+    }
+    #config-tabs-collapse:hover { color: #aaa; background: #2a2a2a; }
+    #config-tabs-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+    #config-tabs-body.collapsed { display: none; }
+    .cfg-tab-pane { display: none; flex-direction: column; gap: 8px; }
+    .cfg-tab-pane.active { display: flex; }
+    #prompt-subtabs-bar { display: flex; gap: 2px; background: #1a1a1a; border-radius: 5px; padding: 2px; }
+    .prompt-subtab {
+      flex: 1; padding: 3px 6px; background: transparent; border: none;
+      color: #555; font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.3px; cursor: pointer; border-radius: 3px; transition: all 0.15s;
+    }
+    .prompt-subtab:hover { color: #aaa; }
+    .prompt-subtab.active { color: #ddd; background: #2e2e2e; }
+    .prompt-subtab-pane { display: none; flex-direction: column; gap: 8px; }
+    .prompt-subtab-pane.active { display: flex; }
+    .config-field { display: flex; flex-direction: column; gap: 4px; }
+    .config-field label { font-size: 10px; font-weight: 500; color: #888; text-transform: uppercase; }
+    .config-field input, .config-field select, .config-field textarea {
+      padding: 8px 10px; background: #2a2a2a; border: 1px solid #444;
+      border-radius: 6px; color: #fff; font-size: 12px;
+      font-family: inherit; outline: none; transition: border-color 0.2s;
+    }
+    .config-field input:focus, .config-field select:focus, .config-field textarea:focus { border-color: #0066ff; }
+    .config-field textarea { resize: vertical; min-height: 60px; }
+    #merge-result-container { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 200px; }
+    #merge-result {
+      flex: 1; background: #333; border: 1px solid #444; border-radius: 8px;
+      padding: 12px; overflow-y: auto; font-size: 13px; line-height: 1.6; white-space: pre-wrap;
+    }
+    #merge-result:empty::before { content: 'Merge results will appear here...'; color: #666; font-style: italic; }
+    #merge-result h1, #merge-result h2, #merge-result h3, #merge-result h4 { margin-top: 16px; margin-bottom: 8px; font-weight: 600; color: #fff; }
+    #merge-result h2 { font-size: 16px; border-bottom: 1px solid #444; padding-bottom: 4px; }
+    #merge-result h3 { font-size: 14px; }
+    #merge-result ul, #merge-result ol { margin-left: 20px; margin-bottom: 8px; }
+    #merge-result li { margin-bottom: 4px; }
+    #merge-result p { margin-bottom: 8px; }
+    #merge-result code { background: #2a2a2a; padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 11px; }
+    #merge-result pre { background: #1a1a1a; padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
+    #merge-result pre code { background: transparent; padding: 0; }
+    #merge-result blockquote { border-left: 3px solid #0066ff; padding-left: 12px; margin: 8px 0; color: #aaa; }
+    #merge-result .metadata-footer { margin-top: 16px; padding-top: 12px; border-top: 1px solid #444; font-size: 11px; color: #888; }
+    #merge-result .metadata-footer code { color: #00aaff; }
+    #merge-debug-log {
+      font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; line-height: 1.5;
+      background: #111; border: 1px solid #333; border-radius: 6px;
+      padding: 8px; overflow-y: auto; max-height: 300px; white-space: pre-wrap; word-break: break-all;
+    }
+    #merge-debug-log:empty::before { content: 'No activity yet...'; color: #555; font-style: italic; }
+    .debug-entry { margin-bottom: 4px; }
+    .debug-entry.info { color: #aaa; }
+    .debug-entry.send { color: #4fc3f7; }
+    .debug-entry.recv { color: #81c784; }
+    .debug-entry.error { color: #ef5350; }
+    .debug-entry.warn { color: #ffb74d; }
+    .debug-entry.scrape { color: #ce93d8; }
+    .debug-entry .debug-ts { color: #555; margin-right: 4px; }
+    .debug-entry .debug-expand { cursor: pointer; color: #666; font-size: 10px; }
+    .debug-entry .debug-expand:hover { color: #aaa; }
+    .debug-entry .debug-body { display: none; margin-top: 2px; padding: 4px 8px; background: #1a1a1a; border-radius: 4px; color: #ccc; overflow-x: auto; }
+    .debug-entry .debug-body.visible { display: block; }
+    #debug-clear-btn { align-self: flex-end; font-size: 10px; padding: 2px 8px; }
+    #clarification-container { display: none; flex-direction: column; gap: 8px; }
+    #clarification-container.visible { display: flex; }
+    #clarification-label { font-size: 11px; color: #888; text-transform: uppercase; }
+    #clarification-input {
+      padding: 10px 12px; background: #2a2a2a; border: 1px solid #444;
+      border-radius: 6px; color: #fff; font-size: 13px; outline: none; transition: border-color 0.2s;
+    }
+    #clarification-input:focus { border-color: #0066ff; }
+    #clarification-send-btn {
+      padding: 10px 20px; background: #0066ff; border: none; border-radius: 6px;
+      color: #fff; font-weight: 600; font-size: 13px; cursor: pointer;
+      transition: all 0.2s; align-self: flex-end;
+    }
+    #clarification-send-btn:hover { background: #0052cc; }
+    #clarification-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .merge-status { font-size: 12px; padding: 8px 12px; border-radius: 6px; text-align: center; }
+    .merge-status.running { background: rgba(0, 170, 136, 0.2); color: #00aa88; border: 1px solid #00aa88; }
+    .merge-status.error { background: rgba(255, 68, 68, 0.2); color: #ff4444; border: 1px solid #ff4444; }
+    .merge-status.idle { background: rgba(136, 136, 136, 0.2); color: #888; border: 1px solid #666; }
+    #resize-handle { width: 4px; background: #1a1a1a; cursor: col-resize; transition: background 0.2s; flex-shrink: 0; }
+    #resize-handle:hover { background: #0066ff; }
+    #resize-overlay { display: none; position: fixed; inset: 0; z-index: 9999; cursor: col-resize; }
+    #run-merge-btn {
+      padding: 12px 20px; background: #00aa88; border: none; border-radius: 6px;
+      color: #fff; font-weight: 600; font-size: 14px; cursor: pointer;
+      margin-bottom: 12px; width: 100%; transition: background 0.2s;
+    }
+    #run-merge-btn:hover { background: #008877; }
+    /* ---- Mobile UA Toggle ---- */
+    #mobile-ua-toggle {
+      display: flex; align-items: center; gap: 5px; padding: 3px 10px;
+      background: #333; border: 1px solid #555; border-radius: 12px;
+      cursor: pointer; font-size: 11px; color: #aaa; user-select: none;
+      transition: all 0.2s;
+    }
+    #mobile-ua-toggle:hover { background: #3a3a3a; }
+    #mobile-ua-toggle.active { background: #1a3a2a; border-color: #00aa66; color: #00cc88; }
+    #mobile-ua-toggle .ua-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: #555; transition: background 0.2s; flex-shrink: 0;
+    }
+    #mobile-ua-toggle.active .ua-dot { background: #00cc88; }
   </style>
 </head>
 <body>
-  <div id="webview-grid">
-    <div class="webview-container">
-      <div class="webview-header" data-slot="slot-1">
-        <select class="service-select" data-slot="slot-1">
-          <option value="chatgpt">ChatGPT</option>
-          <option value="claude">Claude</option>
-          <option value="gemini">Gemini</option>
-          <option value="grok">Grok</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="perplexity">Perplexity</option>
-          <option value="custom">Custom URL</option>
-        </select>
-        <span class="webview-label" id="slot-label-slot-1">#1</span>
-        <button class="nav-btn" data-action="back" title="Back">&#9668;</button>
-        <button class="nav-btn" data-action="forward" title="Forward">&#9658;</button>
-        <button class="nav-btn" data-action="reload" title="Reload">&#10227;</button>
-        <button class="nav-btn" data-action="stop" title="Stop Loading" style="color: #ff4444;">&#9632;</button>
-        <input class="webview-url" type="text" value="" title="Edit URL and press Enter">
-        <div class="webview-controls">
-          <button class="zoom-btn" data-action="zoom-out">&#8722;</button>
-          <span class="zoom-level">100%</span>
-          <button class="zoom-btn" data-action="zoom-in">+</button>
-          <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+  <!-- Main Content Area -->
+  <div id="main-content" class="with-panel">
+    <div id="webview-grid">
+      <div class="webview-container">
+        <div class="webview-header" data-slot="slot-1">
+          <select class="service-select" data-slot="slot-1">
+            <option value="chatgpt">ChatGPT</option>
+            <option value="claude">Claude</option>
+            <option value="gemini">Gemini</option>
+            <option value="grok">Grok</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="perplexity">Perplexity</option>
+            <option value="custom">Custom URL</option>
+          </select>
+          <span class="webview-label" id="slot-label-slot-1">#1</span>
+          <button class="nav-btn" data-action="back">&#9668;</button>
+          <button class="nav-btn" data-action="forward">&#9658;</button>
+          <button class="nav-btn" data-action="reload">&#10227;</button>
+          <button class="nav-btn" data-action="stop" style="color: #ff4444;">&#9632;</button>
+          <input class="webview-url" type="text" value="">
+          <div class="webview-controls">
+            <button class="zoom-btn" data-action="zoom-out">&#8722;</button>
+            <span class="zoom-level">100%</span>
+            <button class="zoom-btn" data-action="zoom-in">+</button>
+            <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+          </div>
         </div>
+        <div class="webview-wrapper"><webview id="webview-slot-1" partition="persist:shared" allowpopups disablewebsecurity></webview></div>
       </div>
-      <div class="webview-wrapper">
-        <webview id="webview-slot-1"
-          partition="persist:shared"
-          allowpopups>
-        </webview>
+      <div class="webview-container">
+        <div class="webview-header" data-slot="slot-2">
+          <select class="service-select" data-slot="slot-2">
+            <option value="chatgpt">ChatGPT</option>
+            <option value="claude" selected>Claude</option>
+            <option value="gemini">Gemini</option>
+            <option value="grok">Grok</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="perplexity">Perplexity</option>
+            <option value="custom">Custom URL</option>
+          </select>
+          <span class="webview-label" id="slot-label-slot-2">#2</span>
+          <button class="nav-btn" data-action="back">&#9668;</button>
+          <button class="nav-btn" data-action="forward">&#9658;</button>
+          <button class="nav-btn" data-action="reload">&#10227;</button>
+          <button class="nav-btn" data-action="stop" style="color: #ff4444;">&#9632;</button>
+          <input class="webview-url" type="text" value="">
+          <div class="webview-controls">
+            <button class="zoom-btn" data-action="zoom-out">&#8722;</button>
+            <span class="zoom-level">100%</span>
+            <button class="zoom-btn" data-action="zoom-in">+</button>
+            <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+          </div>
+        </div>
+        <div class="webview-wrapper"><webview id="webview-slot-2" partition="persist:shared" allowpopups disablewebsecurity></webview></div>
+      </div>
+      <div class="webview-container">
+        <div class="webview-header" data-slot="slot-3">
+          <select class="service-select" data-slot="slot-3">
+            <option value="chatgpt">ChatGPT</option>
+            <option value="claude">Claude</option>
+            <option value="gemini" selected>Gemini</option>
+            <option value="grok">Grok</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="perplexity">Perplexity</option>
+            <option value="custom">Custom URL</option>
+          </select>
+          <span class="webview-label" id="slot-label-slot-3">#3</span>
+          <button class="nav-btn" data-action="back">&#9668;</button>
+          <button class="nav-btn" data-action="forward">&#9658;</button>
+          <button class="nav-btn" data-action="reload">&#10227;</button>
+          <button class="nav-btn" data-action="stop" style="color: #ff4444;">&#9632;</button>
+          <input class="webview-url" type="text" value="">
+          <div class="webview-controls">
+            <button class="zoom-btn" data-action="zoom-out">&#8722;</button>
+            <span class="zoom-level">100%</span>
+            <button class="zoom-btn" data-action="zoom-in">+</button>
+            <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+          </div>
+        </div>
+        <div class="webview-wrapper"><webview id="webview-slot-3" partition="persist:shared" allowpopups disablewebsecurity></webview></div>
+      </div>
+      <div class="webview-container">
+        <div class="webview-header" data-slot="slot-4">
+          <select class="service-select" data-slot="slot-4">
+            <option value="chatgpt">ChatGPT</option>
+            <option value="claude">Claude</option>
+            <option value="gemini">Gemini</option>
+            <option value="grok" selected>Grok</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="perplexity">Perplexity</option>
+            <option value="custom">Custom URL</option>
+          </select>
+          <span class="webview-label" id="slot-label-slot-4">#4</span>
+          <button class="nav-btn" data-action="back">&#9668;</button>
+          <button class="nav-btn" data-action="forward">&#9658;</button>
+          <button class="nav-btn" data-action="reload">&#10227;</button>
+          <button class="nav-btn" data-action="stop" style="color: #ff4444;">&#9632;</button>
+          <input class="webview-url" type="text" value="">
+          <div class="webview-controls">
+            <button class="zoom-btn" data-action="zoom-out">&#8722;</button>
+            <span class="zoom-level">100%</span>
+            <button class="zoom-btn" data-action="zoom-in">+</button>
+            <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+          </div>
+        </div>
+        <div class="webview-wrapper"><webview id="webview-slot-4" partition="persist:shared" allowpopups disablewebsecurity></webview></div>
       </div>
     </div>
-
-    <div class="webview-container">
-      <div class="webview-header" data-slot="slot-2">
-        <select class="service-select" data-slot="slot-2">
-          <option value="chatgpt">ChatGPT</option>
-          <option value="claude" selected>Claude</option>
-          <option value="gemini">Gemini</option>
-          <option value="grok">Grok</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="perplexity">Perplexity</option>
-          <option value="custom">Custom URL</option>
-        </select>
-        <span class="webview-label" id="slot-label-slot-2">#2</span>
-        <button class="nav-btn" data-action="back" title="Back">&#9668;</button>
-        <button class="nav-btn" data-action="forward" title="Forward">&#9658;</button>
-        <button class="nav-btn" data-action="reload" title="Reload">&#10227;</button>
-        <button class="nav-btn" data-action="stop" title="Stop" style="color: #ff4444;">&#9632;</button>
-        <input class="webview-url" type="text" value="" title="Edit URL and press Enter">
-        <div class="webview-controls">
-          <button class="zoom-btn" data-action="zoom-out">&#8722;</button>
-          <span class="zoom-level">100%</span>
-          <button class="zoom-btn" data-action="zoom-in">+</button>
-          <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+    <div id="bottom-panel">
+      <div id="toggles">
+        <div class="toggle"><input type="checkbox" id="toggle-slot-1" checked><label for="toggle-slot-1" id="label-slot-1">Slot 1</label><span class="status" id="status-slot-1"></span></div>
+        <div class="toggle"><input type="checkbox" id="toggle-slot-2" checked><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
+        <div class="toggle"><input type="checkbox" id="toggle-slot-3" checked><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
+        <div class="toggle"><input type="checkbox" id="toggle-slot-4" checked><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
+        <button class="control-btn" id="toggle-address-bar-btn">Hide Address Bar</button>
+        <button class="control-btn" id="import-cookies-btn">Import 📥</button>
+        <div id="mobile-ua-toggle" title="Switch to mobile user-agent (loads lighter mobile pages)">
+          <span class="ua-dot"></span>
+          <span id="mobile-ua-label">📱 Mobile</span>
         </div>
+        <button class="control-btn" id="toggle-merge-panel-btn">Merge ▸</button>
       </div>
-      <div class="webview-wrapper">
-        <webview id="webview-slot-2"
-          partition="persist:shared"
-          allowpopups>
-        </webview>
-      </div>
-    </div>
-
-    <div class="webview-container">
-      <div class="webview-header" data-slot="slot-3">
-        <select class="service-select" data-slot="slot-3">
-          <option value="chatgpt">ChatGPT</option>
-          <option value="claude">Claude</option>
-          <option value="gemini" selected>Gemini</option>
-          <option value="grok">Grok</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="perplexity">Perplexity</option>
-          <option value="custom">Custom URL</option>
-        </select>
-        <span class="webview-label" id="slot-label-slot-3">#3</span>
-        <button class="nav-btn" data-action="back" title="Back">&#9668;</button>
-        <button class="nav-btn" data-action="forward" title="Forward">&#9658;</button>
-        <button class="nav-btn" data-action="reload" title="Reload">&#10227;</button>
-        <button class="nav-btn" data-action="stop" title="Stop" style="color: #ff4444;">&#9632;</button>
-        <input class="webview-url" type="text" value="" title="Edit URL and press Enter">
-        <div class="webview-controls">
-          <button class="zoom-btn" data-action="zoom-out">&#8722;</button>
-          <span class="zoom-level">100%</span>
-          <button class="zoom-btn" data-action="zoom-in">+</button>
-          <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
-        </div>
-      </div>
-      <div class="webview-wrapper">
-        <webview id="webview-slot-3"
-          partition="persist:shared"
-          allowpopups>
-        </webview>
-      </div>
-    </div>
-
-    <div class="webview-container">
-      <div class="webview-header" data-slot="slot-4">
-        <select class="service-select" data-slot="slot-4">
-          <option value="chatgpt">ChatGPT</option>
-          <option value="claude">Claude</option>
-          <option value="gemini">Gemini</option>
-          <option value="grok" selected>Grok</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="perplexity">Perplexity</option>
-          <option value="custom">Custom URL</option>
-        </select>
-        <span class="webview-label" id="slot-label-slot-4">#4</span>
-        <button class="nav-btn" data-action="back" title="Back">&#9668;</button>
-        <button class="nav-btn" data-action="forward" title="Forward">&#9658;</button>
-        <button class="nav-btn" data-action="reload" title="Reload">&#10227;</button>
-        <button class="nav-btn" data-action="stop" title="Stop" style="color: #ff4444;">&#9632;</button>
-        <input class="webview-url" type="text" value="" title="Edit URL and press Enter">
-        <div class="webview-controls">
-          <button class="zoom-btn" data-action="zoom-out">&#8722;</button>
-          <span class="zoom-level">100%</span>
-          <button class="zoom-btn" data-action="zoom-in">+</button>
-          <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
-        </div>
-      </div>
-      <div class="webview-wrapper">
-        <webview id="webview-slot-4"
-          partition="persist:shared"
-          allowpopups>
-        </webview>
+      <div id="input-container">
+        <input type="text" id="message-input" placeholder="Type message and press Enter..." autocomplete="off">
+        <button id="send-btn">Send</button>
+        <button id="collapse-toolbar">⚙</button>
       </div>
     </div>
   </div>
 
-  <div id="bottom-panel">
-    <div id="toggles">
-      <div class="toggle">
-        <input type="checkbox" id="toggle-slot-1" checked>
-        <label for="toggle-slot-1" id="label-slot-1">Slot 1</label>
-        <span class="status" id="status-slot-1"></span>
+  <!-- Side Panel Wrapper -->
+  <div id="side-panel-wrapper">
+    <!-- Resize Handle -->
+    <div id="resize-handle" title="Drag to resize panel"></div>
+    <!-- Side Panel - Merge -->
+    <div id="side-panel">
+      <div id="side-panel-header">
+        <span id="side-panel-title">⚡ Merge Responses</span>
+        <button id="side-panel-toggle" title="Close Panel">✕</button>
       </div>
-      <div class="toggle">
-        <input type="checkbox" id="toggle-slot-2" checked>
-        <label for="toggle-slot-2" id="label-slot-2">Slot 2</label>
-        <span class="status" id="status-slot-2"></span>
+      <div id="side-panel-content">
+        <!-- Config Tabs -->
+        <div id="config-tabs-panel">
+          <div id="config-tabs-bar">
+            <button class="cfg-tab active" data-tab="provider">Provider</button>
+            <button class="cfg-tab" data-tab="instructions">Prompt</button>
+            <button class="cfg-tab" data-tab="debug">Debug</button>
+            <button id="config-tabs-collapse" title="Collapse">▲</button>
+          </div>
+          <div id="config-tabs-body">
+            <!-- Provider tab -->
+            <div class="cfg-tab-pane active" id="cfg-pane-provider">
+              <div class="config-field">
+                <label for="merge-provider">Provider</label>
+                <select id="merge-provider">
+                  <option value="chatgpt_api">ChatGPT API</option>
+                  <option value="claude_api">Claude API</option>
+                  <option value="gemini_api">Gemini API</option>
+                  <option value="perplexity_api">Perplexity API</option>
+                  <option value="deepseek_api">DeepSeek API</option>
+                  <option value="openrouter_api">OpenRouter</option>
+                  <option value="huggingface_api">Hugging Face</option>
+                  <option value="custom_api">Custom OpenAI-Compatible</option>
+                </select>
+              </div>
+              <div class="config-field">
+                <label for="merge-api-key">API Key</label>
+                <input type="password" id="merge-api-key" placeholder="sk-...">
+              </div>
+              <div class="config-field">
+                <label for="merge-endpoint">Endpoint</label>
+                <input type="text" id="merge-endpoint" placeholder="https://api.openai.com/v1/chat/completions">
+              </div>
+              <div class="config-field">
+                <label for="merge-model">Model</label>
+                <input type="text" id="merge-model" placeholder="gpt-4o-mini">
+              </div>
+              <div class="config-field" id="fallback-models-field">
+                <label for="merge-fallback-models">Fallback Models</label>
+                <input type="text" id="merge-fallback-models" placeholder="gpt-4o, gpt-3.5-turbo">
+              </div>
+            </div>
+            <!-- Instructions tab -->
+            <div class="cfg-tab-pane" id="cfg-pane-instructions">
+              <div id="prompt-subtabs-bar">
+                <button class="prompt-subtab active" data-subtab="merge">Merge</button>
+                <button class="prompt-subtab" data-subtab="clarification">Clarification</button>
+              </div>
+              <div class="prompt-subtab-pane active" id="prompt-pane-merge">
+                <div class="config-field">
+                  <textarea id="merge-instructions" placeholder="Custom merge instructions..."></textarea>
+                </div>
+                <button class="control-btn" id="reset-instructions-btn" style="align-self:flex-start;">Reset to Default</button>
+              </div>
+              <div class="prompt-subtab-pane" id="prompt-pane-clarification">
+                <div class="config-field">
+                  <textarea id="clarification-instructions" placeholder="Clarification system prompt..."></textarea>
+                </div>
+                <button class="control-btn" id="reset-clarification-btn" style="align-self:flex-start;">Reset to Default</button>
+              </div>
+            </div>
+            <!-- Debug tab -->
+            <div class="cfg-tab-pane" id="cfg-pane-debug">
+              <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+                <span style="font-size:10px;color:#666;flex:1;">Verbose API log</span>
+                <button class="control-btn" id="debug-clear-btn">Clear</button>
+              </div>
+              <div id="merge-debug-log"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Run Merge Button -->
+        <button id="run-merge-btn">⚡ Run Merge</button>
+        <!-- Merge Result -->
+        <div id="merge-result-container">
+          <div id="merge-status" class="merge-status idle">Ready to merge</div>
+          <div id="merge-result"></div>
+        </div>
+        <!-- Clarification -->
+        <div id="clarification-container">
+          <label id="clarification-label">Follow-up Question</label>
+          <input type="text" id="clarification-input" placeholder="Ask a follow-up question...">
+          <button id="clarification-send-btn">Send</button>
+        </div>
       </div>
-      <div class="toggle">
-        <input type="checkbox" id="toggle-slot-3" checked>
-        <label for="toggle-slot-3" id="label-slot-3">Slot 3</label>
-        <span class="status" id="status-slot-3"></span>
-      </div>
-      <div class="toggle">
-        <input type="checkbox" id="toggle-slot-4" checked>
-        <label for="toggle-slot-4" id="label-slot-4">Slot 4</label>
-        <span class="status" id="status-slot-4"></span>
-      </div>
-      <button class="control-btn" id="toggle-address-bar-btn">Hide Address Bar</button>
-      <button class="control-btn" id="import-cookies-btn">Import &#127850;</button>
-    </div>
-    <div id="input-container">
-      <input
-        type="text"
-        id="message-input"
-        placeholder="Type message and press Enter..."
-        autocomplete="off"
-      >
-      <button id="send-btn">Send</button>
-      <button id="collapse-toolbar">&#9776;</button>
     </div>
   </div>
 
-  <script src="renderer.js"></script>
+  <!-- Resize overlay — blocks webview mouse capture during panel resize -->
+  <div id="resize-overlay"></div>
+
+  <!-- Scripts - Order matters! -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
+  <script src="merge-api-client.js" defer></script>
+  <script src="side-panel-controls.js" defer></script>
+  <script src="renderer.js" defer></script>
 </body>
 </html>

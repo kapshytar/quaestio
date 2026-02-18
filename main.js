@@ -1,6 +1,19 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+
+// Lock userData path so renaming the app doesn't wipe sessions/cookies
+app.setPath('userData', path.join(app.getPath('appData'), 'chat-aggregator'));
+
+// Disable GPU acceleration to fix white screen issues on some Windows systems
+app.disableHardwareAcceleration();
+
+// Add switches to fix white screen / isolation issues
+app.commandLine.appendSwitch('disable-site-isolation-trials');
+app.commandLine.appendSwitch('ignore-certificate-errors');
+app.commandLine.appendSwitch('enable-mixed-content');
+app.commandLine.appendSwitch('allow-running-insecure-content');
+
 const { importCookiesFromJSON } = require('./cookie-import-simple');
 
 let mainWindow;
@@ -120,10 +133,12 @@ async function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      webviewTag: true
+      webviewTag: true,
+      webSecurity: false
     },
     backgroundColor: '#1a1a1a',
-    title: 'Chat Aggregator v0.2'
+    title: 'Gunshi (alpha)',
+    icon: path.join(__dirname, 'icon.ico')
   });
 
   mainWindow.loadFile('index.html');
