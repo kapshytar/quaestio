@@ -1,9 +1,67 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-// Lock userData path so renaming the app doesn't wipe sessions/cookies
-app.setPath('userData', path.join(app.getPath('appData'), 'chat-aggregator'));
+const APP_DATA_PATH = app.getPath('appData');
+const DEFAULT_USER_DATA_PATH = app.getPath('userData');
+const FIXED_USER_DATA_PATH = path.join(APP_DATA_PATH, 'chat-aggregator');
+
+function hasSessionData(dirPath) {
+  const markers = [
+    'Partitions',
+    'Network',
+    'Cookies',
+    'Local Storage',
+    'Session Storage',
+    'IndexedDB',
+    'Preferences'
+  ];
+  return markers.some(entry => fs.existsSync(path.join(dirPath, entry)));
+}
+
+function mergeDirContents(sourceDir, targetDir) {
+  if (!fs.existsSync(sourceDir)) return;
+  fs.mkdirSync(targetDir, { recursive: true });
+  const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const src = path.join(sourceDir, entry.name);
+    const dst = path.join(targetDir, entry.name);
+    if (fs.existsSync(dst)) continue;
+    fs.cpSync(src, dst, { recursive: true, errorOnExist: false });
+  }
+}
+
+function migrateLegacyUserData() {
+  const candidates = Array.from(new Set([
+    DEFAULT_USER_DATA_PATH,
+    path.join(APP_DATA_PATH, 'Gunshi'),
+    path.join(APP_DATA_PATH, 'gunshi'),
+    path.join(APP_DATA_PATH, 'chat-aggregator-electron')
+  ])).filter(p => p !== FIXED_USER_DATA_PATH);
+
+  fs.mkdirSync(FIXED_USER_DATA_PATH, { recursive: true });
+
+  for (const sourcePath of candidates) {
+    if (!fs.existsSync(sourcePath)) continue;
+    if (!hasSessionData(sourcePath)) continue;
+
+    try {
+      console.log(`[UserDataMigration] Merging session data from: ${sourcePath}`);
+      mergeDirContents(sourcePath, FIXED_USER_DATA_PATH);
+      console.log('[UserDataMigration] Merge complete');
+    } catch (err) {
+      console.warn(`[UserDataMigration] Failed from ${sourcePath}:`, err.message);
+    }
+  }
+}
+
+// NOTE:
+// Full profile-directory merge (including Local State / Network DBs) can break
+// Chromium OS-crypt decryption and invalidate existing sessions.
+// Keep fixed userData, but avoid auto-merging entire legacy profiles.
+// Legacy session recovery is handled via cookie-level migration below.
+app.setPath('userData', FIXED_USER_DATA_PATH);
 
 // GPU acceleration enabled by default — needed for 4 webviews to not melt CPU.
 // If you see a white screen on launch, uncomment the next line:
@@ -72,6 +130,76 @@ function reloadAllWebviews() {
 
 function triggerFindInRenderer() {
   runRendererScript(`window.dispatchEvent(new Event('app-find'))`);
+}
+
+async function migrateLegacyPartitionsToShared() {
+  const legacyPartitions = [
+    'persist:slot-1',
+    'persist:slot-2',
+    'persist:slot-3',
+    'persist:slot-4',
+    'persist:chatgpt',
+    'persist:claude',
+    'persist:gemini',
+    'persist:grok',
+    'persist:deepseek',
+    'persist:perplexity'
+  ];
+
+  const shared = session.fromPartition('persist:shared');
+  let totalImported = 0;
+  let totalFailed = 0;
+
+  for (const partitionId of legacyPartitions) {
+    try {
+      const source = session.fromPartition(partitionId);
+      const cookies = await source.cookies.get({});
+      if (!cookies.length) {
+        continue;
+      }
+
+      let importedFromPartition = 0;
+      for (const cookie of cookies) {
+        try {
+          const host = String(cookie.domain || '').replace(/^\./, '');
+          if (!host) continue;
+          const scheme = cookie.secure ? 'https' : 'http';
+          const cookiePath = cookie.path || '/';
+
+          const details = {
+            url: `${scheme}://${host}${cookiePath}`,
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookiePath,
+            secure: !!cookie.secure,
+            httpOnly: !!cookie.httpOnly,
+            sameSite: cookie.sameSite || 'no_restriction'
+          };
+
+          if (typeof cookie.expirationDate === 'number' && cookie.expirationDate > 0) {
+            details.expirationDate = cookie.expirationDate;
+          }
+
+          await shared.cookies.set(details);
+          importedFromPartition++;
+        } catch (_) {
+          totalFailed++;
+        }
+      }
+
+      if (importedFromPartition > 0) {
+        console.log(`[CookieMigration] ${partitionId} -> persist:shared : ${importedFromPartition} cookies`);
+      }
+      totalImported += importedFromPartition;
+    } catch (err) {
+      console.warn(`[CookieMigration] Failed reading ${partitionId}:`, err.message);
+    }
+  }
+
+  if (totalImported > 0 || totalFailed > 0) {
+    console.log(`[CookieMigration] Done. imported=${totalImported}, failed=${totalFailed}`);
+  }
 }
 
 function openGoogleAuthWindow() {
@@ -368,7 +496,10 @@ async function createWindow() {
 }
 
 app.whenReady().then(() => {
-  createWindow();
+  Promise.resolve()
+    .then(() => migrateLegacyPartitionsToShared())
+    .catch((err) => console.warn('[CookieMigration] Unexpected error:', err.message))
+    .finally(() => createWindow());
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
