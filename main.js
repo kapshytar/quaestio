@@ -3,58 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 const APP_DATA_PATH = app.getPath('appData');
-const DEFAULT_USER_DATA_PATH = app.getPath('userData');
 const FIXED_USER_DATA_PATH = path.join(APP_DATA_PATH, 'chat-aggregator');
-
-function hasSessionData(dirPath) {
-  const markers = [
-    'Partitions',
-    'Network',
-    'Cookies',
-    'Local Storage',
-    'Session Storage',
-    'IndexedDB',
-    'Preferences'
-  ];
-  return markers.some(entry => fs.existsSync(path.join(dirPath, entry)));
-}
-
-function mergeDirContents(sourceDir, targetDir) {
-  if (!fs.existsSync(sourceDir)) return;
-  fs.mkdirSync(targetDir, { recursive: true });
-  const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const src = path.join(sourceDir, entry.name);
-    const dst = path.join(targetDir, entry.name);
-    if (fs.existsSync(dst)) continue;
-    fs.cpSync(src, dst, { recursive: true, errorOnExist: false });
-  }
-}
-
-function migrateLegacyUserData() {
-  const candidates = Array.from(new Set([
-    DEFAULT_USER_DATA_PATH,
-    path.join(APP_DATA_PATH, 'Gunshi'),
-    path.join(APP_DATA_PATH, 'gunshi'),
-    path.join(APP_DATA_PATH, 'chat-aggregator-electron')
-  ])).filter(p => p !== FIXED_USER_DATA_PATH);
-
-  fs.mkdirSync(FIXED_USER_DATA_PATH, { recursive: true });
-
-  for (const sourcePath of candidates) {
-    if (!fs.existsSync(sourcePath)) continue;
-    if (!hasSessionData(sourcePath)) continue;
-
-    try {
-      console.log(`[UserDataMigration] Merging session data from: ${sourcePath}`);
-      mergeDirContents(sourcePath, FIXED_USER_DATA_PATH);
-      console.log('[UserDataMigration] Merge complete');
-    } catch (err) {
-      console.warn(`[UserDataMigration] Failed from ${sourcePath}:`, err.message);
-    }
-  }
-}
 
 // NOTE:
 // Full profile-directory merge (including Local State / Network DBs) can break
@@ -147,6 +96,21 @@ async function migrateLegacyPartitionsToShared() {
   ];
 
   const shared = session.fromPartition('persist:shared');
+  const sharedCookies = await shared.cookies.get({});
+
+  // Skip expensive migration work when shared already appears authenticated.
+  const authCookieNames = new Set([
+    'sessionKey',
+    '__Secure-1PSID',
+    '__Secure-next-auth.session-token',
+    'auth_token',
+    'oai-did'
+  ]);
+  const hasAuthCookies = sharedCookies.some(c => authCookieNames.has(c.name));
+  if (hasAuthCookies || sharedCookies.length >= 80) {
+    return;
+  }
+
   let totalImported = 0;
   let totalFailed = 0;
 

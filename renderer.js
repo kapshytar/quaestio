@@ -146,6 +146,7 @@ let selectedMergeProviderId = 'chatgpt_api';
 let focusedSearchScope = 'global'; // global | merge | slot-1..slot-4
 let searchSession = { query: '', scope: 'global' };
 const mergeSearchState = { query: '', marks: [], index: -1 };
+let searchDebounceTimer = null;
 
 function safeLoadURL(slot, url) {
   const webview = webviews[slot];
@@ -858,7 +859,10 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-searchInput?.addEventListener('input', () => runScopedSearch('forward'));
+searchInput?.addEventListener('input', () => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => runScopedSearch('forward'), 160);
+});
 searchInput?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
