@@ -438,9 +438,9 @@ async function createWindow() {
           click: () => {
             runRendererScript(`
               SLOTS.forEach(async slot => {
-                zoomLevels[slot] = 1.0;
-                await webviews[slot].setZoomFactor(1.0);
-                document.querySelector(\`[data-slot="\${slot}"] .zoom-level\`).textContent = '100%';
+                zoomLevels[slot] = 0.7;
+                await webviews[slot].setZoomFactor(0.7);
+                document.querySelector(\`[data-slot="\${slot}"] .zoom-level\`).textContent = '70%';
               });
             `);
           }

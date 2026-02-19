@@ -80,6 +80,7 @@ const SERVICE_PRESETS = {
 
 // ========== SLOT IDS ==========
 const SLOTS = ['slot-1', 'slot-2', 'slot-3', 'slot-4'];
+const DEFAULT_ZOOM_FACTOR = 0.7;
 
 // Default services per slot
 const DEFAULT_SLOT_CONFIG = {
@@ -119,7 +120,7 @@ SLOTS.forEach(slot => {
   toggles[slot] = document.getElementById(`toggle-${slot}`);
   statuses[slot] = document.getElementById(`status-${slot}`);
   labels[slot] = document.getElementById(`label-${slot}`);
-  zoomLevels[slot] = 1.0;
+  zoomLevels[slot] = DEFAULT_ZOOM_FACTOR;
   webviewReady[slot] = false;
   pendingNavigation[slot] = null;
 });
@@ -449,7 +450,7 @@ document.querySelectorAll('.webview-header').forEach(header => {
       } else if (action === 'zoom-out') {
         zoomLevels[slot] = Math.max(zoomLevels[slot] - 0.1, 0.25);
       } else if (action === 'zoom-reset') {
-        zoomLevels[slot] = 1.0;
+        zoomLevels[slot] = DEFAULT_ZOOM_FACTOR;
       }
 
       try {
@@ -478,15 +479,16 @@ document.querySelectorAll('.webview-header').forEach(header => {
       pendingNavigation[slot] = null;
     }
 
-    const savedZoom = localStorage.getItem(`zoom-${slot}`);
-    if (savedZoom) {
-      zoomLevels[slot] = parseFloat(savedZoom);
-      try {
-        await webview.setZoomFactor(zoomLevels[slot]);
-        updateZoomDisplay();
-      } catch (err) {
-        console.error(`Failed to restore zoom for ${slot}:`, err);
-      }
+    const savedZoomRaw = localStorage.getItem(`zoom-${slot}`);
+    const savedZoom = Number.parseFloat(savedZoomRaw);
+    const hasValidSavedZoom = Number.isFinite(savedZoom) && savedZoom >= 0.25 && savedZoom <= 3.0;
+    zoomLevels[slot] = hasValidSavedZoom ? savedZoom : DEFAULT_ZOOM_FACTOR;
+
+    try {
+      await webview.setZoomFactor(zoomLevels[slot]);
+      updateZoomDisplay();
+    } catch (err) {
+      console.error(`Failed to apply zoom for ${slot}:`, err);
     }
 
     // Update URL input to reflect current webview URL

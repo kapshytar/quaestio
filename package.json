@@ -29,6 +29,11 @@
     "jimp": "^1.6.0",
     "png-to-ico": "^3.0.1"
   },
+  "overrides": {
+    "minimatch": "^10.2.1",
+    "glob": "^10.5.0",
+    "rimraf": "^6.0.1"
+  },
   "build": {
     "appId": "com.gunshi.app",
     "productName": "Gunshi",
