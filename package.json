@@ -7,7 +7,8 @@
     "start": "electron .",
     "dev": "electron . --inspect",
     "build": "electron-builder",
-    "build:win": "electron-builder --win --config.npmRebuild=false --config.win.signAndEditExecutable=false",
+    "build:win": "electron-builder --win",
+    "build:win:fast": "electron-builder --win --config.npmRebuild=false --config.win.signAndEditExecutable=false",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"
   },
