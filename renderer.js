@@ -142,6 +142,10 @@ let debugLogDiv, debugClearBtn;
 let mergeInProgress = false;
 let mergeHistory = '';
 let lastScrapedResponses = {}; // saved after first merge, passed to clarification for context
+let selectedMergeProviderId = 'chatgpt_api';
+let focusedSearchScope = 'global'; // global | merge | slot-1..slot-4
+let searchSession = { query: '', scope: 'global' };
+const mergeSearchState = { query: '', marks: [], index: -1 };
 
 function safeLoadURL(slot, url) {
   const webview = webviews[slot];
@@ -592,6 +596,279 @@ mobileUaToggle?.addEventListener('click', () => {
   console.log(`[MobileUA] ${mobileUaEnabled ? 'Mobile' : 'Desktop'} UA — all ${SLOTS.length} webviews reloading`);
 });
 
+// ========== SCOPED FIND (CMD/CTRL+F) ==========
+const searchOverlay = document.getElementById('search-overlay');
+const searchInput = document.getElementById('search-input');
+const searchPrevBtn = document.getElementById('search-prev-btn');
+const searchNextBtn = document.getElementById('search-next-btn');
+const searchCloseBtn = document.getElementById('search-close-btn');
+const searchScopeLabel = document.getElementById('search-scope-label');
+const sidePanelContentEl = document.getElementById('side-panel-content');
+const bottomPanelEl = document.getElementById('bottom-panel');
+const mainContentEl = document.getElementById('main-content');
+
+function hasMergeSearchContent() {
+  const mergeText = (document.getElementById('merge-result')?.innerText || '').trim();
+  return mergeText.length > 0;
+}
+
+function setFocusedSearchScope(scope) {
+  focusedSearchScope = scope || 'global';
+}
+
+function resolveSlotFromActiveElement(activeEl) {
+  if (!activeEl) return null;
+  if (activeEl.tagName === 'WEBVIEW' && activeEl.id?.startsWith('webview-')) {
+    return activeEl.id.replace('webview-', '');
+  }
+  const header = activeEl.closest?.('.webview-header[data-slot]');
+  if (header?.dataset?.slot) return header.dataset.slot;
+  const container = activeEl.closest?.('.webview-container');
+  if (container) {
+    const cHeader = container.querySelector('.webview-header[data-slot]');
+    if (cHeader?.dataset?.slot) return cHeader.dataset.slot;
+  }
+  return null;
+}
+
+function resolveCurrentSearchScope() {
+  const activeEl = document.activeElement;
+  const activeSlot = resolveSlotFromActiveElement(activeEl);
+  if (activeSlot) return activeSlot;
+
+  if (activeEl?.closest?.('#side-panel') && hasMergeSearchContent()) {
+    return 'merge';
+  }
+
+  if (focusedSearchScope === 'merge' && !hasMergeSearchContent()) {
+    return 'global';
+  }
+
+  return focusedSearchScope || 'global';
+}
+
+function scopeLabel(scope) {
+  if (scope === 'global') return 'scope: all';
+  if (scope === 'merge') return 'scope: merge';
+  const n = scope.replace('slot-', '');
+  return `scope: slot ${n}`;
+}
+
+function updateScopeLabel() {
+  if (!searchScopeLabel) return;
+  searchScopeLabel.textContent = scopeLabel(resolveCurrentSearchScope());
+}
+
+function clearWebviewFindSelections() {
+  SLOTS.forEach(slot => {
+    try {
+      webviews[slot]?.stopFindInPage('clearSelection');
+    } catch (_) {}
+  });
+}
+
+function clearMergeHighlights() {
+  const root = document.getElementById('merge-result');
+  if (!root) return;
+  root.querySelectorAll('mark.search-hit').forEach(mark => {
+    const parent = mark.parentNode;
+    if (!parent) return;
+    parent.replaceChild(document.createTextNode(mark.textContent || ''), mark);
+    parent.normalize();
+  });
+  mergeSearchState.query = '';
+  mergeSearchState.marks = [];
+  mergeSearchState.index = -1;
+}
+
+function highlightMergeMatches(query) {
+  const root = document.getElementById('merge-result');
+  if (!root) return [];
+
+  clearMergeHighlights();
+  if (!query) return [];
+
+  const lowerQuery = query.toLowerCase();
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: node => {
+      const value = node?.nodeValue || '';
+      if (!value.trim()) return NodeFilter.FILTER_REJECT;
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      const tag = parent.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || tag === 'INPUT') {
+        return NodeFilter.FILTER_REJECT;
+      }
+      if (parent.closest('mark.search-hit')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+
+  const textNodes = [];
+  while (walker.nextNode()) {
+    textNodes.push(walker.currentNode);
+  }
+
+  for (const textNode of textNodes) {
+    const original = textNode.nodeValue || '';
+    const lower = original.toLowerCase();
+    let idx = lower.indexOf(lowerQuery);
+    if (idx === -1) continue;
+
+    const frag = document.createDocumentFragment();
+    let cursor = 0;
+    while (idx !== -1) {
+      if (idx > cursor) {
+        frag.appendChild(document.createTextNode(original.slice(cursor, idx)));
+      }
+      const mark = document.createElement('mark');
+      mark.className = 'search-hit';
+      mark.textContent = original.slice(idx, idx + query.length);
+      frag.appendChild(mark);
+      cursor = idx + query.length;
+      idx = lower.indexOf(lowerQuery, cursor);
+    }
+    if (cursor < original.length) {
+      frag.appendChild(document.createTextNode(original.slice(cursor)));
+    }
+    textNode.parentNode?.replaceChild(frag, textNode);
+  }
+
+  return Array.from(root.querySelectorAll('mark.search-hit'));
+}
+
+function stepMergeSearch(query, direction = 'forward') {
+  if (!query) {
+    clearMergeHighlights();
+    return;
+  }
+
+  const isNewQuery = mergeSearchState.query !== query || mergeSearchState.marks.length === 0;
+  if (isNewQuery) {
+    mergeSearchState.query = query;
+    mergeSearchState.marks = highlightMergeMatches(query);
+    mergeSearchState.index = direction === 'backward'
+      ? mergeSearchState.marks.length - 1
+      : 0;
+  } else if (mergeSearchState.marks.length > 0) {
+    const step = direction === 'backward' ? -1 : 1;
+    mergeSearchState.index = (mergeSearchState.index + step + mergeSearchState.marks.length) % mergeSearchState.marks.length;
+  }
+
+  mergeSearchState.marks.forEach(m => m.classList.remove('active'));
+  const activeMark = mergeSearchState.marks[mergeSearchState.index];
+  if (activeMark) {
+    activeMark.classList.add('active');
+    activeMark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+}
+
+function searchWebviews(scope, query, direction, isNewSearch) {
+  const forward = direction !== 'backward';
+  const options = { forward, findNext: !isNewSearch };
+
+  if (scope === 'global') {
+    SLOTS.forEach(slot => {
+      try { webviews[slot]?.findInPage(query, options); } catch (_) {}
+    });
+    return;
+  }
+
+  if (!SLOTS.includes(scope)) return;
+  try { webviews[scope]?.findInPage(query, options); } catch (_) {}
+}
+
+function runScopedSearch(direction = 'forward') {
+  const query = searchInput?.value.trim() || '';
+  const scope = resolveCurrentSearchScope();
+  const isNewSearch = query !== searchSession.query || scope !== searchSession.scope;
+  searchSession = { query, scope };
+
+  updateScopeLabel();
+
+  if (!query) {
+    clearWebviewFindSelections();
+    clearMergeHighlights();
+    return;
+  }
+
+  if (isNewSearch) {
+    clearWebviewFindSelections();
+  }
+
+  if (scope === 'merge') {
+    clearWebviewFindSelections();
+    stepMergeSearch(query, direction);
+    return;
+  }
+
+  if (scope === 'global') {
+    searchWebviews(scope, query, direction, isNewSearch);
+    stepMergeSearch(query, direction);
+    return;
+  }
+
+  clearMergeHighlights();
+  searchWebviews(scope, query, direction, isNewSearch);
+}
+
+function openSearchOverlay() {
+  if (!searchOverlay || !searchInput) return;
+  updateScopeLabel();
+  searchOverlay.classList.add('visible');
+  searchOverlay.setAttribute('aria-hidden', 'false');
+  searchInput.focus();
+  searchInput.select();
+}
+
+function closeSearchOverlay() {
+  if (!searchOverlay) return;
+  searchOverlay.classList.remove('visible');
+  searchOverlay.setAttribute('aria-hidden', 'true');
+}
+
+SLOTS.forEach(slot => {
+  const container = document.querySelector(`.webview-header[data-slot="${slot}"]`)?.closest('.webview-container');
+  container?.addEventListener('mousedown', () => setFocusedSearchScope(slot));
+  webviews[slot]?.addEventListener('focus', () => setFocusedSearchScope(slot));
+});
+
+sidePanelContentEl?.addEventListener('mousedown', () => {
+  setFocusedSearchScope(hasMergeSearchContent() ? 'merge' : 'global');
+});
+
+bottomPanelEl?.addEventListener('mousedown', () => setFocusedSearchScope('global'));
+mainContentEl?.addEventListener('mousedown', (e) => {
+  if (e.target === mainContentEl) setFocusedSearchScope('global');
+});
+messageInput?.addEventListener('focus', () => setFocusedSearchScope('global'));
+
+window.addEventListener('app-find', () => openSearchOverlay());
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    openSearchOverlay();
+    return;
+  }
+
+  if (searchOverlay?.classList.contains('visible') && e.key === 'Escape') {
+    e.preventDefault();
+    closeSearchOverlay();
+  }
+});
+
+searchInput?.addEventListener('input', () => runScopedSearch('forward'));
+searchInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    runScopedSearch(e.shiftKey ? 'backward' : 'forward');
+  }
+});
+searchPrevBtn?.addEventListener('click', () => runScopedSearch('backward'));
+searchNextBtn?.addEventListener('click', () => runScopedSearch('forward'));
+searchCloseBtn?.addEventListener('click', closeSearchOverlay);
+
 // ========== MESSAGE SENDING ==========
 
 function setStatus(slot, status) {
@@ -929,9 +1206,17 @@ function loadMergeConfig() {
   // Let the client load from localStorage
   window.mergeApiClient.loadConfig();
 
+  renderProviderFieldsFromClient();
+  updateProviderUI();
+}
+
+function renderProviderFieldsFromClient() {
+  if (!window.mergeApiClient || !mergeProviderSelect) return;
+
   // Populate UI fields from client state
   const client = window.mergeApiClient;
   if (mergeProviderSelect) mergeProviderSelect.value = client.provider?.id || 'chatgpt_api';
+  selectedMergeProviderId = mergeProviderSelect?.value || 'chatgpt_api';
   if (mergeApiKeyInput) mergeApiKeyInput.value = client.apiKey || '';
   if (mergeEndpointInput) mergeEndpointInput.value = client.endpoint || '';
   if (mergeModelInput) mergeModelInput.value = client.model || '';
@@ -943,8 +1228,6 @@ function loadMergeConfig() {
   if (clarificationInstructionsInputEl) {
     clarificationInstructionsInputEl.value = client.clarificationInstructions || '';
   }
-
-  updateProviderUI();
 }
 
 function saveMergeConfig() {
@@ -958,32 +1241,42 @@ function syncMergeApiClient() {
 }
 
 function updateProviderUI() {
-  const provider = mergeProviderSelect?.value || 'openai';
+  const provider = mergeProviderSelect?.value || 'chatgpt_api';
+  const supportsFallback = ['openrouter_api', 'huggingface_api', 'custom_api', 'chatgpt_api'].includes(provider);
 
   // Show/hide custom endpoint field
   const endpointField = mergeEndpointInput?.closest('.config-field');
   if (endpointField) {
-    endpointField.style.display = provider === 'custom' ? '' : 'none';
+    endpointField.style.display = provider === 'custom_api' ? '' : 'none';
   }
 
   // Show/hide fallback models field
   if (fallbackModelsField) {
-    fallbackModelsField.style.display = ['openai', 'openrouter', 'custom'].includes(provider) ? '' : 'none';
+    fallbackModelsField.style.display = supportsFallback ? '' : 'none';
   }
 
   // Update default model placeholder based on provider
   if (mergeModelInput) {
     const defaults = {
-      openai: 'gpt-4o',
-      anthropic: 'claude-opus-4-6',
-      gemini: 'gemini-2.0-flash',
-      perplexity: 'llama-3.1-sonar-large-128k-online',
-      deepseek: 'deepseek-chat',
-      openrouter: 'openai/gpt-4o',
-      huggingface: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
-      custom: ''
+      chatgpt_api: 'gpt-4o-mini',
+      claude_api: 'claude-3-5-sonnet-latest',
+      gemini_api: 'gemini-2.0-flash',
+      perplexity_api: 'sonar',
+      deepseek_api: 'deepseek-chat',
+      openrouter_api: 'openai/gpt-4o-mini',
+      huggingface_api: 'Qwen/Qwen2.5-72B-Instruct',
+      custom_api: ''
     };
-    mergeModelInput.placeholder = defaults[provider] || '';
+    const fallbackTip = supportsFallback
+      ? ' (tip: add fallbacks with comma or new line)'
+      : '';
+    mergeModelInput.placeholder = `${defaults[provider] || ''}${fallbackTip}`;
+  }
+
+  if (mergeFallbackInput) {
+    mergeFallbackInput.placeholder = supportsFallback
+      ? 'Optional: model-a, model-b (or one model per line)'
+      : 'Not used by this provider';
   }
 }
 
@@ -1037,8 +1330,12 @@ function initMergePanel() {
   });
 
   mergeProviderSelect?.addEventListener('change', () => {
-    saveMergeConfig();
+    if (!window.mergeApiClient) return;
+    window.mergeApiClient.saveFormForProvider(selectedMergeProviderId);
+    window.mergeApiClient.setProviderById(mergeProviderSelect.value);
+    renderProviderFieldsFromClient();
     updateProviderUI();
+    saveMergeConfig();
   });
 
   const clarificationInstructionsInput = document.getElementById('clarification-instructions');
@@ -1282,6 +1579,9 @@ function mergeLog(message, type = 'info', detail = null) {
 
 function updateMergeResult(markdownText) {
   if (!mergeResultDiv) return;
+
+  clearMergeHighlights();
+  searchSession = { query: '', scope: searchSession.scope };
 
   if (typeof marked !== 'undefined') {
     mergeResultDiv.innerHTML = marked.parse(markdownText);

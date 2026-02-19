@@ -23,6 +23,11 @@ const { importCookiesFromJSON } = require('./cookie-import-simple');
 
 let mainWindow;
 let googleAuthWindow = null;
+const IS_MAC = process.platform === 'darwin';
+
+const DESKTOP_USER_AGENT = IS_MAC
+  ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`
+  : `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
 
 // Throttle all webviews when app is minimized/hidden to save CPU
 function setAllWebviewsBackgrounded(backgrounded) {
@@ -44,7 +49,6 @@ function setAllWebviewsBackgrounded(backgrounded) {
   }
 }
 const MAX_COOKIE_IMPORT_SIZE_BYTES = 5 * 1024 * 1024;
-const CHROME_LIKE_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
 
 function runRendererScript(script) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -64,6 +68,10 @@ function reloadAllWebviews() {
       wv.reload();
     });
   `);
+}
+
+function triggerFindInRenderer() {
+  runRendererScript(`window.dispatchEvent(new Event('app-find'))`);
 }
 
 function openGoogleAuthWindow() {
@@ -87,7 +95,7 @@ function openGoogleAuthWindow() {
   });
 
   // Keep OAuth flow in this helper window.
-  googleAuthWindow.webContents.setUserAgent(CHROME_LIKE_USER_AGENT);
+  googleAuthWindow.webContents.setUserAgent(DESKTOP_USER_AGENT);
   googleAuthWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url && /^https?:\/\//i.test(url)) {
       googleAuthWindow.loadURL(url);
@@ -164,7 +172,7 @@ async function createWindow() {
     },
     backgroundColor: '#1a1a1a',
     title: 'Gunshi (alpha)',
-    icon: path.join(__dirname, 'icon.ico')
+    icon: path.join(__dirname, IS_MAC ? 'icon.png' : 'icon.ico')
   });
 
   mainWindow.loadFile('index.html');
@@ -192,7 +200,7 @@ async function createWindow() {
   mainWindow.webContents.on('did-attach-webview', (event, webviewContents) => {
     webviewCounter++;
     const slotTag = `slot-${webviewCounter}`;
-    webviewContents.setUserAgent(CHROME_LIKE_USER_AGENT);
+    webviewContents.setUserAgent(DESKTOP_USER_AGENT);
 
     webviewContents.on('console-message', (event, level, message) => {
       if (level >= 2) {
@@ -227,6 +235,26 @@ async function createWindow() {
   });
 
   const menuTemplate = [
+    {
+      label: 'Edit',
+      submenu: [
+        {
+          label: 'Find',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => {
+            triggerFindInRenderer();
+          }
+        },
+        { type: 'separator' },
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
     {
       label: 'Tools',
       submenu: [

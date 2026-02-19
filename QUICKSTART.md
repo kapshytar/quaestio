@@ -3,6 +3,16 @@
 ## 1. Подготовка
 Убедитесь, что у вас установлен **Node.js** (версия 18+).
 
+### macOS (дополнительно)
+- Установите Xcode Command Line Tools:
+```bash
+xcode-select --install
+```
+- Если `start.sh` не запускается, дайте права:
+```bash
+chmod +x start.sh
+```
+
 ## 2. Установка
 Склонируйте проект и выполните:
 ```bash
@@ -13,6 +23,11 @@ npm install
 В Windows используйте `start.bat` или команду:
 ```bash
 npm start
+```
+
+В macOS/Linux можно использовать:
+```bash
+./start.sh
 ```
 
 ## 4. Авторизация (Cookies)

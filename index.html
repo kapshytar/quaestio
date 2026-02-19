@@ -236,6 +236,28 @@
       margin-bottom: 12px; width: 100%; transition: background 0.2s;
     }
     #run-merge-btn:hover { background: #008877; }
+    /* ---- Search Overlay ---- */
+    #search-overlay {
+      position: fixed; top: 12px; right: 12px; z-index: 20000;
+      display: none; align-items: center; gap: 6px;
+      background: rgba(20, 20, 20, 0.96); border: 1px solid #3c3c3c;
+      border-radius: 8px; padding: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    }
+    #search-overlay.visible { display: flex; }
+    #search-input {
+      width: 260px; padding: 7px 10px; border-radius: 6px;
+      border: 1px solid #4a4a4a; background: #1d1d1d; color: #fff; outline: none;
+      font-size: 12px;
+    }
+    #search-input:focus { border-color: #2f7dff; }
+    .search-btn {
+      padding: 7px 9px; border-radius: 6px; border: 1px solid #4a4a4a;
+      background: #2a2a2a; color: #ddd; font-size: 12px; cursor: pointer;
+    }
+    .search-btn:hover { background: #343434; }
+    #search-scope-label { color: #888; font-size: 11px; min-width: 72px; text-align: right; }
+    #merge-result mark.search-hit { background: #f7d154; color: #111; padding: 0 1px; border-radius: 2px; }
+    #merge-result mark.search-hit.active { background: #ff9f1a; }
     /* ---- Mobile UA Toggle ---- */
     #mobile-ua-toggle {
       display: flex; align-items: center; gap: 5px; padding: 3px 10px;
@@ -431,7 +453,7 @@
               </div>
               <div class="config-field" id="fallback-models-field">
                 <label for="merge-fallback-models">Fallback Models</label>
-                <input type="text" id="merge-fallback-models" placeholder="gpt-4o, gpt-3.5-turbo">
+                <input type="text" id="merge-fallback-models" placeholder="Optional: model-a, model-b (or one model per line)">
               </div>
             </div>
             <!-- Instructions tab -->
@@ -482,6 +504,13 @@
 
   <!-- Resize overlay — blocks webview mouse capture during panel resize -->
   <div id="resize-overlay"></div>
+  <div id="search-overlay" aria-hidden="true">
+    <input id="search-input" type="text" placeholder="Find..." autocomplete="off">
+    <button id="search-prev-btn" class="search-btn" title="Previous match">&#8593;</button>
+    <button id="search-next-btn" class="search-btn" title="Next match">&#8595;</button>
+    <button id="search-close-btn" class="search-btn" title="Close">Esc</button>
+    <span id="search-scope-label"></span>
+  </div>
 
   <!-- Scripts - Order matters! -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>

@@ -81,6 +81,7 @@ class MergeApiClient {
     this.endpoint = '';
     this.model = '';
     this.fallbackModels = [];
+    this.providerConfigs = {};
     this.mergeInstructions = '';
     this.clarificationInstructions = '';
     this.mergeHistory = '';
@@ -425,30 +426,81 @@ Attempted models: \`${attempted.join(' -> ')}\``;
     return msg.includes('429') || msg.includes('rate limit') || msg.includes('too many requests');
   }
 
-  // Config persistence
-  saveConfig() {
-    const providerSelect = document.getElementById('merge-provider');
+  _emptyProviderConfig() {
+    return {
+      apiKey: '',
+      endpoint: '',
+      model: '',
+      fallbackModels: ''
+    };
+  }
+
+  _setActiveProviderFields(providerId) {
+    const cfg = this.providerConfigs[providerId] || this._emptyProviderConfig();
+    this.apiKey = cfg.apiKey || '';
+    this.endpoint = cfg.endpoint || '';
+    this.model = cfg.model || '';
+    this.fallbackModels = cfg.fallbackModels || '';
+  }
+
+  setProviderById(providerId) {
+    this.provider = Object.values(MERGE_PROVIDERS).find(p => p.id === providerId) || MERGE_PROVIDERS.CHATGPT;
+    this._setActiveProviderFields(this.provider.id);
+  }
+
+  _providerConfigFromInputs(providerId = this.provider.id) {
     const apiKeyInput = document.getElementById('merge-api-key');
     const endpointInput = document.getElementById('merge-endpoint');
     const modelInput = document.getElementById('merge-model');
     const fallbackInput = document.getElementById('merge-fallback-models');
+
+    let apiKey = apiKeyInput?.value.trim() || '';
+    let endpoint = endpointInput?.value.trim() || '';
+    let model = modelInput?.value.trim() || '';
+    let fallbackModels = fallbackInput?.value.trim() || '';
+
+    // OpenRouter + HuggingFace convenience:
+    // allow "model1, model2" or newline-separated models directly in the Model field.
+    const modelSupportsInlineFallbacks = ['openrouter_api', 'huggingface_api'].includes(providerId);
+    if (modelSupportsInlineFallbacks) {
+      const parsedModelList = this.parseFallbackModels(model);
+      const fallbackFieldEmpty = !String(fallbackModels || '').trim();
+
+      if (parsedModelList.length > 1 && fallbackFieldEmpty) {
+        model = parsedModelList[0];
+        fallbackModels = parsedModelList.slice(1).join(', ');
+      }
+    }
+
+    return { apiKey, endpoint, model, fallbackModels };
+  }
+
+  saveFormForProvider(providerId) {
+    if (!providerId) return;
+    this.providerConfigs[providerId] = this._providerConfigFromInputs(providerId);
+  }
+
+  // Config persistence
+  saveConfig() {
+    const providerSelect = document.getElementById('merge-provider');
     const instructionsInput = document.getElementById('merge-instructions');
     const clarificationInstructionsInput = document.getElementById('clarification-instructions');
 
-    if (providerSelect) this.provider = Object.values(MERGE_PROVIDERS).find(p => p.id === providerSelect.value) || MERGE_PROVIDERS.CHATGPT;
-    if (apiKeyInput) this.apiKey = apiKeyInput.value.trim();
-    if (endpointInput) this.endpoint = endpointInput.value.trim();
-    if (modelInput) this.model = modelInput.value.trim();
-    if (fallbackInput) this.fallbackModels = fallbackInput.value.trim();
+    if (providerSelect) {
+      this.provider = Object.values(MERGE_PROVIDERS).find(p => p.id === providerSelect.value) || MERGE_PROVIDERS.CHATGPT;
+    }
+
+    const currentProviderConfig = this._providerConfigFromInputs(this.provider.id);
+    this.providerConfigs[this.provider.id] = currentProviderConfig;
+    this._setActiveProviderFields(this.provider.id);
+
     if (instructionsInput) this.mergeInstructions = instructionsInput.value.trim();
     if (clarificationInstructionsInput) this.clarificationInstructions = clarificationInstructionsInput.value.trim();
 
     const config = {
+      version: 2,
       providerId: this.provider.id,
-      apiKey: this.apiKey,
-      endpoint: this.endpoint,
-      model: this.model,
-      fallbackModels: this.fallbackModels,
+      providerConfigs: this.providerConfigs,
       mergeInstructions: this.mergeInstructions,
       clarificationInstructions: this.clarificationInstructions
     };
@@ -461,11 +513,24 @@ Attempted models: \`${attempted.join(' -> ')}\``;
 
     try {
       const config = JSON.parse(saved);
+
+      // Backward compatibility: upgrade legacy flat config into per-provider map.
+      if (config.providerConfigs && typeof config.providerConfigs === 'object') {
+        this.providerConfigs = { ...config.providerConfigs };
+      } else {
+        const legacyProviderId = config.providerId || MERGE_PROVIDERS.CHATGPT.id;
+        this.providerConfigs = {
+          [legacyProviderId]: {
+            apiKey: config.apiKey || '',
+            endpoint: config.endpoint || '',
+            model: config.model || '',
+            fallbackModels: config.fallbackModels || ''
+          }
+        };
+      }
+
       this.provider = Object.values(MERGE_PROVIDERS).find(p => p.id === config.providerId) || MERGE_PROVIDERS.CHATGPT;
-      this.apiKey = config.apiKey || '';
-      this.endpoint = config.endpoint || '';
-      this.model = config.model || '';
-      this.fallbackModels = config.fallbackModels || [];
+      this._setActiveProviderFields(this.provider.id);
       this.mergeInstructions = config.mergeInstructions || '';
       this.clarificationInstructions = config.clarificationInstructions || '';
     } catch (e) {
