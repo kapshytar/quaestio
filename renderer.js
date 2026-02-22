@@ -144,6 +144,7 @@ let mergeInProgress = false;
 let mergeHistory = '';
 let lastScrapedResponses = {}; // saved after first merge, passed to clarification for context
 let selectedMergeProviderId = 'chatgpt_api';
+const MERGE_SETUP_NEEDED_HINT = 'Merge setup needed: pick a provider, paste its API key, then tap Run Merge. Free-tier options often include OpenRouter and Hugging Face (availability/rate limits vary).';
 let focusedSearchScope = 'global'; // global | merge | slot-1..slot-4
 let searchSession = { query: '', scope: 'global' };
 const mergeSearchState = { query: '', marks: [], index: -1 };
@@ -1286,6 +1287,16 @@ function updateProviderUI() {
   }
 }
 
+function maybeShowMergeSetupHint(force = false) {
+  if (!window.mergeApiClient || typeof window.mergeApiClient.hasAnyConfiguredApiKey !== 'function') return;
+  if (window.mergeApiClient.hasAnyConfiguredApiKey()) return;
+
+  const current = mergeStatusDiv?.textContent?.trim() || '';
+  if (force || current === 'Ready to merge') {
+    setMergeStatus(MERGE_SETUP_NEEDED_HINT, 'idle');
+  }
+}
+
 // ========== MERGE PANEL INIT ==========
 function initMergePanel() {
   mergeProviderSelect = document.getElementById('merge-provider');
@@ -1314,6 +1325,7 @@ function initMergePanel() {
   }
 
   loadMergeConfig();
+  maybeShowMergeSetupHint(true);
 
   runMergeBtn.addEventListener('click', () => runMerge(false, '', ''));
 
@@ -1646,13 +1658,18 @@ async function runMerge(isClarification = false, clarificationText = '', previou
     return;
   }
 
+  // Sync UI → client before checking config state and calling API.
+  saveMergeConfig();
+
+  if (!isClarification && !window.mergeApiClient.hasAnyConfiguredApiKey()) {
+    setMergeStatus(MERGE_SETUP_NEEDED_HINT, 'idle');
+    return;
+  }
+
   if (!window.mergeApiClient.apiKey) {
     setMergeStatus('API key required', 'error');
     return;
   }
-
-  // Sync UI → client before calling API
-  saveMergeConfig();
 
   const client = window.mergeApiClient;
   const providerInfo = `${client.provider?.id || '?'} / ${client.model || client.provider?.defaultModel || '?'}`;

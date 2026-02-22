@@ -480,6 +480,14 @@ Attempted models: \`${attempted.join(' -> ')}\``;
     this.providerConfigs[providerId] = this._providerConfigFromInputs(providerId);
   }
 
+  hasAnyConfiguredApiKey() {
+    const providerConfigs = this.providerConfigs && typeof this.providerConfigs === 'object'
+      ? Object.values(this.providerConfigs)
+      : [];
+
+    return providerConfigs.some(cfg => String(cfg?.apiKey || '').trim().length > 0);
+  }
+
   // Config persistence
   saveConfig() {
     const providerSelect = document.getElementById('merge-provider');
