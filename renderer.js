@@ -1466,8 +1466,26 @@ async function getLatestAssistantReply(slot) {
     }
 
     function cleanText(t) { return (t || '').replace(/\\s+/g, ' ').trim(); }
+    function isComposerElement(el) {
+      if (!el) return false;
+      return !!el.closest('form, footer, textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"]');
+    }
+    function isMetadataLikeText(text) {
+      const t = (text || '').toLowerCase();
+      if (!t) return true;
+      return (
+        t === 'share' ||
+        t === 'edit' ||
+        t === 'retry' ||
+        t === 'copy' ||
+        t === 'regenerate' ||
+        t.startsWith('model:')
+      );
+    }
 
     const selectors = [
+      '[data-testid*="conversation-turn"]',
+      '[data-testid*="message-content"]',
       '[data-message-author-role="assistant"]',
       '[data-testid*="assistant"]',
       '[class*="assistant"]',
@@ -1484,8 +1502,11 @@ async function getLatestAssistantReply(slot) {
       try {
         document.querySelectorAll(sel).forEach((el) => {
           if (!visible(el)) return;
+          if (isComposerElement(el)) return;
           const txt = cleanText(el.innerText || el.textContent);
-          if (txt.length >= 20) { candidates.push({ el: el, text: txt, bottom: el.getBoundingClientRect().bottom }); }
+          if (txt.length < 20 || isMetadataLikeText(txt)) return;
+          const rect = el.getBoundingClientRect();
+          candidates.push({ el: el, text: txt, bottom: rect.bottom, top: rect.top });
         });
       } catch (_) {}
     });
@@ -1493,15 +1514,37 @@ async function getLatestAssistantReply(slot) {
     // Fallback: any visible article/div with enough text
     if (candidates.length === 0) {
       Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
+        if (isComposerElement(el)) return;
         const txt = cleanText(el.innerText || el.textContent);
-        if (txt.length >= 80) { candidates.push({ el: el, text: txt, bottom: el.getBoundingClientRect().bottom }); }
+        if (txt.length >= 80 && !isMetadataLikeText(txt)) {
+          const rect = el.getBoundingClientRect();
+          candidates.push({ el: el, text: txt, bottom: rect.bottom, top: rect.top });
+        }
       });
     }
 
     if (candidates.length === 0) return null;
 
-    candidates.sort((a, b) => b.bottom - a.bottom);
-    return candidates[0].text;
+    // Drop nested short fragments when a parent candidate carries the full reply.
+    const pruned = candidates.filter((candidate) => {
+      return !candidates.some((other) => {
+        if (other === candidate) return false;
+        if (!other.el.contains(candidate.el)) return false;
+        if (other.text.length < 120) return false;
+        if (candidate.text.length >= other.text.length * 0.8) return false;
+        return Math.abs(other.bottom - candidate.bottom) <= 180;
+      });
+    });
+
+    const source = pruned.length > 0 ? pruned : candidates;
+    const maxBottom = source.reduce((acc, c) => Math.max(acc, c.bottom), -Infinity);
+    const nearBottom = source.filter(c => c.bottom >= maxBottom - 260);
+    const pool = nearBottom.length > 0 ? nearBottom : source;
+    pool.sort((a, b) => {
+      if (b.text.length !== a.text.length) return b.text.length - a.text.length;
+      return b.bottom - a.bottom;
+    });
+    return pool[0].text;
 
   } catch (e) { return null; }
 })();

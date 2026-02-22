@@ -31,6 +31,7 @@ const { importCookiesFromJSON } = require('./cookie-import-simple');
 let mainWindow;
 let googleAuthWindow = null;
 const IS_MAC = process.platform === 'darwin';
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 const DESKTOP_USER_AGENT = IS_MAC
   ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`
@@ -38,7 +39,6 @@ const DESKTOP_USER_AGENT = IS_MAC
 
 // Throttle all webviews when app is minimized/hidden to save CPU
 function setAllWebviewsBackgrounded(backgrounded) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
     const { webContents } = require('electron');
     const allContents = webContents.getAllWebContents();
@@ -57,20 +57,32 @@ function setAllWebviewsBackgrounded(backgrounded) {
 }
 const MAX_COOKIE_IMPORT_SIZE_BYTES = 5 * 1024 * 1024;
 
-function runRendererScript(script) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.executeJavaScript(script).catch((err) => {
+function getPrimaryWindow() {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) return focused;
+  const all = BrowserWindow.getAllWindows().filter(w => !w.isDestroyed());
+  return all.length > 0 ? all[0] : null;
+}
+
+function runRendererScript(script, targetWindow = null) {
+  const win = targetWindow || getPrimaryWindow();
+  if (!win || win.isDestroyed()) return;
+  win.webContents.executeJavaScript(script).catch((err) => {
     console.error('Failed to execute renderer script:', err);
   });
 }
 
+function runRendererScriptAll(script) {
+  BrowserWindow.getAllWindows().forEach((win) => runRendererScript(script, win));
+}
+
 function notifyRenderer(message) {
   const safeMessage = JSON.stringify(String(message));
-  runRendererScript(`window.alert(${safeMessage});`);
+  runRendererScriptAll(`window.alert(${safeMessage});`);
 }
 
 function reloadAllWebviews() {
-  runRendererScript(`
+  runRendererScriptAll(`
     document.querySelectorAll('webview').forEach(wv => {
       wv.reload();
     });
@@ -98,7 +110,7 @@ async function migrateLegacyPartitionsToShared() {
   const shared = session.fromPartition('persist:shared');
   const sharedCookies = await shared.cookies.get({});
 
-  // Skip expensive migration work when shared already appears authenticated.
+  // Skip migration only when shared partition already looks authenticated.
   const authCookieNames = new Set([
     'sessionKey',
     '__Secure-1PSID',
@@ -106,10 +118,11 @@ async function migrateLegacyPartitionsToShared() {
     'auth_token',
     'oai-did'
   ]);
-  const hasAuthCookies = sharedCookies.some(c => authCookieNames.has(c.name));
-  if (hasAuthCookies || sharedCookies.length >= 80) {
+  const sharedAuthCount = sharedCookies.filter(c => authCookieNames.has(c.name)).length;
+  if (sharedAuthCount > 0) {
     return;
   }
+  console.log(`[CookieMigration] shared has no known auth cookies (total=${sharedCookies.length}). Trying legacy partitions...`);
 
   let totalImported = 0;
   let totalFailed = 0;
@@ -177,7 +190,7 @@ function openGoogleAuthWindow() {
     height: 760,
     autoHideMenuBar: true,
     title: 'Google Sign-In',
-    parent: mainWindow,
+    parent: getPrimaryWindow() || undefined,
     webPreferences: {
       partition: 'persist:shared',
       contextIsolation: true,
@@ -249,7 +262,7 @@ ipcMain.handle('import-cookies', async (event, jsonContent) => {
 });
 
 async function createWindow() {
-  mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1600,
     height: 1000,
     minWidth: 1200,
@@ -267,29 +280,41 @@ async function createWindow() {
     icon: path.join(__dirname, IS_MAC ? 'icon.png' : 'icon.ico')
   });
 
-  mainWindow.loadFile('index.html');
+  mainWindow = window;
+
+  window.loadFile('index.html');
 
   // ---- Throttle webviews when window is hidden/minimized to save CPU ----
-  mainWindow.on('minimize', () => {
+  window.on('minimize', () => {
     setAllWebviewsBackgrounded(true);
   });
-  mainWindow.on('restore', () => {
+  window.on('restore', () => {
     setAllWebviewsBackgrounded(false);
   });
-  mainWindow.on('hide', () => {
+  window.on('hide', () => {
     setAllWebviewsBackgrounded(true);
   });
-  mainWindow.on('show', () => {
+  window.on('show', () => {
     setAllWebviewsBackgrounded(false);
   });
 
-  mainWindow.webContents.on('console-message', (event, level, message) => {
+  window.webContents.on('console-message', (event, level, message) => {
     const levelTag = ['LOG', 'WARN', 'ERR'][level] || 'LOG';
     console.log(`[renderer][${levelTag}] ${message}`);
   });
 
+  window.on('focus', () => {
+    mainWindow = window;
+  });
+
+  window.on('closed', () => {
+    if (mainWindow === window) {
+      mainWindow = getPrimaryWindow();
+    }
+  });
+
   let webviewCounter = 0;
-  mainWindow.webContents.on('did-attach-webview', (event, webviewContents) => {
+  window.webContents.on('did-attach-webview', (event, webviewContents) => {
     webviewCounter++;
     const slotTag = `slot-${webviewCounter}`;
     webviewContents.setUserAgent(DESKTOP_USER_AGENT);
@@ -328,6 +353,20 @@ async function createWindow() {
 
   const menuTemplate = [
     {
+      label: 'File',
+      submenu: [
+        {
+          label: 'New Window',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => {
+            createWindow();
+          }
+        },
+        { type: 'separator' },
+        { role: 'close' }
+      ]
+    },
+    {
       label: 'Edit',
       submenu: [
         {
@@ -354,7 +393,7 @@ async function createWindow() {
           label: 'Import Cookies from File...',
           accelerator: 'CmdOrCtrl+I',
           click: async () => {
-            const result = await dialog.showOpenDialog(mainWindow, {
+            const result = await dialog.showOpenDialog(getPrimaryWindow() || undefined, {
               title: 'Select cookies.json file',
               filters: [
                 { name: 'JSON Files', extensions: ['json'] },
@@ -393,7 +432,8 @@ async function createWindow() {
           label: 'Toggle DevTools',
           accelerator: 'F12',
           click: () => {
-            mainWindow.webContents.toggleDevTools();
+            const win = getPrimaryWindow();
+            if (win) win.webContents.toggleDevTools();
           }
         }
       ]
@@ -455,25 +495,38 @@ async function createWindow() {
   Menu.setApplicationMenu(menu);
 
   if (process.env.OPEN_DEVTOOLS === '1') {
-    mainWindow.webContents.openDevTools();
+    window.webContents.openDevTools();
   }
 }
 
-app.whenReady().then(() => {
-  Promise.resolve()
-    .then(() => migrateLegacyPartitionsToShared())
-    .catch((err) => console.warn('[CookieMigration] Unexpected error:', err.message))
-    .finally(() => createWindow());
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const win = getPrimaryWindow();
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+    createWindow();
+  });
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+  app.whenReady().then(() => {
+    Promise.resolve()
+      .then(() => migrateLegacyPartitionsToShared())
+      .catch((err) => console.warn('[CookieMigration] Unexpected error:', err.message))
+      .finally(() => createWindow());
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit();
     }
   });
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+}
