@@ -340,6 +340,8 @@ async function emitIngestDebugEvent({ supabaseUrl, serviceRoleKey, eventPayload 
     rpc_name: eventPayload?.rpc_name || '',
     idempotency_key: eventPayload?.idempotency_key || '',
     payload: eventPayload?.payload ?? null,
+    request_body: eventPayload?.request_body ?? null,
+    scrape_meta: eventPayload?.scrape_meta ?? null,
     rpc_result: eventPayload?.rpc_result ?? null,
     error_text: eventPayload?.error_text ? String(eventPayload.error_text) : null
   };
@@ -394,6 +396,7 @@ async function ingestDreamRpc(kindInput, params) {
   const traceId = sanitizeTraceId(params?.traceId);
   const payload = params?.payload;
   const sourceMessageId = String(params?.sourceMessageId || '').trim();
+  const scrapeMeta = Array.isArray(params?.scrapeMeta) ? params.scrapeMeta : [];
 
   try {
     const kind = normalizeDreamKind(kindInput);
@@ -475,7 +478,9 @@ async function ingestDreamRpc(kindInput, params) {
         step: kind,
         rpc_name: rpcName,
         idempotency_key: idempotencyKey,
-        payload
+        payload,
+        request_body: requestBody,
+        scrape_meta: scrapeMeta
       }
     });
 
@@ -541,6 +546,8 @@ async function ingestDreamRpc(kindInput, params) {
           rpc_name: rpcName,
           idempotency_key: idempotencyKey,
           payload,
+          request_body: requestBody,
+          scrape_meta: scrapeMeta,
           rpc_result: parsed || rawText || null,
           error_text: errorText
         }
@@ -574,6 +581,8 @@ async function ingestDreamRpc(kindInput, params) {
         rpc_name: rpcName,
         idempotency_key: idempotencyKey,
         payload,
+        request_body: requestBody,
+        scrape_meta: scrapeMeta,
         rpc_result: parsed
       }
     });

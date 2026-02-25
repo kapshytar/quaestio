@@ -144,6 +144,7 @@ let mergeInProgress = false;
 let mergeHistory = '';
 let lastScrapedResponses = {}; // saved after first merge, passed to clarification for context
 let lastAggregatedResponses = [];
+let lastScrapeMeta = [];
 let selectedMergeProviderId = 'chatgpt_api';
 const MERGE_SETUP_NEEDED_HINT = 'Merge setup needed: pick a provider, paste its API key, then tap Run Merge. Free-tier options often include OpenRouter and Hugging Face (availability/rate limits vary).';
 let focusedSearchScope = 'global'; // global | merge | slot-1..slot-4
@@ -365,6 +366,7 @@ async function ingestAggregatedPayload(payload, providerId, externalChatId, trac
   }
   return window.electronAPI.sendAggregated({
     payload,
+    scrapeMeta: Array.isArray(traceContext?.scrapeMeta) ? traceContext.scrapeMeta : [],
     sourceMessageId: externalChatId || `${providerId || 'aggregated'}:${hashString(stableStringify(payload))}`,
     traceId: traceContext?.traceId || activeIngestTraceId || startIngestTrace(),
     sequence: Number.isInteger(traceContext?.sequence) ? traceContext.sequence : undefined
@@ -472,7 +474,7 @@ function extractSessionId(result) {
   return null;
 }
 
-async function sendAggregated(sessionId, title, responses, activeSegmentId) {
+async function sendAggregated(sessionId, title, responses, activeSegmentId, scrapeMeta = []) {
   const normalizedResponses = Array.isArray(responses)
     ? responses.map((item, idx) => ({
       segment_id: String(item?.segment_id || `segment_${idx + 1}`),
@@ -493,10 +495,11 @@ async function sendAggregated(sessionId, title, responses, activeSegmentId) {
 
   const sourceMessageId = `msg_${hashString(stableStringify(payload))}`;
   const traceContext = getIngestTraceContext(sourceMessageId);
+  traceContext.scrapeMeta = Array.isArray(scrapeMeta) ? scrapeMeta : [];
   return ingestAggregatedPayload(payload, 'aggregated', sourceMessageId, traceContext);
 }
 
-async function sendMerge(sessionId, title, markdown) {
+async function sendMerge(sessionId, title, markdown, scrapeMeta = []) {
   if (!Number.isInteger(sessionId) || sessionId <= 0) {
     return { ok: false, error: 'session_id is required for merge.' };
   }
@@ -514,13 +517,14 @@ async function sendMerge(sessionId, title, markdown) {
   const traceContext = getIngestTraceContext(sourceMessageId);
   return window.electronAPI.sendMerge({
     payload,
+    scrapeMeta: Array.isArray(scrapeMeta) ? scrapeMeta : [],
     sourceMessageId,
     traceId: traceContext.traceId,
     sequence: traceContext.sequence
   });
 }
 
-async function sendClarification(sessionId, title, markdown) {
+async function sendClarification(sessionId, title, markdown, scrapeMeta = []) {
   if (!Number.isInteger(sessionId) || sessionId <= 0) {
     return { ok: false, error: 'session_id is required for clarification.' };
   }
@@ -538,6 +542,7 @@ async function sendClarification(sessionId, title, markdown) {
   const traceContext = getIngestTraceContext(sourceMessageId);
   return window.electronAPI.sendClarification({
     payload,
+    scrapeMeta: Array.isArray(scrapeMeta) ? scrapeMeta : [],
     sourceMessageId,
     traceId: traceContext.traceId,
     sequence: traceContext.sequence
@@ -2078,6 +2083,7 @@ async function collectLatestRepliesFromEnabledSlots() {
   mergeLog(`Scraping ${enabledSlots.length} slot(s): ${enabledSlots.join(', ')}`, 'scrape');
   const responsesByModel = {};
   const aggregatedResponses = [];
+  const scrapeMeta = [];
   const sourcePrompt = (window.mergeApiClient?.lastSourcePrompt || '').trim();
 
   const reserveModelName = (baseName) => {
@@ -2098,7 +2104,18 @@ async function collectLatestRepliesFromEnabledSlots() {
     const cleanedReply = sanitizeScrapedReply(serviceId, reply || '', sourcePrompt);
     if (cleanedReply && cleanedReply.trim().length > 0) {
       const preview = cleanedReply.length > 120 ? `${cleanedReply.slice(0, 120)}...` : cleanedReply;
-      mergeLog(`${serviceName}: scraped ${cleanedReply.length} chars - "${preview}"`, 'scrape', cleanedReply);
+      const meta = {
+        slot,
+        service_id: serviceId || 'unknown',
+        service_name: serviceName,
+        source_url: currentUrl || SERVICE_PRESETS[serviceId]?.url || '',
+        raw_chars: String(reply || '').length,
+        clean_chars: cleanedReply.length,
+        dropped_chars: Math.max(String(reply || '').length - cleanedReply.length, 0),
+        clean_preview: preview
+      };
+      scrapeMeta.push(meta);
+      mergeLog(`${serviceName}: scraped ${cleanedReply.length} chars - "${preview}"`, 'scrape', meta);
       const modelName = reserveModelName(serviceName);
       responsesByModel[modelName] = cleanedReply;
       aggregatedResponses.push({
@@ -2117,7 +2134,7 @@ async function collectLatestRepliesFromEnabledSlots() {
     }
   }
 
-  return { responsesByModel, aggregatedResponses };
+  return { responsesByModel, aggregatedResponses, scrapeMeta };
 }
 
 async function getScrapeDiagnostics(slot, serviceIdHint = '') {
@@ -2188,7 +2205,7 @@ async function getScrapeDiagnostics(slot, serviceIdHint = '') {
 async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestContext = {}) {
   mergeLog(`Ingest polling started (expected slots: ${expectedSlotCount})`, 'info');
 
-  let collected = { responsesByModel: {}, aggregatedResponses: [] };
+  let collected = { responsesByModel: {}, aggregatedResponses: [], scrapeMeta: [] };
   for (let attempt = 1; attempt <= INGEST_POLL_ATTEMPTS; attempt += 1) {
     collected = await collectLatestRepliesFromEnabledSlots();
     const count = Object.keys(collected.responsesByModel).length;
@@ -2210,14 +2227,16 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestCo
   });
 
   mergeLog('Ingest aggregated request prepared', 'send', {
-    payload: payloadBuild.payload
+    payload: payloadBuild.payload,
+    scrape_meta: collected.scrapeMeta || []
   });
 
   const ingestResult = await sendAggregated(
     payloadBuild.sessionId,
     payloadBuild.payload.title,
     payloadBuild.payload.responses,
-    payloadBuild.payload.active_segment_id
+    payloadBuild.payload.active_segment_id,
+    collected.scrapeMeta || []
   );
 
   const sessionId = extractSessionId(ingestResult);
@@ -2333,6 +2352,7 @@ async function runMerge(isClarification = false, clarificationText = '', previou
     const collected = await collectLatestRepliesFromEnabledSlots();
     responses = collected.responsesByModel;
     aggregatedResponses = collected.aggregatedResponses;
+    lastScrapeMeta = collected.scrapeMeta || [];
 
     if (Object.keys(responses).length === 0) {
       mergeLog('No responses collected — nothing to merge', 'error');
@@ -2414,8 +2434,8 @@ async function runMerge(isClarification = false, clarificationText = '', previou
         ? clarificationTitle
         : mergeTitle;
       const rpcResult = isClarification
-        ? await sendClarification(sessionId, rpcTitle, cleanResponse)
-        : await sendMerge(sessionId, rpcTitle, cleanResponse);
+        ? await sendClarification(sessionId, rpcTitle, cleanResponse, lastScrapeMeta)
+        : await sendMerge(sessionId, rpcTitle, cleanResponse, lastScrapeMeta);
 
       mergeLog(
         rpcResult?.ok
