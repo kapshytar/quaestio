@@ -151,12 +151,14 @@ let searchSession = { query: '', scope: 'global' };
 const mergeSearchState = { query: '', marks: [], index: -1 };
 let searchDebounceTimer = null;
 const AGGREGATED_SESSION_ID_KEY = 'aggregated-ingest-session-id';
+const AGGREGATED_SESSION_CONTEXT_KEY = 'aggregated-ingest-session-context';
 const SLOT_ENABLED_STATE_KEY = 'slot-enabled-state';
 const INGEST_POLL_ATTEMPTS = 30;
 const INGEST_POLL_INTERVAL_MS = 2000;
 let activeIngestTraceId = '';
 let ingestSequenceCounter = 0;
 let ingestSequenceBySourceMessageId = new Map();
+let activeSessionFingerprint = '';
 
 function stableStringify(value) {
   const sort = (v) => {
@@ -213,7 +215,119 @@ function getIngestTraceContext(sourceMessageId) {
   };
 }
 
+function getWebviewCurrentUrl(slot) {
+  const webview = webviews[slot];
+  if (!webview) return '';
+  try {
+    return String(webview.getURL?.() || webview.getAttribute?.('src') || '').trim();
+  } catch (_) {
+    return String(webview.getAttribute?.('src') || '').trim();
+  }
+}
+
+function readSessionContext() {
+  const raw = localStorage.getItem(AGGREGATED_SESSION_CONTEXT_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const sessionId = Number(parsed?.session_id);
+    const fingerprint = String(parsed?.fingerprint || '').trim();
+    if (!Number.isInteger(sessionId) || sessionId <= 0 || !fingerprint) return null;
+    return {
+      session_id: sessionId,
+      fingerprint
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function persistSessionContext(sessionId, fingerprint) {
+  if (!Number.isInteger(sessionId) || sessionId <= 0 || !fingerprint) return;
+  const context = {
+    session_id: sessionId,
+    fingerprint,
+    updated_at: new Date().toISOString()
+  };
+  localStorage.setItem(AGGREGATED_SESSION_CONTEXT_KEY, JSON.stringify(context));
+  localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionId));
+}
+
+function clearStoredSessionContext() {
+  localStorage.removeItem(AGGREGATED_SESSION_CONTEXT_KEY);
+  localStorage.removeItem(AGGREGATED_SESSION_ID_KEY);
+}
+
+function getStoredSessionIdForFingerprint(fingerprint) {
+  const normalizedFingerprint = String(fingerprint || '').trim();
+  if (!normalizedFingerprint) return null;
+  const context = readSessionContext();
+  if (!context) return null;
+  return context.fingerprint === normalizedFingerprint ? context.session_id : null;
+}
+
+function extractConversationKey(serviceId, rawUrl) {
+  const sid = String(serviceId || 'unknown').toLowerCase();
+  const fallback = `${sid}:no-url`;
+  if (!rawUrl) return fallback;
+
+  try {
+    const parsed = new URL(rawUrl);
+    const origin = parsed.origin.toLowerCase();
+    const path = (parsed.pathname || '/').replace(/\/+$/g, '') || '/';
+    const segments = path.split('/').filter(Boolean);
+    const looksLikeId = (value) => /^[a-z0-9][a-z0-9_-]{5,}$/i.test(String(value || ''));
+
+    const firstAfter = (label) => {
+      const idx = segments.findIndex((part) => part.toLowerCase() === label);
+      if (idx >= 0 && segments[idx + 1]) return segments[idx + 1];
+      return '';
+    };
+
+    let chatId = '';
+    if (sid === 'chatgpt') {
+      chatId = firstAfter('c') || firstAfter('chat');
+      if (!chatId && parsed.searchParams.get('temporary-chat')) chatId = 'temporary';
+    } else if (sid === 'claude') {
+      chatId = firstAfter('chat');
+    } else if (sid === 'deepseek') {
+      chatId = firstAfter('s') || firstAfter('chat');
+    } else if (sid === 'perplexity') {
+      chatId = firstAfter('search');
+    } else if (sid === 'grok') {
+      chatId = firstAfter('c') || firstAfter('chat');
+    } else if (sid === 'gemini') {
+      chatId = firstAfter('chat');
+    }
+
+    if (!chatId) {
+      const tail = segments[segments.length - 1] || '';
+      if (looksLikeId(tail)) chatId = tail;
+    }
+
+    if (chatId) return `${sid}:${chatId}`;
+    return `${sid}:${origin}${path.toLowerCase()}`;
+  } catch (_) {
+    return `${sid}:${String(rawUrl).trim().toLowerCase()}`;
+  }
+}
+
+function buildSessionFingerprint(slots) {
+  const slotList = Array.isArray(slots) ? slots : [];
+  const parts = slotList.map((slot) => {
+    const url = getWebviewCurrentUrl(slot);
+    const serviceId = detectServiceByUrl(url) || slotConfig[slot] || 'unknown';
+    const conversationKey = extractConversationKey(serviceId, url);
+    return `${slot}:${conversationKey}`;
+  }).sort();
+
+  if (parts.length === 0) return '';
+  return sha256(stableStringify(parts));
+}
+
 function getStoredAggregatedSessionId() {
+  const context = readSessionContext();
+  if (context?.session_id) return context.session_id;
   const raw = localStorage.getItem(AGGREGATED_SESSION_ID_KEY);
   if (!raw) return null;
   const parsed = Number(raw);
@@ -223,7 +337,9 @@ function getStoredAggregatedSessionId() {
 function buildAggregatedPayload(params) {
   const sourcePrompt = (params.sourcePrompt || '').trim();
   const title = sourcePrompt || `Gunshi merge ${new Date().toISOString()}`;
-  const sessionId = getStoredAggregatedSessionId();
+  const sessionId = Number.isInteger(params?.sessionId) && params.sessionId > 0
+    ? params.sessionId
+    : null;
   const segmentSeed = stableStringify({
     title,
     responses: params.responses
@@ -1526,6 +1642,18 @@ async function sendToAll() {
   mergeLog(`Ingest trace started: ${traceId}`, 'info');
 
   const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
+  const sessionFingerprint = buildSessionFingerprint(enabledSlots);
+  activeSessionFingerprint = sessionFingerprint;
+  const sessionIdHint = getStoredSessionIdForFingerprint(sessionFingerprint);
+
+  if (Number.isInteger(sessionIdHint) && sessionIdHint > 0) {
+    localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionIdHint));
+    setIngestSessionIndicator(sessionIdHint);
+  } else {
+    clearStoredSessionContext();
+    clearIngestSessionIndicator();
+    mergeLog('Session context reset: fresh chat fingerprint detected', 'info');
+  }
 
   for (const slot of enabledSlots) {
     await sendMessage(slot, text);
@@ -1535,7 +1663,10 @@ async function sendToAll() {
   messageInput.value = '';
   messageInput.focus();
 
-  ingestAfterSlotsPolling(text, enabledSlots.length).catch((error) => {
+  ingestAfterSlotsPolling(text, enabledSlots.length, {
+    sessionFingerprint,
+    sessionIdHint
+  }).catch((error) => {
     mergeLog(`Ingest polling failed: ${error?.message || error}`, 'error');
   });
 }
@@ -2054,7 +2185,7 @@ async function getScrapeDiagnostics(slot, serviceIdHint = '') {
   }
 }
 
-async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount) {
+async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestContext = {}) {
   mergeLog(`Ingest polling started (expected slots: ${expectedSlotCount})`, 'info');
 
   let collected = { responsesByModel: {}, aggregatedResponses: [] };
@@ -2074,7 +2205,8 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount) {
 
   const payloadBuild = buildAggregatedPayload({
     sourcePrompt: sourcePrompt || '',
-    responses: collected.aggregatedResponses
+    responses: collected.aggregatedResponses,
+    sessionId: ingestContext.sessionIdHint
   });
 
   mergeLog('Ingest aggregated request prepared', 'send', {
@@ -2090,7 +2222,12 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount) {
 
   const sessionId = extractSessionId(ingestResult);
   if (ingestResult?.ok && sessionId) {
-    localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionId));
+    const fingerprint = String(ingestContext.sessionFingerprint || activeSessionFingerprint || '').trim();
+    if (fingerprint) {
+      persistSessionContext(sessionId, fingerprint);
+    } else {
+      localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionId));
+    }
     setIngestSessionIndicator(sessionId);
   }
 
