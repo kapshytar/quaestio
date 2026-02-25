@@ -331,10 +331,8 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
 })();
 `;
 
-  let copiedText = '';
-  let clickInfo = null;
   try {
-    clickInfo = await webview.executeJavaScript(code);
+    const clickInfo = await webview.executeJavaScript(code);
     if (!clickInfo || !clickInfo.clicked) return null;
 
     for (let attempt = 1; attempt <= 12; attempt += 1) {
@@ -343,9 +341,8 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
       const normalized = normalizeMultilineText(current);
       if (!normalized) continue;
       if (current === probeText) continue;
-      copiedText = current;
       return {
-        text: copiedText,
+        text: current,
         diagnostics: {
           method: 'copy',
           clicked: true,
@@ -529,10 +526,6 @@ function normalizeMultilineText(value) {
     .trim();
 }
 
-function normalizeReplyForCompare(value) {
-  return normalizeMultilineText(value).replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
 function toNoteTitle(rawText, fallback) {
   const text = pickMarkdown(rawText);
   if (!text) return fallback;
@@ -557,7 +550,6 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
   if (serviceId === 'gemini') {
     text = text
       .replace(/^conversation with gemini\s*/i, '')
-      .replace(/^\s*you said\s*[\r\n]+\s*/i, '')
       .replace(/\byou said\b[\s\S]*?\bgemini said\b[:\s]*/i, '')
       .replace(/\bgemini said\b[:\s]*/i, '')
       .trim();
@@ -566,11 +558,6 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
   const dropLine = (lineLower) => {
     if (!lineLower) return true;
     if (lineLower === 'source') return true;
-    if (lineLower === 'incognito') return true;
-    if (lineLower === 'deepthink' || lineLower === 'search') return true;
-    if (lineLower === 'ai-generated, for reference only' || lineLower === 'ai generated, for reference only') return true;
-    if (lineLower === 'answer' || lineLower === 'links' || lineLower === 'images' || lineLower === 'download comet') return true;
-    if (lineLower === 'ask a follow-up' || lineLower === 'model') return true;
     if (lineLower === 'share' || lineLower === 'edit' || lineLower === 'retry' || lineLower === 'copy' || lineLower === 'regenerate') return true;
     if (lineLower === 'open sidebar' || lineLower === 'reply...' || lineLower === 'temporary chat' || lineLower === 'incognito chat') return true;
     if (lineLower === 'tools' || lineLower === 'fast') return true;
@@ -1786,24 +1773,14 @@ async function sendToAll() {
     return;
   }
 
-  const traceId = startIngestTrace();
-  mergeLog(`Ingest trace started: ${traceId}`, 'info');
-
-  const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
-  const baselineRepliesBySlot = {};
-  for (const slot of enabledSlots) {
-    let currentUrl = '';
-    try { currentUrl = webviews[slot]?.getURL() || ''; } catch (_) {}
-    const serviceId = detectServiceByUrl(currentUrl) || slotConfig[slot] || slot;
-    const baselineRaw = await getLatestAssistantReply(slot);
-    const baselineClean = sanitizeScrapedReply(serviceId, baselineRaw || '', '');
-    baselineRepliesBySlot[slot] = normalizeReplyForCompare(baselineClean);
-  }
-
   if (window.mergeApiClient) {
     window.mergeApiClient.lastSourcePrompt = text;
   }
 
+  const traceId = startIngestTrace();
+  mergeLog(`Ingest trace started: ${traceId}`, 'info');
+
+  const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
   const sessionFingerprint = buildSessionFingerprint(enabledSlots);
   activeSessionFingerprint = sessionFingerprint;
   const sessionIdHint = getStoredSessionIdForFingerprint(sessionFingerprint);
@@ -1826,8 +1803,6 @@ async function sendToAll() {
   messageInput.focus();
 
   ingestAfterSlotsPolling(text, enabledSlots.length, {
-    enabledSlots,
-    baselineRepliesBySlot,
     sessionFingerprint,
     sessionIdHint
   }).catch((error) => {
@@ -2123,8 +2098,6 @@ async function getLatestAssistantReply(slot) {
 (function() {
   try {
     const serviceId = ${JSON.stringify(serviceId)};
-    const sourcePrompt = ${JSON.stringify((window.mergeApiClient?.lastSourcePrompt || '').trim())};
-    const normalizedPrompt = String(sourcePrompt || '').replace(/\\s+/g, ' ').trim().toLowerCase();
 
     function visible(el) {
       if (!el) return false;
@@ -2132,11 +2105,11 @@ async function getLatestAssistantReply(slot) {
       const s = window.getComputedStyle(el);
       return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
     }
+
     function normalizeText(t) {
       return String(t || '')
         .replace(/\\r/g, '')
         .replace(/\\u00a0/g, ' ')
-        .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
         .replace(/[ \\t]+\\n/g, '\\n')
         .replace(/\\n{3,}/g, '\\n\\n')
         .trim();
@@ -2147,12 +2120,6 @@ async function getLatestAssistantReply(slot) {
     function isComposerElement(el) {
       if (!el) return false;
       return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"]');
-    }
-    function shouldExcludeContainer(el) {
-      if (!el) return true;
-      if (el.closest('aside, nav, header, footer, [role="navigation"], [class*="sidebar"], [class*="history"], [class*="drawer"], [class*="composer"], [class*="input"], form')) return true;
-      if (el.querySelector('textarea, input, [contenteditable="true"], [role="textbox"]')) return true;
-      return false;
     }
     function isMetadataLikeText(text) {
       const t = (text || '').toLowerCase();
@@ -2167,76 +2134,51 @@ async function getLatestAssistantReply(slot) {
         t.includes('window.__')
       );
     }
-    function textLooksLikeUiNoise(flat) {
-      const t = String(flat || '').toLowerCase();
-      if (!t) return true;
-      if (t === 'source' || t.startsWith('source ')) return true;
-      if (t === 'deepthink' || t === 'search') return true;
-      if (t.includes('ai-generated, for reference only') || t.includes('ai generated, for reference only')) return true;
-      if (t.includes('open sidebar') || t.includes('download comet')) return true;
-      if (t.includes('answer links images')) return true;
-      if (t.includes('ask a follow-up') || t === 'model') return true;
-      if (t.includes('temporary chat') || t.includes('incognito chat')) return true;
-      if (t.includes('chatgpt can make mistakes') || t.includes('can make mistakes')) return true;
-      if (t.includes('check important info') || t.includes('cookie preferences')) return true;
-      return false;
-    }
-    function looksLikePromptEcho(flat) {
-      const t = String(flat || '').toLowerCase().trim();
-      if (!normalizedPrompt || !t) return false;
-      if (t === normalizedPrompt) return true;
-      if (t === 'you said ' + normalizedPrompt) return true;
-      if (t.startsWith('you said') && t.includes(normalizedPrompt) && t.length <= normalizedPrompt.length + 24) return true;
-      if (t.includes(normalizedPrompt) && t.length <= normalizedPrompt.length + 18) return true;
-      return false;
-    }
 
-    const selectors = serviceId === 'perplexity'
-      ? [
-          '[data-message-author-role="assistant"] div[class*="prose"]',
-          '[data-message-author-role="assistant"] article',
-          '[data-testid*="answer"] div[class*="prose"]',
-          'main div[class*="prose"]',
-          'article div[class*="prose"]',
-          '[data-message-author-role="assistant"]'
-        ]
-      : [
-          '[data-message-author-role="assistant"]',
-          '[data-testid*="assistant"]',
-          '[class*="assistant"][class*="message"]',
-          'article div[class*="prose"]',
-          'main div[class*="prose"]',
-          '[class*="answer"]'
-        ];
+    const selectors = [
+      '[data-testid*="conversation-turn"]',
+      '[data-testid*="message-content"]',
+      '[data-message-author-role="assistant"]',
+      '[data-testid*="assistant"]',
+      '[class*="assistant"]',
+      '[class*="response"]',
+      '[class*="answer"]',
+      '[class*="message"]'
+    ];
+
+    // Perplexity: prepend prose selector
+    if (serviceId === 'perplexity') { selectors.unshift('div[class*="prose"]'); }
 
     const candidates = [];
-    function pushCandidate(el) {
-      if (!visible(el)) return;
-      if (isComposerElement(el)) return;
-      if (shouldExcludeContainer(el)) return;
-      const raw = normalizeText(el.innerText || el.textContent);
-      const flat = flatText(raw);
-      if (flat.length < 24 || isMetadataLikeText(flat) || textLooksLikeUiNoise(flat)) return;
-      if (looksLikePromptEcho(flat)) return;
-      const rect = el.getBoundingClientRect();
-      const viewportArea = Math.max(window.innerWidth * window.innerHeight, 1);
-      const area = Math.max(rect.width * rect.height, 0);
-      if (area > viewportArea * 0.70) return;
-      let score = rect.bottom + Math.min(flat.length, 2000) * 0.15;
-      if (serviceId === 'perplexity' && /\\b(answer|links|images|model)\\b/i.test(flat)) score -= 4000;
-      if (flat.length < 40) score -= 1500;
-      candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top, score });
-    }
-
     selectors.forEach((sel) => {
-      try { document.querySelectorAll(sel).forEach((el) => pushCandidate(el)); } catch (_) {}
+      try {
+        document.querySelectorAll(sel).forEach((el) => {
+          if (!visible(el)) return;
+          if (isComposerElement(el)) return;
+          const raw = normalizeText(el.innerText || el.textContent);
+          const flat = flatText(raw);
+          if (flat.length < 20 || isMetadataLikeText(flat)) return;
+          const rect = el.getBoundingClientRect();
+          candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top });
+        });
+      } catch (_) {}
     });
 
+    // Fallback: any visible article/div with enough text
     if (candidates.length === 0) {
-      try { document.querySelectorAll('article, section, div').forEach((el) => pushCandidate(el)); } catch (_) {}
+      Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
+        if (isComposerElement(el)) return;
+        const raw = normalizeText(el.innerText || el.textContent);
+        const flat = flatText(raw);
+        if (flat.length < 80 || isMetadataLikeText(flat)) return;
+        const rect = el.getBoundingClientRect();
+        candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top });
+      });
     }
+
     if (candidates.length === 0) return null;
 
+    // Drop nested short fragments when a parent candidate carries the full reply.
     const pruned = candidates.filter((candidate) => {
       return !candidates.some((other) => {
         if (other === candidate) return false;
@@ -2252,11 +2194,11 @@ async function getLatestAssistantReply(slot) {
     const nearBottom = source.filter(c => c.bottom >= maxBottom - 260);
     const pool = nearBottom.length > 0 ? nearBottom : source;
     pool.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
       if (b.flat.length !== a.flat.length) return b.flat.length - a.flat.length;
       return b.bottom - a.bottom;
     });
     return pool[0].raw;
+
   } catch (e) { return null; }
 })();
 `;
@@ -2276,7 +2218,6 @@ async function collectLatestRepliesFromEnabledSlots() {
   const responsesByModel = {};
   const aggregatedResponses = [];
   const scrapeMeta = [];
-  const slotReplies = {};
   const sourcePrompt = (window.mergeApiClient?.lastSourcePrompt || '').trim();
 
   const reserveModelName = (baseName) => {
@@ -2297,22 +2238,8 @@ async function collectLatestRepliesFromEnabledSlots() {
     const reply = copied?.text || await getLatestAssistantReply(slot);
     const extractionMethod = copied?.text ? 'copy' : 'dom';
     const cleanedReply = sanitizeScrapedReply(serviceId, reply || '', sourcePrompt);
-    const normalizedPrompt = normalizeMultilineText(sourcePrompt).replace(/\s+/g, ' ').trim().toLowerCase();
-    const normalizedClean = normalizeMultilineText(cleanedReply).replace(/\s+/g, ' ').trim().toLowerCase();
-    const isPromptEcho = normalizedPrompt && (
-      normalizedClean === normalizedPrompt ||
-      normalizedClean === `you said ${normalizedPrompt}` ||
-      (normalizedClean.startsWith('you said') && normalizedClean.includes(normalizedPrompt) && normalizedClean.length <= normalizedPrompt.length + 24)
-    );
-    if (cleanedReply && cleanedReply.trim().length > 0 && !isPromptEcho) {
+    if (cleanedReply && cleanedReply.trim().length > 0) {
       const preview = cleanedReply.length > 120 ? `${cleanedReply.slice(0, 120)}...` : cleanedReply;
-      const aggregatedItem = {
-        segment_id: `${slot}:${serviceId || 'unknown'}`,
-        provider: serviceId || 'unknown',
-        model: serviceName,
-        source_url: currentUrl || SERVICE_PRESETS[serviceId]?.url || '',
-        markdown: cleanedReply
-      };
       const meta = {
         slot,
         service_id: serviceId || 'unknown',
@@ -2326,20 +2253,15 @@ async function collectLatestRepliesFromEnabledSlots() {
         copy_diagnostics: copied?.diagnostics || null
       };
       scrapeMeta.push(meta);
-      slotReplies[slot] = {
-        slot,
-        service_id: serviceId || 'unknown',
-        service_name: serviceName,
-        normalized: normalizedClean,
-        aggregatedItem,
-        meta
-      };
       mergeLog(`${serviceName}: scraped ${cleanedReply.length} chars - "${preview}"`, 'scrape', meta);
       const modelName = reserveModelName(serviceName);
       responsesByModel[modelName] = cleanedReply;
       aggregatedResponses.push({
-        ...aggregatedItem,
-        model: modelName
+        segment_id: `${slot}:${serviceId || 'unknown'}`,
+        provider: serviceId || 'unknown',
+        model: modelName,
+        source_url: currentUrl || SERVICE_PRESETS[serviceId]?.url || '',
+        markdown: cleanedReply
       });
     } else {
       mergeLog(`${serviceName}: no reply found (slot=${slot}, url=${currentUrl.slice(0,60)})`, 'warn');
@@ -2350,7 +2272,7 @@ async function collectLatestRepliesFromEnabledSlots() {
     }
   }
 
-  return { responsesByModel, aggregatedResponses, scrapeMeta, slotReplies };
+  return { responsesByModel, aggregatedResponses, scrapeMeta };
 }
 
 async function getScrapeDiagnostics(slot, serviceIdHint = '') {
@@ -2420,100 +2342,31 @@ async function getScrapeDiagnostics(slot, serviceIdHint = '') {
 
 async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestContext = {}) {
   mergeLog(`Ingest polling started (expected slots: ${expectedSlotCount})`, 'info');
-  const enabledSlots = Array.isArray(ingestContext.enabledSlots) && ingestContext.enabledSlots.length
-    ? ingestContext.enabledSlots
-    : SLOTS.filter(slot => toggles[slot]?.checked);
-  const baselineRepliesBySlot = ingestContext.baselineRepliesBySlot || {};
-  const slotState = {};
-  enabledSlots.forEach((slot) => {
-    slotState[slot] = {
-      baseline: normalizeReplyForCompare(baselineRepliesBySlot[slot] || ''),
-      lastNormalized: '',
-      streak: 0,
-      ready: false,
-      latest: null
-    };
-  });
 
-  let collected = { responsesByModel: {}, aggregatedResponses: [], scrapeMeta: [], slotReplies: {} };
-  let prevReadyCount = -1;
-  let prevChangedCount = -1;
-  let stagnantAttempts = 0;
+  let collected = { responsesByModel: {}, aggregatedResponses: [], scrapeMeta: [] };
   for (let attempt = 1; attempt <= INGEST_POLL_ATTEMPTS; attempt += 1) {
     collected = await collectLatestRepliesFromEnabledSlots();
-    enabledSlots.forEach((slot) => {
-      const state = slotState[slot];
-      const candidate = collected.slotReplies?.[slot];
-      if (!state || !candidate || !candidate.normalized) return;
+    const count = Object.keys(collected.responsesByModel).length;
+    mergeLog(`Ingest polling attempt ${attempt}/${INGEST_POLL_ATTEMPTS}: ${count}/${expectedSlotCount} replies`, 'info');
 
-      const changedFromBaseline = !state.baseline || candidate.normalized !== state.baseline;
-      if (!changedFromBaseline) return;
-
-      if (candidate.normalized === state.lastNormalized) {
-        state.streak += 1;
-      } else {
-        state.lastNormalized = candidate.normalized;
-        state.streak = 1;
-      }
-      state.latest = candidate;
-
-      if (state.streak >= 2 || attempt === INGEST_POLL_ATTEMPTS) {
-        state.ready = true;
-      }
-    });
-
-    const readyCount = enabledSlots.filter(slot => slotState[slot]?.ready).length;
-    const changedCount = enabledSlots.filter(slot => !!slotState[slot]?.latest).length;
-    mergeLog(
-      `Ingest polling attempt ${attempt}/${INGEST_POLL_ATTEMPTS}: ready ${readyCount}/${expectedSlotCount}, changed ${changedCount}/${expectedSlotCount}`,
-      'info'
-    );
-
-    if (readyCount === prevReadyCount && changedCount === prevChangedCount) {
-      stagnantAttempts += 1;
-    } else {
-      stagnantAttempts = 0;
-      prevReadyCount = readyCount;
-      prevChangedCount = changedCount;
-    }
-
-    if (readyCount >= expectedSlotCount) break;
-    if (
-      attempt >= 4 &&
-      stagnantAttempts >= 3 &&
-      readyCount >= Math.max(1, expectedSlotCount - 1)
-    ) {
-      mergeLog(
-        `Ingest polling stopped early due to stable plateau (ready ${readyCount}/${expectedSlotCount})`,
-        'warn'
-      );
-      break;
-    }
+    if (count >= expectedSlotCount) break;
     if (attempt < INGEST_POLL_ATTEMPTS) await sleep(INGEST_POLL_INTERVAL_MS);
   }
 
-  const finalSelected = enabledSlots
-    .map(slot => slotState[slot]?.latest)
-    .filter(item => !!item && item.aggregatedItem)
-    .map(item => item.aggregatedItem);
-  const finalScrapeMeta = enabledSlots
-    .map(slot => slotState[slot]?.latest?.meta)
-    .filter(Boolean);
-
-  if (finalSelected.length === 0) {
+  if (collected.aggregatedResponses.length === 0) {
     mergeLog('Ingest skipped: no replies collected after polling', 'warn');
     return;
   }
 
   const payloadBuild = buildAggregatedPayload({
     sourcePrompt: sourcePrompt || '',
-    responses: finalSelected,
+    responses: collected.aggregatedResponses,
     sessionId: ingestContext.sessionIdHint
   });
 
   mergeLog('Ingest aggregated request prepared', 'send', {
     payload: payloadBuild.payload,
-    scrape_meta: finalScrapeMeta
+    scrape_meta: collected.scrapeMeta || []
   });
 
   const ingestResult = await sendAggregated(
@@ -2521,7 +2374,7 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestCo
     payloadBuild.payload.title,
     payloadBuild.payload.responses,
     payloadBuild.payload.active_segment_id,
-    finalScrapeMeta
+    collected.scrapeMeta || []
   );
 
   const sessionId = extractSessionId(ingestResult);
