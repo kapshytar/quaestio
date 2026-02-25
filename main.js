@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const APP_DATA_PATH = app.getPath('appData');
 const FIXED_USER_DATA_PATH = path.join(APP_DATA_PATH, 'chat-aggregator');
@@ -56,6 +57,11 @@ function setAllWebviewsBackgrounded(backgrounded) {
   }
 }
 const MAX_COOKIE_IMPORT_SIZE_BYTES = 5 * 1024 * 1024;
+const DREAM_RPC_PATHS = {
+  aggregated: '/rest/v1/rpc/ingest_aggregated_v1',
+  merge: '/rest/v1/rpc/ingest_merge_v1',
+  clarification: '/rest/v1/rpc/ingest_clarification_v1'
+};
 
 function getPrimaryWindow() {
   const focused = BrowserWindow.getFocusedWindow();
@@ -216,6 +222,170 @@ function openGoogleAuthWindow() {
     notifyRenderer('Google sign-in window closed. Webviews reloaded.');
   });
 }
+
+function stableStringify(obj) {
+  const sort = (value) => {
+    if (Array.isArray(value)) return value.map(sort);
+    if (value && typeof value === 'object') {
+      return Object.keys(value).sort().reduce((acc, key) => {
+        acc[key] = sort(value[key]);
+        return acc;
+      }, {});
+    }
+    return value;
+  };
+
+  return JSON.stringify(sort(obj));
+}
+
+function sha256(input) {
+  return crypto.createHash('sha256').update(input).digest('hex');
+}
+
+function buildIdempotencyKey({ kind, sessionId, sourceMessageId }) {
+  const sessionPart = Number.isInteger(sessionId) && sessionId > 0 ? String(sessionId) : 'new';
+  return `${kind}:${sessionPart}:${sourceMessageId}`;
+}
+
+function normalizeDreamKind(kind) {
+  const raw = String(kind || '').trim().toLowerCase();
+  if (raw === 'aggregated' || raw === 'merge' || raw === 'clarification') return raw;
+  return null;
+}
+
+function isValidDreamPayload(kind, payload) {
+  if (!payload || typeof payload !== 'object') return false;
+
+  if (kind === 'aggregated') {
+    return payload.schema === 'aggregated_ingest_v1' && Array.isArray(payload.responses);
+  }
+  if (kind === 'merge') {
+    return payload.schema === 'merge_ingest_v1' && Number.isInteger(payload.session_id);
+  }
+  if (kind === 'clarification') {
+    return payload.schema === 'clarification_ingest_v1' && Number.isInteger(payload.session_id);
+  }
+  return false;
+}
+
+async function ingestDreamRpc(kindInput, params) {
+  const startedAt = Date.now();
+
+  try {
+    const kind = normalizeDreamKind(kindInput);
+    if (!kind) return { ok: false, error: 'Unsupported ingest kind.' };
+
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.DREAM_TRACKER_SUPABASE_URL || '';
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.DREAM_TRACKER_SERVICE_ROLE_KEY || '';
+
+    if (!supabaseUrl || !serviceRoleKey) {
+      return {
+        ok: false,
+        error: 'Supabase env is not configured (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).'
+      };
+    }
+
+    const payload = params?.payload;
+    if (!isValidDreamPayload(kind, payload)) {
+      return { ok: false, error: `Invalid payload for kind=${kind}.` };
+    }
+
+    const payloadStr = stableStringify(payload);
+    const payloadHash = sha256(payloadStr);
+    const sourceMessageId = String(params?.sourceMessageId || payloadHash.slice(0, 16)).trim();
+    if (!sourceMessageId) return { ok: false, error: 'sourceMessageId is required.' };
+
+    const sessionId = Number.isInteger(payload.session_id) ? payload.session_id : null;
+    const idempotencyKey = buildIdempotencyKey({
+      kind,
+      sessionId,
+      sourceMessageId
+    });
+
+    const requestBody = {
+      p_payload: payload,
+      p_idempotency_key: idempotencyKey,
+      p_payload_hash: payloadHash
+    };
+
+    console.log('[IngestRPC] Request', {
+      url: `${supabaseUrl}${DREAM_RPC_PATHS[kind]}`,
+      kind,
+      sourceMessageId,
+      idempotencyKey,
+      payloadHash,
+      sessionId
+    });
+
+    const response = await fetch(`${supabaseUrl}${DREAM_RPC_PATHS[kind]}`, {
+      method: 'POST',
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    const rawText = await response.text();
+    let parsed;
+    try {
+      parsed = rawText ? JSON.parse(rawText) : null;
+    } catch (_) {
+      parsed = null;
+    }
+
+    if (!response.ok) {
+      console.error('[IngestRPC] HTTP error', {
+        kind,
+        status: response.status,
+        body: rawText
+      });
+      return {
+        ok: false,
+        error: `RPC ${kind} failed: ${response.status}`,
+        status: response.status,
+        responseText: rawText,
+        payloadHash,
+        idempotencyKey
+      };
+    }
+
+    console.log('[IngestRPC] Response', {
+      kind,
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+      body: parsed
+    });
+
+    return {
+      ok: true,
+      data: parsed,
+      status: response.status,
+      payloadHash,
+      idempotencyKey,
+      kind
+    };
+  } catch (error) {
+    console.error('[IngestRPC] Unexpected error', error);
+    return {
+      ok: false,
+      error: error.message || 'Unexpected ingest error'
+    };
+  }
+}
+
+ipcMain.handle('dream-send-aggregated', async (_event, params) => {
+  return ingestDreamRpc('aggregated', params);
+});
+
+ipcMain.handle('dream-send-merge', async (_event, params) => {
+  return ingestDreamRpc('merge', params);
+});
+
+ipcMain.handle('dream-send-clarification', async (_event, params) => {
+  return ingestDreamRpc('clarification', params);
+});
 
 ipcMain.handle('import-cookies', async (event, jsonContent) => {
   console.log('Received import-cookies IPC message');

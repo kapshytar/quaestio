@@ -143,12 +143,199 @@ let debugLogDiv, debugClearBtn;
 let mergeInProgress = false;
 let mergeHistory = '';
 let lastScrapedResponses = {}; // saved after first merge, passed to clarification for context
+let lastAggregatedResponses = [];
 let selectedMergeProviderId = 'chatgpt_api';
 const MERGE_SETUP_NEEDED_HINT = 'Merge setup needed: pick a provider, paste its API key, then tap Run Merge. Free-tier options often include OpenRouter and Hugging Face (availability/rate limits vary).';
 let focusedSearchScope = 'global'; // global | merge | slot-1..slot-4
 let searchSession = { query: '', scope: 'global' };
 const mergeSearchState = { query: '', marks: [], index: -1 };
 let searchDebounceTimer = null;
+const AGGREGATED_SESSION_ID_KEY = 'aggregated-ingest-session-id';
+const SLOT_ENABLED_STATE_KEY = 'slot-enabled-state';
+const INGEST_POLL_ATTEMPTS = 30;
+const INGEST_POLL_INTERVAL_MS = 2000;
+
+function stableStringify(value) {
+  const sort = (v) => {
+    if (Array.isArray(v)) return v.map(sort);
+    if (v && typeof v === 'object') {
+      return Object.keys(v).sort().reduce((acc, key) => {
+        acc[key] = sort(v[key]);
+        return acc;
+      }, {});
+    }
+    return v;
+  };
+  return JSON.stringify(sort(value));
+}
+
+function hashString(input) {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function getStoredAggregatedSessionId() {
+  const raw = localStorage.getItem(AGGREGATED_SESSION_ID_KEY);
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function buildAggregatedPayload(params) {
+  const sourcePrompt = (params.sourcePrompt || '').trim();
+  const title = sourcePrompt || `Gunshi merge ${new Date().toISOString()}`;
+  const sessionId = getStoredAggregatedSessionId();
+  const segmentSeed = stableStringify({
+    title,
+    responses: params.responses
+  });
+  const activeSegmentId = `segment_${hashString(segmentSeed)}`;
+
+  return {
+    payload: {
+      schema: 'aggregated_ingest_v1',
+      session_id: sessionId,
+      title,
+      active_segment_id: activeSegmentId,
+      responses: params.responses
+    },
+    activeSegmentId,
+    sessionId
+  };
+}
+
+async function ingestAggregatedPayload(payload, providerId, externalChatId) {
+  if (!window.electronAPI || typeof window.electronAPI.sendAggregated !== 'function') {
+    return { ok: false, error: 'Ingest bridge is not available in preload.' };
+  }
+  return window.electronAPI.sendAggregated({
+    payload,
+    sourceMessageId: externalChatId || `${providerId || 'aggregated'}:${hashString(stableStringify(payload))}`
+  });
+}
+
+function pickMarkdown(value) {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return '';
+}
+
+function toNoteTitle(rawText, fallback) {
+  const text = pickMarkdown(rawText);
+  if (!text) return fallback;
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 120 ? `${oneLine.slice(0, 117)}...` : oneLine;
+}
+
+function sanitizeScrapedReply(serviceId, rawReply) {
+  let text = pickMarkdown(rawReply);
+  if (!text) return '';
+
+  // Common UI leftovers from chat containers.
+  text = text
+    .replace(/\b(Share|Edit|Retry|Copy|Regenerate)\b/gi, ' ')
+    .replace(/\b(Open sidebar|Reply\.\.\.)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (serviceId === 'gemini') {
+    text = text
+      .replace(/^conversation with gemini\s*/i, '')
+      .replace(/\byou said\b[\s\S]*?\bgemini said\b[:\s]*/i, '')
+      .replace(/\bgemini said\b[:\s]*/i, '')
+      .replace(/\bfast gemini is ai and can make mistakes\.?\s*$/i, '')
+      .trim();
+  }
+
+  if (serviceId === 'chatgpt') {
+    text = text
+      .replace(/\btemporary chat\b/ig, '')
+      .replace(/\bchatgpt can make mistakes\.? check important info\.? see cookie preferences\.?\b/ig, '')
+      .trim();
+  }
+
+  if (serviceId === 'claude') {
+    text = text
+      .replace(/\bincognito chat\b/ig, '')
+      .replace(/\bclaude is ai and can make mistakes\.? please double-check responses\.?\b/ig, '')
+      .trim();
+  }
+
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function extractSessionId(result) {
+  const raw = result?.data;
+  if (Number.isInteger(raw?.session_id)) return raw.session_id;
+  if (Array.isArray(raw) && Number.isInteger(raw[0]?.session_id)) return raw[0].session_id;
+  return null;
+}
+
+async function sendAggregated(sessionId, title, responses, activeSegmentId) {
+  const normalizedResponses = Array.isArray(responses)
+    ? responses.map((item, idx) => ({
+      segment_id: String(item?.segment_id || `segment_${idx + 1}`),
+      provider: String(item?.provider || 'unknown'),
+      model: String(item?.model || item?.provider || 'unknown'),
+      source_url: String(item?.source_url || ''),
+      markdown: pickMarkdown(item?.markdown || item?.content || item?.text || item?.answer || item?.response)
+    })).filter(item => item.markdown)
+    : [];
+
+  const payload = {
+    schema: 'aggregated_ingest_v1',
+    session_id: Number.isInteger(sessionId) ? sessionId : null,
+    title: title || `Aggregated ${new Date().toISOString()}`,
+    active_segment_id: activeSegmentId || (normalizedResponses[0]?.segment_id || 'segment_1'),
+    responses: normalizedResponses
+  };
+
+  const sourceMessageId = `msg_${hashString(stableStringify(payload))}`;
+  return ingestAggregatedPayload(payload, 'aggregated', sourceMessageId);
+}
+
+async function sendMerge(sessionId, title, markdown) {
+  if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    return { ok: false, error: 'session_id is required for merge.' };
+  }
+  if (!window.electronAPI || typeof window.electronAPI.sendMerge !== 'function') {
+    return { ok: false, error: 'Merge bridge is not available in preload.' };
+  }
+
+  const payload = {
+    schema: 'merge_ingest_v1',
+    session_id: sessionId,
+    title: title || `Merge ${new Date().toISOString()}`,
+    markdown: pickMarkdown(markdown)
+  };
+  const sourceMessageId = `msg_${hashString(stableStringify(payload))}`;
+  return window.electronAPI.sendMerge({ payload, sourceMessageId });
+}
+
+async function sendClarification(sessionId, title, markdown) {
+  if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    return { ok: false, error: 'session_id is required for clarification.' };
+  }
+  if (!window.electronAPI || typeof window.electronAPI.sendClarification !== 'function') {
+    return { ok: false, error: 'Clarification bridge is not available in preload.' };
+  }
+
+  const payload = {
+    schema: 'clarification_ingest_v1',
+    session_id: sessionId,
+    title: title || `Clarification ${new Date().toISOString()}`,
+    markdown: pickMarkdown(markdown)
+  };
+  const sourceMessageId = `msg_${hashString(stableStringify(payload))}`;
+  return window.electronAPI.sendClarification({ payload, sourceMessageId });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function safeLoadURL(slot, url) {
   const webview = webviews[slot];
@@ -218,6 +405,59 @@ function saveSlotConfig(config) {
 }
 
 const slotConfig = loadSlotConfig();
+
+function loadSlotEnabledState() {
+  const defaults = {};
+  SLOTS.forEach(slot => { defaults[slot] = true; });
+
+  const saved = localStorage.getItem(SLOT_ENABLED_STATE_KEY);
+  if (!saved) return defaults;
+
+  try {
+    const parsed = JSON.parse(saved);
+    if (Array.isArray(parsed)) {
+      const normalized = {};
+      SLOTS.forEach(slot => {
+        normalized[slot] = parsed.includes(slot);
+      });
+      return normalized;
+    }
+    if (!parsed || typeof parsed !== 'object') return defaults;
+    const normalized = { ...defaults };
+    SLOTS.forEach(slot => {
+      if (typeof parsed[slot] === 'boolean') normalized[slot] = parsed[slot];
+    });
+    return normalized;
+  } catch (_) {
+    return defaults;
+  }
+}
+
+function saveSlotEnabledState(state) {
+  localStorage.setItem(SLOT_ENABLED_STATE_KEY, JSON.stringify(state));
+}
+
+function getCurrentSlotEnabledState() {
+  const state = {};
+  SLOTS.forEach(slot => {
+    state[slot] = !!toggles[slot]?.checked;
+  });
+  return state;
+}
+
+const slotEnabledState = loadSlotEnabledState();
+SLOTS.forEach(slot => {
+  if (!toggles[slot]) return;
+  toggles[slot].checked = slotEnabledState[slot] !== false;
+  toggles[slot].addEventListener('change', () => {
+    slotEnabledState[slot] = !!toggles[slot].checked;
+    saveSlotEnabledState(slotEnabledState);
+  });
+});
+saveSlotEnabledState(getCurrentSlotEnabledState());
+window.addEventListener('beforeunload', () => {
+  saveSlotEnabledState(getCurrentSlotEnabledState());
+});
 
 // ========== INITIALIZE SLOTS ==========
 function initSlot(slot) {
@@ -556,6 +796,8 @@ importCookiesBtn.addEventListener('click', () => {
 
 // ========== MOBILE UA TOGGLE ==========
 const mobileUaToggle = document.getElementById('mobile-ua-toggle');
+const ingestSessionIndicator = document.getElementById('ingest-session-indicator');
+const ingestSessionLabel = document.getElementById('ingest-session-label');
 let mobileUaEnabled = localStorage.getItem('mobile-ua') === 'true';
 const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
@@ -568,6 +810,21 @@ function applyMobileUaState() {
 }
 
 applyMobileUaState();
+
+function clearIngestSessionIndicator() {
+  ingestSessionIndicator?.classList.remove('active');
+  if (ingestSessionLabel) ingestSessionLabel.textContent = 'Session ID';
+}
+
+clearIngestSessionIndicator();
+
+function setIngestSessionIndicator(sessionId) {
+  const isActive = Number.isInteger(sessionId) && sessionId > 0;
+  ingestSessionIndicator?.classList.toggle('active', isActive);
+  if (ingestSessionLabel) {
+    ingestSessionLabel.textContent = isActive ? `Session ${sessionId}` : 'Session ID';
+  }
+}
 
 // Apply mobile UA on startup (just set attribute, no reload needed — webviews load with it)
 if (mobileUaEnabled) {
@@ -1170,15 +1427,19 @@ async function sendToAll() {
     window.mergeApiClient.lastSourcePrompt = text;
   }
 
-  for (const slot of SLOTS) {
-    if (toggles[slot] && toggles[slot].checked) {
-      await sendMessage(slot, text);
-      await new Promise(resolve => setTimeout(resolve, 250));
-    }
+  const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
+
+  for (const slot of enabledSlots) {
+    await sendMessage(slot, text);
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
 
   messageInput.value = '';
   messageInput.focus();
+
+  ingestAfterSlotsPolling(text, enabledSlots.length).catch((error) => {
+    mergeLog(`Ingest polling failed: ${error?.message || error}`, 'error');
+  });
 }
 
 sendBtn.addEventListener('click', sendToAll);
@@ -1478,9 +1739,34 @@ async function getLatestAssistantReply(slot) {
     }
 
     function cleanText(t) { return (t || '').replace(/\\s+/g, ' ').trim(); }
+    function normalizeCandidateText(rawText) {
+      let txt = cleanText(rawText);
+      if (serviceId === 'gemini') {
+        txt = txt.replace(/^conversation with gemini\\s*/i, '');
+        txt = txt.replace(/\\byou said\\b[\\s\\S]*?\\bgemini said\\b[:\\s]*/i, '');
+        txt = txt.replace(/\\bgemini said\\b[:\\s]*/i, '');
+        txt = txt.replace(/\\bfast gemini is ai and can make mistakes\\.?\\s*$/i, '');
+        txt = cleanText(txt);
+      }
+      return txt;
+    }
     function isComposerElement(el) {
       if (!el) return false;
       return !!el.closest('form, footer, textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"]');
+    }
+    function isSidebarLikeElement(el, text) {
+      if (!el) return false;
+      if (serviceId === 'grok') {
+        return !!el.closest('aside, nav, header, [role="navigation"], [data-testid*="sidebar"], [class*="sidebar"], [class*="history"], [class*="conversation-list"]');
+      }
+      if (el.closest('aside, nav, header, [role="navigation"], [data-testid*="sidebar"], [class*="sidebar"], [class*="history"], [class*="conversation-list"]')) {
+        return true;
+      }
+      const t = (text || '').toLowerCase();
+      if (t.includes('your chats') || t.includes('temporary chat') || t.includes('chat history')) return true;
+      const linksAndButtons = el.querySelectorAll('a, button').length;
+      if (linksAndButtons >= 8 && (text || '').length < linksAndButtons * 40) return true;
+      return false;
     }
     function isMetadataLikeText(text) {
       const t = (text || '').toLowerCase();
@@ -1491,7 +1777,11 @@ async function getLatestAssistantReply(slot) {
         t === 'retry' ||
         t === 'copy' ||
         t === 'regenerate' ||
-        t.startsWith('model:')
+        t.startsWith('model:') ||
+        t.includes('window.__') ||
+        t.includes('temporary chat') ||
+        t.includes('reply...') ||
+        t.includes('open sidebar')
       );
     }
 
@@ -1509,26 +1799,91 @@ async function getLatestAssistantReply(slot) {
     // Perplexity: prepend prose selector
     if (serviceId === 'perplexity') { selectors.unshift('div[class*="prose"]'); }
 
+    // Grok: prefer explicit message/markdown blocks before generic scraping.
+    if (serviceId === 'grok') {
+      const grokSelectors = [
+        '[data-testid*="assistant"]',
+        '[data-testid*="response"]',
+        '[class*="assistant"] [class*="markdown"]',
+        '[class*="message"] [class*="markdown"]',
+        'article [class*="markdown"]',
+        'article'
+      ];
+      const grokCandidates = [];
+      grokSelectors.forEach((sel) => {
+        try {
+          document.querySelectorAll(sel).forEach((el) => {
+            if (!visible(el)) return;
+            if (isComposerElement(el)) return;
+            const txt = cleanText(el.innerText || el.textContent);
+            if (txt.length < 20 || txt.length > 12000 || isMetadataLikeText(txt)) return;
+            if (isSidebarLikeElement(el, txt)) return;
+            const rect = el.getBoundingClientRect();
+            grokCandidates.push({ el: el, text: txt, bottom: rect.bottom, top: rect.top });
+          });
+        } catch (_) {}
+      });
+
+      if (grokCandidates.length > 0) {
+        const maxBottom = grokCandidates.reduce((acc, c) => Math.max(acc, c.bottom), -Infinity);
+        const nearBottom = grokCandidates.filter(c => c.bottom >= maxBottom - 220);
+        const pool = nearBottom.length > 0 ? nearBottom : grokCandidates;
+        pool.sort((a, b) => {
+          const bottomDiff = b.bottom - a.bottom;
+          if (Math.abs(bottomDiff) > 24) return bottomDiff;
+          return b.text.length - a.text.length;
+        });
+        return pool[0].text;
+      }
+
+      // Grok fallback: nearest substantial visible block right above the composer.
+      const composer = Array.from(document.querySelectorAll('textarea, [role="textbox"], [contenteditable="true"]'))
+        .find((el) => visible(el));
+      const composerTop = composer ? composer.getBoundingClientRect().top : window.innerHeight;
+      const nearComposerCandidates = [];
+      Array.from(document.querySelectorAll('article, section, div, p')).forEach((el) => {
+        if (!visible(el)) return;
+        if (isComposerElement(el)) return;
+        const txt = cleanText(el.innerText || el.textContent);
+        if (txt.length < 30 || txt.length > 4000) return;
+        if (isMetadataLikeText(txt) || isSidebarLikeElement(el, txt)) return;
+        const rect = el.getBoundingClientRect();
+        if (rect.bottom > composerTop - 6) return;
+        nearComposerCandidates.push({ el: el, text: txt, bottom: rect.bottom, top: rect.top });
+      });
+      if (nearComposerCandidates.length > 0) {
+        nearComposerCandidates.sort((a, b) => {
+          const bottomDiff = b.bottom - a.bottom;
+          if (Math.abs(bottomDiff) > 24) return bottomDiff;
+          return b.text.length - a.text.length;
+        });
+        return nearComposerCandidates[0].text;
+      }
+    }
+
     const candidates = [];
     selectors.forEach((sel) => {
       try {
         document.querySelectorAll(sel).forEach((el) => {
           if (!visible(el)) return;
           if (isComposerElement(el)) return;
-          const txt = cleanText(el.innerText || el.textContent);
-          if (txt.length < 20 || isMetadataLikeText(txt)) return;
+          const txt = normalizeCandidateText(el.innerText || el.textContent);
+          if (txt.length < 20 || txt.length > 12000 || isMetadataLikeText(txt)) return;
+          if (isSidebarLikeElement(el, txt)) return;
           const rect = el.getBoundingClientRect();
           candidates.push({ el: el, text: txt, bottom: rect.bottom, top: rect.top });
         });
       } catch (_) {}
     });
 
-    // Fallback: any visible article/div with enough text
+    // Fallback: only inside main content to avoid sidebar/history blobs
     if (candidates.length === 0) {
-      Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
+      const root = document.querySelector('main, [role="main"], #__next') || document.body;
+      Array.from(root.querySelectorAll('article, div')).filter(visible).forEach((el) => {
         if (isComposerElement(el)) return;
-        const txt = cleanText(el.innerText || el.textContent);
-        if (txt.length >= 80 && !isMetadataLikeText(txt)) {
+        const txt = normalizeCandidateText(el.innerText || el.textContent);
+        if (isSidebarLikeElement(el, txt)) return;
+        if (txt.length >= 80 && txt.length <= 12000 && !isMetadataLikeText(txt)) {
           const rect = el.getBoundingClientRect();
           candidates.push({ el: el, text: txt, bottom: rect.bottom, top: rect.top });
         }
@@ -1537,14 +1892,14 @@ async function getLatestAssistantReply(slot) {
 
     if (candidates.length === 0) return null;
 
-    // Drop nested short fragments when a parent candidate carries the full reply.
+    // Drop broad wrapper containers when a nested child already has substantial text.
     const pruned = candidates.filter((candidate) => {
       return !candidates.some((other) => {
         if (other === candidate) return false;
-        if (!other.el.contains(candidate.el)) return false;
+        if (!candidate.el.contains(other.el)) return false;
         if (other.text.length < 120) return false;
-        if (candidate.text.length >= other.text.length * 0.8) return false;
-        return Math.abs(other.bottom - candidate.bottom) <= 180;
+        if (other.text.length < candidate.text.length * 0.2) return false;
+        return Math.abs(other.bottom - candidate.bottom) <= 220;
       });
     });
 
@@ -1553,10 +1908,11 @@ async function getLatestAssistantReply(slot) {
     const nearBottom = source.filter(c => c.bottom >= maxBottom - 260);
     const pool = nearBottom.length > 0 ? nearBottom : source;
     pool.sort((a, b) => {
-      if (b.text.length !== a.text.length) return b.text.length - a.text.length;
-      return b.bottom - a.bottom;
+      const bottomDiff = b.bottom - a.bottom;
+      if (Math.abs(bottomDiff) > 24) return bottomDiff;
+      return a.text.length - b.text.length;
     });
-    return pool[0].text;
+    return normalizeCandidateText(pool[0].text);
 
   } catch (e) { return null; }
 })();
@@ -1574,7 +1930,15 @@ async function getLatestAssistantReply(slot) {
 async function collectLatestRepliesFromEnabledSlots() {
   const enabledSlots = SLOTS.filter(slot => toggles[slot]?.checked);
   mergeLog(`Scraping ${enabledSlots.length} slot(s): ${enabledSlots.join(', ')}`, 'scrape');
-  const results = {};
+  const responsesByModel = {};
+  const aggregatedResponses = [];
+
+  const reserveModelName = (baseName) => {
+    if (!responsesByModel[baseName]) return baseName;
+    let idx = 2;
+    while (responsesByModel[`${baseName} (${idx})`]) idx += 1;
+    return `${baseName} (${idx})`;
+  };
 
   for (const slot of enabledSlots) {
     // Use service name from preset, not toggle label
@@ -1584,16 +1948,141 @@ async function collectLatestRepliesFromEnabledSlots() {
     const serviceName = SERVICE_PRESETS[serviceId]?.name || labels[slot]?.textContent || slot;
 
     const reply = await getLatestAssistantReply(slot);
-    if (reply && reply.trim().length > 0) {
-      const preview = reply.length > 120 ? reply.slice(0, 120) + '…' : reply;
-      mergeLog(`${serviceName}: scraped ${reply.length} chars — "${preview}"`, 'scrape', reply);
-      results[serviceName] = reply;
+    const cleanedReply = sanitizeScrapedReply(serviceId, reply || '');
+    if (cleanedReply && cleanedReply.trim().length > 0) {
+      const preview = cleanedReply.length > 120 ? cleanedReply.slice(0, 120) + '…' : cleanedReply;
+      mergeLog(`${serviceName}: scraped ${cleanedReply.length} chars — "${preview}"`, 'scrape', cleanedReply);
+      const modelName = reserveModelName(serviceName);
+      responsesByModel[modelName] = cleanedReply;
+      aggregatedResponses.push({
+        segment_id: `${slot}:${serviceId || 'unknown'}`,
+        provider: serviceId || 'unknown',
+        model: modelName,
+        source_url: currentUrl || SERVICE_PRESETS[serviceId]?.url || '',
+        markdown: cleanedReply
+      });
     } else {
       mergeLog(`${serviceName}: no reply found (slot=${slot}, url=${currentUrl.slice(0,60)})`, 'warn');
+      if (serviceId === 'grok') {
+        const diagnostics = await getScrapeDiagnostics(slot, serviceId);
+        mergeLog('Grok scrape diagnostics', 'warn', diagnostics);
+      }
     }
   }
 
-  return results;
+  return { responsesByModel, aggregatedResponses };
+}
+
+async function getScrapeDiagnostics(slot, serviceIdHint = '') {
+  const webview = webviews[slot];
+  if (!webview || !webviewReady[slot]) return null;
+
+  let currentUrl = '';
+  try { currentUrl = webview.getURL() || ''; } catch (_) {}
+  const serviceId = serviceIdHint || detectServiceByUrl(currentUrl) || '';
+
+  const code = `
+(function() {
+  try {
+    const serviceId = ${JSON.stringify(serviceId)};
+    function visible(el) {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+    }
+    function cleanText(t) { return (t || '').replace(/\\s+/g, ' ').trim(); }
+    const selectors = serviceId === 'grok'
+      ? ['[data-testid*="assistant"]', '[data-testid*="response"]', '[class*="assistant"]', '[class*="message"]', 'article']
+      : ['[data-testid*="assistant"]', '[data-message-author-role="assistant"]', '[class*="assistant"]', '[class*="message"]', 'article'];
+
+    const counts = selectors.map((sel) => {
+      let count = 0;
+      try { count = Array.from(document.querySelectorAll(sel)).filter(visible).length; } catch (_) {}
+      return { sel, count };
+    });
+
+    const sampleNodes = Array.from(document.querySelectorAll('article, section, div'))
+      .filter(visible)
+      .map((el) => {
+        const txt = cleanText(el.innerText || el.textContent);
+        const rect = el.getBoundingClientRect();
+        return {
+          tag: el.tagName,
+          className: (el.className || '').toString().slice(0, 80),
+          len: txt.length,
+          bottom: Math.round(rect.bottom),
+          text: txt.slice(0, 180)
+        };
+      })
+      .filter((x) => x.len >= 20 && x.len <= 500)
+      .sort((a, b) => b.bottom - a.bottom)
+      .slice(0, 8);
+
+    return {
+      serviceId,
+      href: location.href,
+      counts,
+      samples: sampleNodes
+    };
+  } catch (e) {
+    return { error: String(e && e.message || e) };
+  }
+})();
+`;
+
+  try {
+    return await webview.executeJavaScript(code);
+  } catch (error) {
+    return { error: error?.message || String(error), serviceId, href: currentUrl };
+  }
+}
+
+async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount) {
+  mergeLog(`Ingest polling started (expected slots: ${expectedSlotCount})`, 'info');
+
+  let collected = { responsesByModel: {}, aggregatedResponses: [] };
+  for (let attempt = 1; attempt <= INGEST_POLL_ATTEMPTS; attempt += 1) {
+    collected = await collectLatestRepliesFromEnabledSlots();
+    const count = Object.keys(collected.responsesByModel).length;
+    mergeLog(`Ingest polling attempt ${attempt}/${INGEST_POLL_ATTEMPTS}: ${count}/${expectedSlotCount} replies`, 'info');
+
+    if (count >= expectedSlotCount) break;
+    if (attempt < INGEST_POLL_ATTEMPTS) await sleep(INGEST_POLL_INTERVAL_MS);
+  }
+
+  if (collected.aggregatedResponses.length === 0) {
+    mergeLog('Ingest skipped: no replies collected after polling', 'warn');
+    return;
+  }
+
+  const payloadBuild = buildAggregatedPayload({
+    sourcePrompt: sourcePrompt || '',
+    responses: collected.aggregatedResponses
+  });
+
+  mergeLog('Ingest aggregated request prepared', 'send', {
+    payload: payloadBuild.payload
+  });
+
+  const ingestResult = await sendAggregated(
+    payloadBuild.sessionId,
+    payloadBuild.payload.title,
+    payloadBuild.payload.responses,
+    payloadBuild.payload.active_segment_id
+  );
+
+  const sessionId = extractSessionId(ingestResult);
+  if (ingestResult?.ok && sessionId) {
+    localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionId));
+    setIngestSessionIndicator(sessionId);
+  }
+
+  mergeLog(
+    ingestResult?.ok ? 'Ingest RPC success' : 'Ingest RPC failed',
+    ingestResult?.ok ? 'recv' : 'warn',
+    ingestResult
+  );
 }
 
 // ========== MERGE FUNCTIONALITY ==========
@@ -1682,12 +2171,16 @@ async function runMerge(isClarification = false, clarificationText = '', previou
   if (isClarification && clarificationSendBtn) clarificationSendBtn.disabled = true;
 
   let responses;
+  let aggregatedResponses;
 
   if (isClarification) {
     // Reuse saved responses from first merge for context
     responses = lastScrapedResponses;
+    aggregatedResponses = lastAggregatedResponses;
   } else {
-    responses = await collectLatestRepliesFromEnabledSlots();
+    const collected = await collectLatestRepliesFromEnabledSlots();
+    responses = collected.responsesByModel;
+    aggregatedResponses = collected.aggregatedResponses;
 
     if (Object.keys(responses).length === 0) {
       mergeLog('No responses collected — nothing to merge', 'error');
@@ -1698,18 +2191,53 @@ async function runMerge(isClarification = false, clarificationText = '', previou
       return;
     }
     lastScrapedResponses = responses; // save for clarification context
+    lastAggregatedResponses = aggregatedResponses;
     mergeHistory = ''; // reset conversation on new merge
     mergeLog(`Collected from: ${Object.keys(responses).join(', ')}`, 'info');
+
   }
 
   setMergeStatus(isClarification ? 'Processing follow-up...' : 'Running merge...', 'running');
+
+  let latestPartialText = '';
+  let partialFlushTimer = null;
+  let partialStarted = false;
+  const flushPartial = () => {
+    partialFlushTimer = null;
+    if (!latestPartialText) return;
+    updateMergeResult(latestPartialText);
+  };
+  const onPartial = (partialText) => {
+    if (typeof partialText !== 'string') return;
+    if (!partialText) {
+      latestPartialText = '';
+      return;
+    }
+    latestPartialText = partialText;
+    if (!partialStarted) {
+      partialStarted = true;
+      setMergeStatus(isClarification ? 'Streaming follow-up...' : 'Streaming merge...', 'running');
+    }
+    if (!partialFlushTimer) {
+      partialFlushTimer = setTimeout(flushPartial, 120);
+    }
+  };
 
   const result = await window.mergeApiClient.merge(
     responses,
     isClarification,
     clarificationText,
-    previousSummary
+    previousSummary,
+    onPartial
   );
+
+  if (partialFlushTimer) {
+    clearTimeout(partialFlushTimer);
+    partialFlushTimer = null;
+  }
+  if (latestPartialText) {
+    updateMergeResult(latestPartialText);
+  }
 
   mergeInProgress = false;
   if (runMergeBtn) runMergeBtn.disabled = false;
@@ -1725,6 +2253,33 @@ async function runMerge(isClarification = false, clarificationText = '', previou
 
     updateMergeResult(result.text);
     setMergeStatus(isClarification ? 'Follow-up complete' : 'Merge complete', 'idle');
+
+    const sessionId = getStoredAggregatedSessionId();
+    if (Number.isInteger(sessionId) && sessionId > 0) {
+      const clarificationTitle = toNoteTitle(clarificationText, `Clarification ${new Date().toISOString()}`);
+      const mergeTitle = toNoteTitle(client.lastSourcePrompt, `Merge ${new Date().toISOString()}`);
+      const rpcTitle = isClarification
+        ? clarificationTitle
+        : mergeTitle;
+      const rpcResult = isClarification
+        ? await sendClarification(sessionId, rpcTitle, cleanResponse)
+        : await sendMerge(sessionId, rpcTitle, cleanResponse);
+
+      mergeLog(
+        rpcResult?.ok
+          ? (isClarification ? 'Clarification RPC success' : 'Merge RPC success')
+          : (isClarification ? 'Clarification RPC failed' : 'Merge RPC failed'),
+        rpcResult?.ok ? 'recv' : 'warn',
+        rpcResult
+      );
+    } else {
+      mergeLog(
+        isClarification
+          ? 'Clarification RPC skipped: session_id is missing (send aggregated first)'
+          : 'Merge RPC skipped: session_id is missing (send aggregated first)',
+        'warn'
+      );
+    }
 
     if (clarificationContainer) {
       clarificationContainer.classList.add('visible');

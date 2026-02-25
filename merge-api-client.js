@@ -95,7 +95,7 @@ class MergeApiClient {
     console.log(`[MergeApiClient][${type}] ${message}`);
   }
 
-  async merge(responses, isClarification = false, clarificationText = '', previousSummary = '') {
+  async merge(responses, isClarification = false, clarificationText = '', previousSummary = '', onPartial = null) {
     // Save BEFORE building config so config.originalResponses is always up to date
     if (!isClarification && Object.keys(responses).length > 0) {
       this.lastOriginalResponses = responses;
@@ -113,7 +113,8 @@ class MergeApiClient {
       isClarification: isClarification,
       clarificationText: clarificationText,
       previousSummary: previousSummary,
-      originalResponses: this.lastOriginalResponses || {}
+      originalResponses: this.lastOriginalResponses || {},
+      onPartial: typeof onPartial === 'function' ? onPartial : null
     };
 
     const prompt = this.buildPrompt(config, responses);
@@ -258,6 +259,7 @@ ${Object.entries(responses).map(([model, text]) => `### ${model}\n${text.slice(0
       attempted.push(model);
       try {
         console.log(`[MergeApiClient] Trying model: ${model}`);
+        if (typeof config.onPartial === 'function') config.onPartial('');
         const result = await this.callOpenAi(config, prompt, model, systemPrompt, chatHistory);
         return { ...result, attemptedModels: attempted };
       } catch (error) {
@@ -283,7 +285,8 @@ ${Object.entries(responses).map(([model, text]) => `### ${model}\n${text.slice(0
     const payload = {
       model: model,
       messages: messages,
-      temperature: 0.2
+      temperature: 0.2,
+      stream: true
     };
 
     const headers = {
@@ -303,17 +306,21 @@ ${Object.entries(responses).map(([model, text]) => `### ${model}\n${text.slice(0
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${data.error?.message || 'Request failed'}`);
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(`HTTP ${response.status}: ${errData.error?.message || 'Request failed'}`);
     }
 
-    const text = data.choices?.[0]?.message?.content?.trim();
+    const data = await this.readSseJsonStream(response, (json) => {
+      const chunk = json?.choices?.[0]?.delta?.content;
+      return typeof chunk === 'string' ? chunk : '';
+    }, config.onPartial);
+    const text = data.text.trim();
     if (!text) throw new Error('Empty response from provider');
 
     return {
       text: text,
-      modelUsed: data.model || model
+      modelUsed: data.modelUsed || model
     };
   }
 
@@ -328,7 +335,8 @@ ${Object.entries(responses).map(([model, text]) => `### ${model}\n${text.slice(0
       model: config.model || 'claude-3-5-sonnet-latest',
       max_tokens: 1200,
       system: systemPrompt,
-      messages: messages
+      messages: messages,
+      stream: true
     };
 
     const response = await fetch(config.endpoint, {
@@ -341,17 +349,83 @@ ${Object.entries(responses).map(([model, text]) => `### ${model}\n${text.slice(0
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${data.error?.message || 'Request failed'}`);
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(`HTTP ${response.status}: ${errData.error?.message || 'Request failed'}`);
     }
 
-    const text = data.content?.[0]?.text?.trim();
+    const data = await this.readSseJsonStream(response, (json) => {
+      const deltaText = json?.delta?.text;
+      return typeof deltaText === 'string' ? deltaText : '';
+    }, config.onPartial);
+    const text = data.text.trim();
     if (!text) throw new Error('Empty response from Claude');
 
     return {
       text: text,
-      modelUsed: data.model || config.model
+      modelUsed: data.modelUsed || config.model
+    };
+  }
+
+  async readSseJsonStream(response, getChunkText, onPartial = null) {
+    if (!response.body) {
+      throw new Error('Streaming response body is unavailable');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalText = '';
+    let modelUsed = '';
+
+    const processSseBlock = (block) => {
+      const lines = block.split('\n');
+      let dataLines = [];
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+      if (dataLines.length === 0) return;
+      const dataStr = dataLines.join('\n');
+      if (!dataStr || dataStr === '[DONE]') return;
+
+      try {
+        const json = JSON.parse(dataStr);
+        if (!modelUsed && typeof json.model === 'string') modelUsed = json.model;
+        const chunk = getChunkText(json);
+        if (chunk) {
+          finalText += chunk;
+          if (typeof onPartial === 'function') onPartial(finalText);
+        }
+      } catch (_) {
+        // ignore malformed partial chunks
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r/g, '');
+
+      let splitIdx = buffer.indexOf('\n\n');
+      while (splitIdx !== -1) {
+        const block = buffer.slice(0, splitIdx);
+        buffer = buffer.slice(splitIdx + 2);
+        processSseBlock(block);
+        splitIdx = buffer.indexOf('\n\n');
+      }
+    }
+
+    buffer += decoder.decode().replace(/\r/g, '');
+    if (buffer.trim()) {
+      const trailingBlocks = buffer.split('\n\n');
+      trailingBlocks.forEach(processSseBlock);
+    }
+
+    return {
+      text: finalText,
+      modelUsed
     };
   }
 
