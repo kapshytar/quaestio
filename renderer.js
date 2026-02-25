@@ -1199,6 +1199,12 @@ async function sendClarification(sessionId, title, markdown, scrapeMeta = []) {
   });
 }
 
+function stripMergeMetadataFooter(text) {
+  return String(text || '')
+    .replace(/\r?\n\r?\n---\r?\nMerge provider:[\s\S]*$/i, '')
+    .trim();
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -2713,6 +2719,31 @@ async function getLatestAssistantReply(slot) {
     const maxBottom = source.reduce((acc, c) => Math.max(acc, c.bottom), -Infinity);
     const nearBottom = source.filter(c => c.bottom >= maxBottom - 260);
     const pool = nearBottom.length > 0 ? nearBottom : source;
+
+    const isGeminiOrGrok = serviceId === 'gemini' || serviceId === 'grok';
+    if (isGeminiOrGrok) {
+      // Prefer the newest leaf-like container near bottom, not the longest wrapper.
+      const wrapped = pool.map((candidate) => {
+        const containsPeer = pool.some((other) => {
+          if (other === candidate) return false;
+          if (!candidate.el.contains(other.el)) return false;
+          if (other.flat.length < 40) return false;
+          return Math.abs(other.bottom - candidate.bottom) <= 200;
+        });
+        return { candidate, containsPeer };
+      });
+
+      wrapped.sort((a, b) => {
+        if (b.candidate.bottom !== a.candidate.bottom) return b.candidate.bottom - a.candidate.bottom;
+        if (b.candidate.top !== a.candidate.top) return b.candidate.top - a.candidate.top;
+        if (a.containsPeer !== b.containsPeer) return a.containsPeer ? 1 : -1;
+        if (a.candidate.flat.length !== b.candidate.flat.length) return a.candidate.flat.length - b.candidate.flat.length;
+        return 0;
+      });
+
+      return wrapped[0].candidate.raw;
+    }
+
     pool.sort((a, b) => {
       if (b.flat.length !== a.flat.length) return b.flat.length - a.flat.length;
       return b.bottom - a.bottom;
@@ -2754,9 +2785,25 @@ async function collectLatestRepliesFromEnabledSlots() {
     const serviceId = detectServiceByUrl(currentUrl) || slotConfig[slot] || slot;
     const serviceName = SERVICE_PRESETS[serviceId]?.name || labels[slot]?.textContent || slot;
 
-    const copied = await tryCopyLatestAssistantReply(slot, serviceId);
-    const reply = copied?.text || await getLatestAssistantReply(slot);
-    const extractionMethod = copied?.text ? 'copy' : 'dom';
+    const preferDomFirst = serviceId === 'gemini' || serviceId === 'grok';
+    let copied = null;
+    let reply = '';
+    let extractionMethod = 'dom';
+
+    if (preferDomFirst) {
+      reply = await getLatestAssistantReply(slot);
+      if (!reply || String(reply).trim().length < 20) {
+        copied = await tryCopyLatestAssistantReply(slot, serviceId);
+        if (copied?.text) {
+          reply = copied.text;
+          extractionMethod = 'copy-fallback';
+        }
+      }
+    } else {
+      copied = await tryCopyLatestAssistantReply(slot, serviceId);
+      reply = copied?.text || await getLatestAssistantReply(slot);
+      extractionMethod = copied?.text ? 'copy' : 'dom';
+    }
     const cleanedReply = sanitizeScrapedReply(serviceId, reply || '', sourcePrompt);
     if (cleanedReply && isQualityReply(cleanedReply, sourcePrompt)) {
       const preview = cleanedReply.length > 120 ? `${cleanedReply.slice(0, 120)}...` : cleanedReply;
@@ -3099,7 +3146,7 @@ async function runMerge(isClarification = false, clarificationText = '', previou
   if (clarificationSendBtn) clarificationSendBtn.disabled = false;
 
   if (result.success) {
-    const cleanResponse = result.text.split('\n\n---')[0].trim();
+    const cleanResponse = stripMergeMetadataFooter(result.text);
     if (mergeHistory === '') {
       mergeHistory = `Assistant: ${cleanResponse}`;
     } else {
