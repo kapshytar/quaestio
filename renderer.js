@@ -1547,6 +1547,56 @@ document.querySelectorAll('.webview-header').forEach(header => {
     });
   }
 
+  // Save Page button
+  const savePageBtn = header.querySelector('[data-action="save-page"]');
+  if (savePageBtn) {
+    savePageBtn.addEventListener('click', async () => {
+      if (!webviewReady[slot]) {
+        alert('Page is not ready yet');
+        return;
+      }
+
+      const pageUrl = getWebviewCurrentUrl(slot);
+      if (!pageUrl) {
+        alert('No page loaded');
+        return;
+      }
+
+      try {
+        savePageBtn.disabled = true;
+        savePageBtn.style.opacity = '0.5';
+
+        // Get page content via executeJavaScript
+        const pageContent = await webview.executeJavaScript(`
+          (function() {
+            const html = document.documentElement.outerHTML;
+            return html;
+          })()
+        `);
+
+        if (!pageContent) {
+          alert('Failed to get page content');
+          return;
+        }
+
+        // Call Electron API to show save dialog
+        const result = await window.electronAPI.savePage(pageContent, pageUrl);
+
+        if (result.ok) {
+          alert(result.message);
+        } else {
+          alert('Save failed: ' + result.message);
+        }
+      } catch (err) {
+        console.error(`[${slot}] Save page error:`, err);
+        alert('Error saving page: ' + err.message);
+      } finally {
+        savePageBtn.disabled = false;
+        savePageBtn.style.opacity = '1';
+      }
+    });
+  }
+
   // ===== ZOOM CONTROLS =====
 
   const updateZoomDisplay = () => {
@@ -3190,6 +3240,149 @@ async function runMerge(isClarification = false, clarificationText = '', previou
   } else {
     setMergeStatus(`Failed: ${result.error}`, 'error');
   }
+}
+
+// ========== SESSION MANAGEMENT ==========
+const SESSIONS_KEY = 'chat-aggregator-sessions';
+const MAX_SESSIONS = 20;
+
+function saveSessionSnapshot() {
+  const snapshot = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+    timestamp: Date.now(),
+    slotConfig: { ...slotConfig },
+    slotUrls: {},
+    slotEnabled: { ...getCurrentSlotEnabledState() }
+  };
+
+  SLOTS.forEach(slot => {
+    const webview = webviews[slot];
+    if (webview && webview.src) {
+      snapshot.slotUrls[slot] = webview.src;
+    }
+  });
+
+  let sessions = loadSessionsList();
+  sessions.unshift(snapshot);
+  if (sessions.length > MAX_SESSIONS) {
+    sessions = sessions.slice(0, MAX_SESSIONS);
+  }
+
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  updateSessionsUI();
+  return snapshot;
+}
+
+function loadSessionsList() {
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function loadSession(sessionId) {
+  const sessions = loadSessionsList();
+  const session = sessions.find(s => s.id === sessionId);
+  if (!session) {
+    console.warn('Session not found:', sessionId);
+    return;
+  }
+
+  // Restore slot configuration
+  Object.assign(slotConfig, session.slotConfig);
+  saveSlotConfig(slotConfig);
+
+  // Restore enabled state
+  const slotEnabled = { ...session.slotEnabled };
+  SLOTS.forEach(slot => {
+    if (toggles[slot]) {
+      toggles[slot].checked = slotEnabled[slot] !== false;
+    }
+  });
+  saveSlotEnabledState(slotEnabled);
+
+  // Load URLs in webviews
+  SLOTS.forEach(slot => {
+    const url = session.slotUrls[slot];
+    if (url && webviews[slot]) {
+      webviews[slot].src = url;
+      const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
+      if (urlInput) urlInput.value = url;
+    }
+    updateSlotLabel(slot, session.slotConfig[slot]);
+  });
+
+  console.log('Session loaded:', sessionId);
+}
+
+function deleteSession(sessionId) {
+  let sessions = loadSessionsList();
+  sessions = sessions.filter(s => s.id !== sessionId);
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  updateSessionsUI();
+}
+
+function updateSessionsUI() {
+  const container = document.getElementById('sessions-list');
+  if (!container) return;
+
+  const sessions = loadSessionsList();
+  container.innerHTML = '';
+
+  if (sessions.length === 0) {
+    container.innerHTML = '<div style="padding:8px;color:#666;font-size:11px;text-align:center;">No sessions saved yet</div>';
+    return;
+  }
+
+  sessions.forEach(session => {
+    const item = document.createElement('div');
+    item.className = 'session-item';
+
+    const timeStr = new Date(session.timestamp).toLocaleString('ru-RU', {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    const activeSlots = SLOTS.filter(s => session.slotEnabled[s] !== false).map(s => {
+      const service = session.slotConfig[s] || 'unknown';
+      return service.replace(/_api$/, '').toUpperCase();
+    }).join(', ');
+
+    item.innerHTML = `
+      <div style="font-weight:600;color:#fff;">${activeSlots || '(no slots)'}</div>
+      <div class="session-item-time">${timeStr}</div>
+      <div class="session-item-actions">
+        <button class="session-item-action" onclick="loadSession('${session.id}')">Load</button>
+        <button class="session-item-action" onclick="deleteSession('${session.id}')">Delete</button>
+      </div>
+    `;
+
+    container.appendChild(item);
+  });
+}
+
+// Initialize sessions UI and save button
+function initSessionsTab() {
+  updateSessionsUI();
+
+  const saveSessionBtn = document.getElementById('save-session-btn');
+  if (saveSessionBtn) {
+    saveSessionBtn.addEventListener('click', () => {
+      saveSessionSnapshot();
+      saveSessionBtn.textContent = '✓ Saved!';
+      setTimeout(() => {
+        saveSessionBtn.textContent = '💾 Save Current';
+      }, 2000);
+    });
+  }
+}
+
+// Call initialization after DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initSessionsTab);
+} else {
+  initSessionsTab();
 }
 
 console.log('Renderer initialized');
