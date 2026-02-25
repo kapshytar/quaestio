@@ -3522,7 +3522,10 @@ async function updateSessionsUI() {
     }).join(', ');
 
     item.innerHTML = `
-      <div style="font-weight:600;color:#fff;">${session.name || activeSlots || '(no slots)'}</div>
+      <div style="font-weight:600;color:#fff;">
+        <span style="color:#9ad89a;font-size:10px;font-weight:400;margin-right:4px;">#${session.id}</span>
+        ${session.name || activeSlots || '(no slots)'}
+      </div>
       <div class="session-item-time">${timeStr}</div>
       <div class="session-item-actions">
         <button class="session-item-action" onclick="loadSession('${session.id}')">Load</button>
