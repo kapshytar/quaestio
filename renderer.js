@@ -3446,7 +3446,18 @@ async function loadSession(sessionId) {
   });
   saveSlotConfig(slotConfig);
 
-  console.log('Session loaded:', sessionId);
+  // Restore session context so subsequent messages continue in THIS session
+  const numericId = Number(sessionId);
+  if (Number.isInteger(numericId) && numericId > 0) {
+    activeSessionId = numericId;
+    const enabledSlots = SLOTS.filter(slot => slotEnabled[slot]);
+    const fingerprint = buildSessionFingerprint(enabledSlots);
+    activeSessionFingerprint = fingerprint;
+    persistSessionContext(numericId, fingerprint);
+    setIngestSessionIndicator(numericId);
+  }
+
+  console.log('Session loaded:', sessionId, '→ activeSessionId =', activeSessionId);
   setSessionsNotice(`Session loaded: ${session.name || sessionId}`, 'ok');
   await updateSessionsUI();
 }
