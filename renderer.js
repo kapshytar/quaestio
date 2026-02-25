@@ -156,6 +156,10 @@ const AGGREGATED_SESSION_CONTEXT_KEY = 'aggregated-ingest-session-context';
 const SLOT_ENABLED_STATE_KEY = 'slot-enabled-state';
 const INGEST_POLL_ATTEMPTS = 30;
 const INGEST_POLL_INTERVAL_MS = 2000;
+const INGEST_INITIAL_DELAY_MS = 5000;
+const INGEST_GENERATION_WAIT_ATTEMPTS = 15;
+const INGEST_GENERATION_CHECK_MS = 2000;
+const INGEST_MIN_REPLY_CHARS = 30;
 let activeIngestTraceId = '';
 let ingestSequenceCounter = 0;
 let ingestSequenceBySourceMessageId = new Map();
@@ -244,11 +248,77 @@ async function writeClipboardTextSafe(text) {
   }
 }
 
+async function isSlotStillGenerating(slot, serviceId = '') {
+  const webview = webviews[slot];
+  if (!webview || !webviewReady[slot]) return false;
+
+  const code = `
+(function() {
+  try {
+    const sid = ${JSON.stringify(serviceId)};
+    function visible(el) {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
+    }
+
+    // Provider-specific streaming indicators
+    const checks = [];
+
+    if (sid === 'deepseek') {
+      checks.push(
+        'div[class*="ds-thinking"]',
+        'div[class*="generating"]'
+      );
+    } else if (sid === 'gemini') {
+      checks.push(
+        'mat-icon[data-mat-icon-name="stop_circle"]',
+        'button[data-test-id="stop-button"]'
+      );
+    } else if (sid === 'chatgpt') {
+      checks.push(
+        'button[data-testid="stop-button"]',
+        'button[aria-label="Stop streaming"]',
+        'button[aria-label="Stop generating"]'
+      );
+    }
+
+    // Generic: only match explicit "Stop generating" / "Stop response" buttons
+    checks.push(
+      'button[aria-label*="Stop generating" i]',
+      'button[aria-label*="Stop response" i]',
+      'button[aria-label="Stop" i]'
+    );
+
+    for (const sel of checks) {
+      try {
+        const els = document.querySelectorAll(sel);
+        for (const el of els) {
+          if (visible(el)) return true;
+        }
+      } catch (_) {}
+    }
+
+    return false;
+  } catch (_) { return false; }
+})();
+`;
+
+  try {
+    return !!(await webview.executeJavaScript(code));
+  } catch (_) {
+    return false;
+  }
+}
+
 async function tryCopyLatestAssistantReply(slot, serviceId = '') {
   const webview = webviews[slot];
-  if (!webview || !webviewReady[slot]) return null;
+  if (!webview || !webviewReady[slot]) {
+    return { text: null, diagnostics: { method: 'copy', clicked: false, reason: 'webview-not-ready' } };
+  }
   if (!window.electronAPI || typeof window.electronAPI.readClipboardText !== 'function' || typeof window.electronAPI.writeClipboardText !== 'function') {
-    return null;
+    return { text: null, diagnostics: { method: 'copy', clicked: false, reason: 'no-clipboard-bridge' } };
   }
 
   const previousClipboard = await readClipboardTextSafe();
@@ -259,56 +329,112 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
 (function() {
   try {
     const sid = ${JSON.stringify(serviceId || '')};
-    function visible(el) {
+    function hasLayout(el) {
       if (!el) return false;
       const r = el.getBoundingClientRect();
       const s = window.getComputedStyle(el);
-      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
     }
     function labelOf(el) {
       return String(
         el?.getAttribute?.('aria-label') ||
         el?.getAttribute?.('title') ||
+        el?.getAttribute?.('mattooltip') ||
         el?.textContent ||
         ''
       ).replace(/\\s+/g, ' ').trim();
     }
-    function isCopyLike(label) {
+    function isCopyLike(label, el) {
       const l = String(label || '').toLowerCase();
-      if (!l) return false;
-      return l.includes('copy') || l.includes('скоп') || l.includes('копир');
+      if (l && (l.includes('copy') || l.includes('скоп') || l.includes('копир'))) return true;
+      // Check CSS classes on element + children (DeepSeek uses class-based icons, not aria-labels)
+      try {
+        const own = (el?.className || '').toString().toLowerCase();
+        if (own.includes('copy')) return true;
+        if (el?.querySelector?.('.dl-icon-copy, [class*="copy-icon"], [class*="copy-btn"], [class*="copy-button"]')) return true;
+      } catch (_) {}
+      return false;
     }
     function inExcludedArea(el) {
       if (!el) return true;
-      return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [class*="composer"], [class*="input"], form, nav, aside, [class*="sidebar"], [class*="history"]');
+      // Only exclude buttons literally inside text input elements
+      return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"], [class*="composer"]');
     }
     function messageContainer(el) {
-      return el?.closest?.('[data-message-author-role="assistant"], [data-testid*="assistant"], [class*="assistant"][class*="message"], article, [class*="response"], [class*="answer"]') || null;
+      // Try specific message selectors first
+      const specific = el?.closest?.('[data-message-author-role="assistant"], [data-testid*="assistant"], [class*="assistant"][class*="message"], article, [class*="response"], [class*="answer"], [id^="response-"], model-response, response-container, [class*="message-bubble"], [class*="prose"]');
+      if (specific) return specific;
+      // Fallback: walk up the DOM to find nearest ancestor with enough text
+      let parent = el?.parentElement;
+      for (let i = 0; i < 15 && parent; i += 1) {
+        const text = (parent.innerText || parent.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (text.length >= 30) return parent;
+        parent = parent.parentElement;
+      }
+      return null;
+    }
+
+    // Hover the last message container to reveal hidden copy buttons (Grok hides them until hover)
+    const msgContainers = document.querySelectorAll('[id^="response-"], model-response, response-container, [data-message-author-role="assistant"], article, [class*="response"]');
+    const lastContainer = Array.from(msgContainers).filter(hasLayout).pop();
+    if (lastContainer) {
+      ['mouseenter', 'mouseover', 'mousemove'].forEach((evt) => {
+        try { lastContainer.dispatchEvent(new MouseEvent(evt, { bubbles: true, clientX: 100, clientY: 100 })); } catch (_) {}
+      });
     }
 
     const selectors = [
+      '[data-testid="copy-turn-action-button"]',  // ChatGPT (exact match)
       'button[aria-label*="Copy" i]',
       'button[title*="Copy" i]',
       '[role="button"][aria-label*="Copy" i]',
       '[data-testid*="copy" i]',
+      '[data-test-id*="copy" i]',
+      'button[aria-label*="Копир" i]',
+      '[role="button"][aria-label*="Копир" i]',
       'button[aria-label*="Скоп" i]',
-      'button[title*="Скоп" i]'
+      'button[title*="Скоп" i]',
+      'button[mattooltip*="Copy" i]',
+      'copy-button button',
+      '.dl-btn:has(.dl-icon-copy)',
+      '.ds-icon-button:has(.dl-icon-copy)',
+      '[role="button"]:has([class*="copy"])',
+      '.ds-markdown-code-copy-button',
+      // Fallback for unknown/new providers
+      'button[aria-label*="Duplicate" i]',
+      'button[title*="Duplicate" i]',
+      'button[aria-label*="Clone" i]',
+      'button[title*="Clone" i]',
+      '[role="button"]:has(svg use[*="copy" i])',
+      'button:has(svg use[href*="copy" i])',
+      'button:has([class*="copy-icon"])',
+      '[class*="action-btn"]:has([class*="copy"])',
+      '[class*="toolbar-btn"]:has([class*="copy"])',
+      'button[class*="copy"]',
+      '[class*="message-action"] button:first-child'
     ];
 
     const seen = new Set();
     const candidates = [];
+    const selectorHits = {};
+    const rejected = [];
     selectors.forEach((sel) => {
       try {
-        document.querySelectorAll(sel).forEach((el) => {
+        const found = document.querySelectorAll(sel);
+        selectorHits[sel] = found.length;
+        found.forEach((el) => {
           if (!el || seen.has(el)) return;
           seen.add(el);
-          if (!visible(el) || inExcludedArea(el)) return;
+          // Skip excluded-area check for ChatGPT's exact copy button (data-testid="copy-turn-action-button")
+          const isExactChatGPT = sel === '[data-testid="copy-turn-action-button"]';
+          if (!isExactChatGPT && inExcludedArea(el)) { rejected.push({ sel, reason: 'excluded-area', tag: el.tagName, label: labelOf(el).slice(0, 40) }); return; }
+          if (!hasLayout(el)) { rejected.push({ sel, reason: 'no-layout', tag: el.tagName, label: labelOf(el).slice(0, 40) }); return; }
           const label = labelOf(el);
-          if (!isCopyLike(label)) return;
+          if (!isCopyLike(label, el)) { rejected.push({ sel, reason: 'not-copy-like', tag: el.tagName, label: label.slice(0, 40) }); return; }
           const rect = el.getBoundingClientRect();
           const msg = messageContainer(el);
           const msgText = (msg?.innerText || msg?.textContent || '').replace(/\\s+/g, ' ').trim();
-          if (!msgText || msgText.length < 24) return;
+          if (!msgText || msgText.length < 20) { rejected.push({ sel, reason: 'msg-too-short', tag: el.tagName, label: label.slice(0, 40), msgLen: msgText.length, hasContainer: !!msg }); return; }
           let score = rect.bottom + Math.min(msgText.length, 5000) * 0.04;
           if (sid === 'perplexity' && msgText.toLowerCase().includes('ask a follow-up')) score -= 1200;
           candidates.push({ el, label, score, bottom: rect.bottom });
@@ -316,13 +442,80 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
       } catch (_) {}
     });
 
-    if (candidates.length === 0) return { clicked: false, reason: 'no-copy-button' };
+    // Fallback: scan ALL buttons on the page for debug
+    let allButtonsSample = [];
+    if (candidates.length === 0) {
+      try {
+        allButtonsSample = Array.from(document.querySelectorAll('button, [role="button"]')).slice(-20).map((el) => {
+          const lbl = (el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('mattooltip') || '').slice(0, 50);
+          const txt = (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 50);
+          const tid = el.getAttribute('data-testid') || el.getAttribute('data-test-id') || '';
+          const cls = (el.className || '').toString().slice(0, 80);
+          return { tag: el.tagName, lbl, txt, tid, cls, w: Math.round(el.getBoundingClientRect().width), h: Math.round(el.getBoundingClientRect().height) };
+        });
+      } catch (_) {}
+    }
+
+    if (candidates.length === 0) return { clicked: false, reason: 'no-copy-button', debug: { lastContainerFound: !!lastContainer, selectorsChecked: selectors.length, selectorHits, rejected: rejected.slice(0, 10), allButtonsSample } };
     candidates.sort((a, b) => (b.score - a.score) || (b.bottom - a.bottom));
     const target = candidates[0];
+    // Hover the button itself + its parent to ensure it becomes interactive
+    const hoverTarget = target.el.closest('[class*="group"]') || target.el.parentElement || target.el;
     ['mouseenter', 'mouseover', 'mousemove'].forEach((evt) => {
+      try { hoverTarget.dispatchEvent(new MouseEvent(evt, { bubbles: true })); } catch (_) {}
       try { target.el.dispatchEvent(new MouseEvent(evt, { bubbles: true })); } catch (_) {}
     });
     try { target.el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_) {}
+    try { window.focus(); } catch (_) {}
+
+    // Intercept clipboard.writeText so we capture the text even if clipboard permission is denied
+    window.__gunshiCopyCapture = null;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        const origWrite = navigator.clipboard.writeText.bind(navigator.clipboard);
+        navigator.clipboard.writeText = function(text) {
+          window.__gunshiCopyCapture = text;
+          return origWrite(text).catch(() => {});
+        };
+      }
+    } catch (_) {}
+    // Intercept clipboard.write() (ClipboardItem API) — used by Gemini, Grok
+    try {
+      if (navigator.clipboard && navigator.clipboard.write) {
+        const origClipWrite = navigator.clipboard.write.bind(navigator.clipboard);
+        navigator.clipboard.write = async function(items) {
+          try {
+            for (const item of items) {
+              if (item.types && item.types.includes('text/plain')) {
+                const blob = await item.getType('text/plain');
+                window.__gunshiCopyCapture = await blob.text();
+                break;
+              }
+              // Also try text/html → strip tags as fallback
+              if (item.types && item.types.includes('text/html') && !window.__gunshiCopyCapture) {
+                const blob = await item.getType('text/html');
+                const html = await blob.text();
+                const tmp = document.createElement('div');
+                tmp.innerHTML = html;
+                window.__gunshiCopyCapture = tmp.textContent || tmp.innerText || '';
+              }
+            }
+          } catch (_) {}
+          return origClipWrite(items).catch(() => {});
+        };
+      }
+    } catch (_) {}
+    // Also intercept execCommand('copy') for older implementations
+    try {
+      const origExec = document.execCommand.bind(document);
+      document.execCommand = function(cmd) {
+        if (cmd === 'copy') {
+          try { window.__gunshiCopyCapture = window.getSelection().toString(); } catch (_) {}
+        }
+        return origExec.apply(document, arguments);
+      };
+    } catch (_) {}
+
     target.el.click();
     return { clicked: true, label: target.label, score: target.score, candidates: candidates.length };
   } catch (e) {
@@ -332,29 +525,80 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
 `;
 
   try {
-    const clickInfo = await webview.executeJavaScript(code);
-    if (!clickInfo || !clickInfo.clicked) return null;
+    // Focus the webview so the page's clipboard API works
+    try { webview.focus(); } catch (_) {}
+    await sleep(100);
 
-    for (let attempt = 1; attempt <= 12; attempt += 1) {
-      await sleep(120);
-      const current = await readClipboardTextSafe();
-      const normalized = normalizeMultilineText(current);
-      if (!normalized) continue;
-      if (current === probeText) continue;
+    const clickInfo = await webview.executeJavaScript(code);
+    if (!clickInfo || !clickInfo.clicked) {
       return {
-        text: current,
+        text: null,
         diagnostics: {
           method: 'copy',
-          clicked: true,
-          attempts: attempt,
-          label: clickInfo.label || '',
-          candidates: clickInfo.candidates || 0
+          clicked: false,
+          reason: clickInfo?.reason || 'unknown',
+          debug: clickInfo?.debug || null,
+          candidates: clickInfo?.candidates || 0
         }
       };
     }
-    return null;
-  } catch (_) {
-    return null;
+
+    for (let attempt = 1; attempt <= 20; attempt += 1) {
+      await sleep(200);
+      // Try system clipboard first
+      const current = await readClipboardTextSafe();
+      const normalized = normalizeMultilineText(current);
+      if (normalized && current !== probeText) {
+        return {
+          text: current,
+          diagnostics: {
+            method: 'copy',
+            clicked: true,
+            source: 'clipboard',
+            attempts: attempt,
+            label: clickInfo.label || '',
+            candidates: clickInfo.candidates || 0
+          }
+        };
+      }
+      // Fallback: check intercepted clipboard.writeText inside webview
+      try {
+        const captured = await webview.executeJavaScript('window.__gunshiCopyCapture');
+        if (captured && typeof captured === 'string' && captured.trim().length > 0) {
+          return {
+            text: captured,
+            diagnostics: {
+              method: 'copy',
+              clicked: true,
+              source: 'interceptor',
+              attempts: attempt,
+              label: clickInfo.label || '',
+              candidates: clickInfo.candidates || 0
+            }
+          };
+        }
+      } catch (_) {}
+    }
+    return {
+      text: null,
+      diagnostics: {
+        method: 'copy',
+        clicked: true,
+        clipboardTimeout: true,
+        label: clickInfo.label || '',
+        candidates: clickInfo.candidates || 0
+      }
+    };
+  } catch (err) {
+    return {
+      text: null,
+      diagnostics: {
+        method: 'copy',
+        clicked: false,
+        reason: 'exception',
+        error: String(err?.message || err)
+      }
+    };
   } finally {
     await writeClipboardTextSafe(previousClipboard);
   }
@@ -475,21 +719,15 @@ function buildAggregatedPayload(params) {
   const sessionId = Number.isInteger(params?.sessionId) && params.sessionId > 0
     ? params.sessionId
     : null;
-  const segmentSeed = stableStringify({
-    title,
-    responses: params.responses
-  });
-  const activeSegmentId = `segment_${hashString(segmentSeed)}`;
+  const responses = Array.isArray(params?.responses) ? params.responses : [];
 
   return {
     payload: {
       schema: 'aggregated_ingest_v1',
       session_id: sessionId,
       title,
-      active_segment_id: activeSegmentId,
-      responses: params.responses
+      responses
     },
-    activeSegmentId,
     sessionId
   };
 }
@@ -526,11 +764,261 @@ function normalizeMultilineText(value) {
     .trim();
 }
 
+function normalizeTableDividerCell(cell) {
+  const raw = String(cell || '').trim();
+  if (!raw) return '---';
+  const left = raw.startsWith(':');
+  const right = raw.endsWith(':');
+  const hyphenCount = (raw.match(/-/g) || []).length;
+  const core = '-'.repeat(Math.max(3, hyphenCount));
+  return `${left ? ':' : ''}${core}${right ? ':' : ''}`;
+}
+
+function looksLikePipeRow(line) {
+  const text = String(line || '').trim();
+  if (!text.includes('|')) return false;
+  const bars = (text.match(/\|/g) || []).length;
+  return bars >= 2;
+}
+
+function looksLikeTableDivider(line) {
+  const text = String(line || '').trim();
+  if (!looksLikePipeRow(text)) return false;
+  return /^[\s|:\-]+$/.test(text);
+}
+
+function normalizePipeTableMarkdown(text) {
+  const lines = String(text || '').replace(/\r/g, '').split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const next = i + 1 < lines.length ? lines[i + 1] : '';
+
+    if (looksLikePipeRow(line) && looksLikeTableDivider(next)) {
+      if (out.length > 0 && out[out.length - 1].trim() !== '') out.push('');
+      out.push(line);
+      const cells = next
+        .split('|')
+        .map((cell) => normalizeTableDividerCell(cell))
+        .join('|');
+      out.push(cells);
+      i += 1;
+      continue;
+    }
+
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+function isUnorderedListLine(line) {
+  return /^\s*[-*+]\s+(?:\[[ xX]\]\s+)?\S/.test(String(line || ''));
+}
+
+function isOrderedListLine(line) {
+  return /^\s*\d+[.)]\s+\S/.test(String(line || ''));
+}
+
+function normalizeListLine(line) {
+  let out = String(line || '');
+  // UI bullets / dashes -> markdown list marker
+  out = out.replace(/^\s*[•◦●▪▫‣∙]\s+/, '- ');
+  out = out.replace(/^\s*[–—−]\s+/, '- ');
+  // "1) item" -> "1. item"
+  out = out.replace(/^(\s*)(\d+)\)\s+/, '$1$2. ');
+  return out;
+}
+
+function normalizeListMarkdown(text) {
+  const source = String(text || '').replace(/\r/g, '').split('\n').map(normalizeListLine);
+  const out = [];
+  for (let i = 0; i < source.length; i += 1) {
+    const line = source[i];
+    const isList = isUnorderedListLine(line) || isOrderedListLine(line);
+    if (isList) {
+      const prev = out.length > 0 ? out[out.length - 1] : '';
+      const prevIsBlank = !String(prev || '').trim();
+      const prevIsList = isUnorderedListLine(prev) || isOrderedListLine(prev);
+      if (!prevIsBlank && !prevIsList) out.push('');
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 function toNoteTitle(rawText, fallback) {
   const text = pickMarkdown(rawText);
   if (!text) return fallback;
   const oneLine = text.replace(/\s+/g, ' ').trim();
   return oneLine.length > 120 ? `${oneLine.slice(0, 117)}...` : oneLine;
+}
+
+function isQualityReply(text, sourcePrompt = '') {
+  if (!text || text.trim().length < INGEST_MIN_REPLY_CHARS) return false;
+  const flat = text.replace(/\s+/g, ' ').trim().toLowerCase();
+  const promptFlat = (sourcePrompt || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  // Reject if the scraped text is just the user's prompt
+  if (promptFlat && flat === promptFlat) return false;
+  if (promptFlat && flat.length < promptFlat.length * 1.5 && flat.includes(promptFlat)) return false;
+  return true;
+}
+
+// ========== TABLE FORMAT CONVERSION ==========
+// LLMs export tables in different formats:
+//   CSV  (Grok, Gemini)    →  col1,col2,col3
+//   Space-aligned (DeepSeek) →  col1  col2  col3   (2+ spaces as separator)
+//   Markdown (Perplexity, ChatGPT, Claude) → | col1 | col2 |  (already fine)
+// We convert CSV and space-aligned → markdown so the frontend renders properly.
+
+function parseCsvLine(line) {
+  const fields = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+      else { inQ = !inQ; }
+    } else if (ch === ',' && !inQ) {
+      fields.push(cur.trim());
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  fields.push(cur.trim());
+  return fields;
+}
+
+function csvBlockToMarkdown(csvText) {
+  const lines = csvText.trim().split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return null;
+  // Must not already be markdown table
+  if (lines.some(l => l.startsWith('|'))) return null;
+  // Must not look like markdown heading, list, or code
+  if (lines.some(l => /^[#>\-*`]/.test(l))) return null;
+  // All lines must have at least one comma
+  if (!lines.every(l => l.includes(','))) return null;
+
+  const rows = lines.map(parseCsvLine);
+  const expectedCols = rows[0].length;
+  if (expectedCols < 2) return null;
+  // Column count must be consistent (allow trailing empty cell)
+  if (!rows.every(r => r.length === expectedCols || r.length === expectedCols - 1)) return null;
+
+  const esc = s => String(s).replace(/\|/g, '\\|');
+  const fmtRow = r => '| ' + r.map(esc).join(' | ') + ' |';
+  const sep = '| ' + rows[0].map(() => '---').join(' | ') + ' |';
+  return [fmtRow(rows[0]), sep, ...rows.slice(1).map(fmtRow)].join('\n');
+}
+
+// Convert pure-CSV reply OR CSV blocks embedded within text
+function convertCsvTablesToMarkdown(text) {
+  if (!text) return text;
+
+  // Case 1: entire text is one CSV table
+  const full = csvBlockToMarkdown(text);
+  if (full) return full;
+
+  // Case 2: CSV blocks separated by blank lines within mixed content
+  const blocks = text.split(/\n{2,}/);
+  const converted = blocks.map(block => csvBlockToMarkdown(block) || block);
+  // Only return the joined result if at least one block was converted
+  if (converted.some((b, i) => b !== blocks[i])) {
+    return converted.join('\n\n');
+  }
+
+  return text;
+}
+
+// Convert space-aligned tables (DeepSeek format) → markdown tables.
+// DeepSeek uses 2+ spaces as column separator; single spaces appear inside values.
+// Works on mixed content: text lines and table rows can be adjacent (no blank line needed).
+function convertSpaceAlignedTables(text) {
+  if (!text) return text;
+
+  const esc = s => String(s).replace(/\|/g, '\\|');
+  const fmtRow = (parts, cols) => {
+    const padded = [...parts];
+    while (padded.length < cols) padded.push('');
+    return '| ' + padded.map(esc).join(' | ') + ' |';
+  };
+
+  const inputLines = text.split('\n');
+  const output = [];
+  let tableBuf = [];   // array of string[] (parsed rows)
+  let colCount = 0;
+
+  function flushTable() {
+    if (tableBuf.length < 2) {
+      // Single line or empty — not a real table, output raw
+      tableBuf.forEach((_, i) => {
+        // Reconstruct original-ish line
+        output.push(tableBuf[i].join('  '));
+      });
+    } else {
+      const sep = '| ' + tableBuf[0].map(() => '---').join(' | ') + ' |';
+      output.push(fmtRow(tableBuf[0], colCount));
+      output.push(sep);
+      tableBuf.slice(1).forEach(r => output.push(fmtRow(r, colCount)));
+    }
+    tableBuf = [];
+    colCount = 0;
+  }
+
+  for (const rawLine of inputLines) {
+    const line = rawLine.trim();
+
+    // Empty line → flush any pending table, pass through blank
+    if (!line) {
+      flushTable();
+      output.push('');
+      continue;
+    }
+
+    // Already a markdown element → flush and pass through
+    if (/^[|#>\-*`]/.test(line)) {
+      flushTable();
+      output.push(rawLine);
+      continue;
+    }
+
+    // Check for 2+ space separator
+    if (!/\s{2,}/.test(line)) {
+      flushTable();
+      output.push(rawLine);
+      continue;
+    }
+
+    const parts = line.split(/\s{2,}/).map(p => p.trim()).filter(p => p);
+    if (parts.length < 2) {
+      flushTable();
+      output.push(rawLine);
+      continue;
+    }
+
+    if (tableBuf.length === 0) {
+      // Start new table block
+      colCount = parts.length;
+      tableBuf.push(parts);
+    } else if (parts.length >= 2 && parts.length <= colCount) {
+      // Same or fewer cols (e.g. summary row like "Итого  6 150 ₽") → keep in table
+      tableBuf.push(parts);
+    } else if (parts.length > colCount) {
+      // More columns than current header → end table, start new one
+      flushTable();
+      colCount = parts.length;
+      tableBuf.push(parts);
+    } else {
+      flushTable();
+      output.push(rawLine);
+    }
+  }
+  flushTable();
+
+  const result = output.join('\n').trim();
+  // Only return if we actually changed something
+  return result !== text.trim() ? result : text;
 }
 
 function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
@@ -552,6 +1040,21 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
       .replace(/^conversation with gemini\s*/i, '')
       .replace(/\byou said\b[\s\S]*?\bgemini said\b[:\s]*/i, '')
       .replace(/\bgemini said\b[:\s]*/i, '')
+      // Strip "Opens in a new window [url] Open" image link artifacts (may span one line)
+      .replace(/opens in a new window[^\n]*/gi, '')
+      .trim();
+  }
+
+  if (serviceId === 'grok') {
+    // Strip leading user-prompt echo (happens when wrong container is scraped)
+    if (normalizedPrompt) {
+      const escapedPrompt = escapeRegExp(normalizedPrompt);
+      text = text.replace(new RegExp(`^\\s*${escapedPrompt}\\s*\\n?`, 'i'), '').trim();
+    }
+    // Strip trailing timing / suggestion-chip lines
+    text = text
+      .replace(/\n\d[\d,.]*\s*[сs]\s*$/im, '')   // e.g. "\n1,1с"
+      .replace(/\nбыстро\s*$/im, '')
       .trim();
   }
 
@@ -565,6 +1068,13 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
     if (lineLower.includes('переключить боковую панель')) return true;
     if (lineLower.includes('can make mistakes') || lineLower.includes('please double-check responses')) return true;
     if (lineLower.includes('check important info') || lineLower.includes('see cookie preferences')) return true;
+    // Gemini image result artifacts
+    if (lineLower === 'opens in a new window' || lineLower === 'open') return true;
+    if (/^www\.[^\s]+$/.test(lineLower)) return true;  // bare domain lines (e.g. www.ozon.ru)
+    // Grok UI artifacts: timing lines, suggestion chips
+    if (/^\d[\d,.]*\s*[сs]$/.test(lineLower)) return true;  // "1,1с" / "1.1s"
+    if (lineLower === 'быстро' || lineLower === 'подробнее') return true;
+    if (lineLower.startsWith('расскажи больше')) return true;
     return false;
   };
 
@@ -598,6 +1108,14 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
     .replace(/(?:^|\n)(?:reply\.\.\.|open sidebar)\s*$/ig, '')
     .trim();
 
+  text = text.replace(/^source\s*\n+/i, '');
+  text = normalizeListMarkdown(text);
+  text = normalizePipeTableMarkdown(text);
+
+  // Convert CSV tables (Grok/Gemini) and space-aligned tables (DeepSeek) → markdown
+  text = convertCsvTablesToMarkdown(text);
+  text = convertSpaceAlignedTables(text);
+
   return normalizeMultilineText(text);
 }
 
@@ -608,12 +1126,11 @@ function extractSessionId(result) {
   return null;
 }
 
-async function sendAggregated(sessionId, title, responses, activeSegmentId, scrapeMeta = []) {
+async function sendAggregated(sessionId, title, responses, scrapeMeta = []) {
   const normalizedResponses = Array.isArray(responses)
     ? responses.map((item, idx) => ({
       segment_id: String(item?.segment_id || `segment_${idx + 1}`),
       provider: String(item?.provider || 'unknown'),
-      model: String(item?.model || item?.provider || 'unknown'),
       source_url: String(item?.source_url || ''),
       markdown: pickMarkdown(item?.markdown || item?.content || item?.text || item?.answer || item?.response)
     })).filter(item => item.markdown)
@@ -623,7 +1140,6 @@ async function sendAggregated(sessionId, title, responses, activeSegmentId, scra
     schema: 'aggregated_ingest_v1',
     session_id: Number.isInteger(sessionId) ? sessionId : null,
     title: title || `Aggregated ${new Date().toISOString()}`,
-    active_segment_id: activeSegmentId || (normalizedResponses[0]?.segment_id || 'segment_1'),
     responses: normalizedResponses
   };
 
@@ -2148,6 +2664,10 @@ async function getLatestAssistantReply(slot) {
 
     // Perplexity: prepend prose selector
     if (serviceId === 'perplexity') { selectors.unshift('div[class*="prose"]'); }
+    // Gemini: target model-response custom element (avoids full-page conversation wrapper)
+    if (serviceId === 'gemini') { selectors.unshift('model-response', 'response-container'); }
+    // Grok: target individual response container by id (avoids mixing user prompt)
+    if (serviceId === 'grok') { selectors.unshift('div[id^="response-"]', '[class*="message-bubble"]'); }
 
     const candidates = [];
     selectors.forEach((sel) => {
@@ -2170,7 +2690,7 @@ async function getLatestAssistantReply(slot) {
         if (isComposerElement(el)) return;
         const raw = normalizeText(el.innerText || el.textContent);
         const flat = flatText(raw);
-        if (flat.length < 80 || isMetadataLikeText(flat)) return;
+        if (flat.length < 30 || isMetadataLikeText(flat)) return;
         const rect = el.getBoundingClientRect();
         candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top });
       });
@@ -2238,7 +2758,7 @@ async function collectLatestRepliesFromEnabledSlots() {
     const reply = copied?.text || await getLatestAssistantReply(slot);
     const extractionMethod = copied?.text ? 'copy' : 'dom';
     const cleanedReply = sanitizeScrapedReply(serviceId, reply || '', sourcePrompt);
-    if (cleanedReply && cleanedReply.trim().length > 0) {
+    if (cleanedReply && isQualityReply(cleanedReply, sourcePrompt)) {
       const preview = cleanedReply.length > 120 ? `${cleanedReply.slice(0, 120)}...` : cleanedReply;
       const meta = {
         slot,
@@ -2259,16 +2779,13 @@ async function collectLatestRepliesFromEnabledSlots() {
       aggregatedResponses.push({
         segment_id: `${slot}:${serviceId || 'unknown'}`,
         provider: serviceId || 'unknown',
-        model: modelName,
         source_url: currentUrl || SERVICE_PRESETS[serviceId]?.url || '',
         markdown: cleanedReply
       });
     } else {
       mergeLog(`${serviceName}: no reply found (slot=${slot}, url=${currentUrl.slice(0,60)})`, 'warn');
-      if (serviceId === 'grok') {
-        const diagnostics = await getScrapeDiagnostics(slot, serviceId);
-        mergeLog('Grok scrape diagnostics', 'warn', diagnostics);
-      }
+      const diagnostics = await getScrapeDiagnostics(slot, serviceId);
+      mergeLog(`${serviceName} scrape diagnostics`, 'warn', diagnostics);
     }
   }
 
@@ -2343,6 +2860,35 @@ async function getScrapeDiagnostics(slot, serviceIdHint = '') {
 async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestContext = {}) {
   mergeLog(`Ingest polling started (expected slots: ${expectedSlotCount})`, 'info');
 
+  // Phase 1: Initial delay — no LLM responds in under 5 seconds
+  mergeLog(`Waiting ${INGEST_INITIAL_DELAY_MS}ms before first scrape attempt`, 'info');
+  await sleep(INGEST_INITIAL_DELAY_MS);
+
+  // Phase 2: Wait for all slots to finish generating
+  const enabledSlots = SLOTS.filter(slot => toggles[slot]?.checked);
+  for (let waitAttempt = 1; waitAttempt <= INGEST_GENERATION_WAIT_ATTEMPTS; waitAttempt += 1) {
+    let stillGenerating = 0;
+    const generatingSlots = [];
+    for (const slot of enabledSlots) {
+      const serviceId = detectServiceByUrl(getWebviewCurrentUrl(slot)) || '';
+      if (await isSlotStillGenerating(slot, serviceId)) {
+        stillGenerating += 1;
+        generatingSlots.push(`${slot}:${serviceId || '?'}`);
+      }
+    }
+    if (stillGenerating === 0) {
+      mergeLog(`All slots finished generating (after ${waitAttempt} check(s))`, 'info');
+      break;
+    }
+    mergeLog(`Generation wait ${waitAttempt}/${INGEST_GENERATION_WAIT_ATTEMPTS}: ${stillGenerating} still generating [${generatingSlots.join(', ')}]`, 'info');
+    if (waitAttempt < INGEST_GENERATION_WAIT_ATTEMPTS) await sleep(INGEST_GENERATION_CHECK_MS);
+  }
+
+  // Safety delay: wait a bit more to ensure content is fully rendered
+  mergeLog('Waiting 3000ms for content to fully settle before scraping', 'info');
+  await sleep(3000);
+
+  // Phase 3: Scrape with quality validation
   let collected = { responsesByModel: {}, aggregatedResponses: [], scrapeMeta: [] };
   for (let attempt = 1; attempt <= INGEST_POLL_ATTEMPTS; attempt += 1) {
     collected = await collectLatestRepliesFromEnabledSlots();
@@ -2373,7 +2919,6 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestCo
     payloadBuild.sessionId,
     payloadBuild.payload.title,
     payloadBuild.payload.responses,
-    payloadBuild.payload.active_segment_id,
     collected.scrapeMeta || []
   );
 
