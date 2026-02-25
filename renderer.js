@@ -322,7 +322,7 @@ function buildSessionFingerprint(slots) {
   }).sort();
 
   if (parts.length === 0) return '';
-  return sha256(stableStringify(parts));
+  return `fp_${hashString(stableStringify(parts))}`;
 }
 
 function getStoredAggregatedSessionId() {
