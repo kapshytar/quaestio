@@ -727,13 +727,17 @@ ipcMain.handle('dream-send-clarification', async (_event, params) => {
 
 ipcMain.handle('dream-save-session', async (_event, params) => {
   try {
-    return await callSupabaseRpc('save_aggregator_session', {
+    const raw = await callSupabaseRpc('save_aggregator_session', {
       p_session_id: params?.sessionId ?? null,
       p_name: String(params?.name || '').trim(),
       p_slot_config: params?.slotConfig || {},
       p_slot_urls: params?.slotUrls || {},
       p_slot_enabled: params?.slotEnabled || {}
     });
+    // Supabase RETURNS TABLE gives back an array — unwrap first row
+    const result = Array.isArray(raw) ? raw[0] : raw;
+    logSessionRpc('save_aggregator_session result', { id: result?.id, name: result?.name });
+    return result || null;
   } catch (error) {
     console.error('[dream-save-session] failed:', error);
     throw error;
