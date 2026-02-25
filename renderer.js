@@ -416,6 +416,7 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
   if (serviceId === 'gemini') {
     text = text
       .replace(/^conversation with gemini\s*/i, '')
+      .replace(/^\s*you said\s*[\r\n]+\s*/i, '')
       .replace(/\byou said\b[\s\S]*?\bgemini said\b[:\s]*/i, '')
       .replace(/\bgemini said\b[:\s]*/i, '')
       .trim();
@@ -424,6 +425,8 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
   const dropLine = (lineLower) => {
     if (!lineLower) return true;
     if (lineLower === 'source') return true;
+    if (lineLower === 'answer' || lineLower === 'links' || lineLower === 'images' || lineLower === 'download comet') return true;
+    if (lineLower === 'ask a follow-up' || lineLower === 'model') return true;
     if (lineLower === 'share' || lineLower === 'edit' || lineLower === 'retry' || lineLower === 'copy' || lineLower === 'regenerate') return true;
     if (lineLower === 'open sidebar' || lineLower === 'reply...' || lineLower === 'temporary chat' || lineLower === 'incognito chat') return true;
     if (lineLower === 'tools' || lineLower === 'fast') return true;
@@ -1964,6 +1967,8 @@ async function getLatestAssistantReply(slot) {
 (function() {
   try {
     const serviceId = ${JSON.stringify(serviceId)};
+    const sourcePrompt = ${JSON.stringify((window.mergeApiClient?.lastSourcePrompt || '').trim())};
+    const normalizedPrompt = String(sourcePrompt || '').replace(/\\s+/g, ' ').trim().toLowerCase();
 
     function visible(el) {
       if (!el) return false;
@@ -1971,11 +1976,11 @@ async function getLatestAssistantReply(slot) {
       const s = window.getComputedStyle(el);
       return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
     }
-
     function normalizeText(t) {
       return String(t || '')
         .replace(/\\r/g, '')
         .replace(/\\u00a0/g, ' ')
+        .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
         .replace(/[ \\t]+\\n/g, '\\n')
         .replace(/\\n{3,}/g, '\\n\\n')
         .trim();
@@ -2000,51 +2005,73 @@ async function getLatestAssistantReply(slot) {
         t.includes('window.__')
       );
     }
-
-    const selectors = [
-      '[data-testid*="conversation-turn"]',
-      '[data-testid*="message-content"]',
-      '[data-message-author-role="assistant"]',
-      '[data-testid*="assistant"]',
-      '[class*="assistant"]',
-      '[class*="response"]',
-      '[class*="answer"]',
-      '[class*="message"]'
-    ];
-
-    // Perplexity: prepend prose selector
-    if (serviceId === 'perplexity') { selectors.unshift('div[class*="prose"]'); }
-
-    const candidates = [];
-    selectors.forEach((sel) => {
-      try {
-        document.querySelectorAll(sel).forEach((el) => {
-          if (!visible(el)) return;
-          if (isComposerElement(el)) return;
-          const raw = normalizeText(el.innerText || el.textContent);
-          const flat = flatText(raw);
-          if (flat.length < 20 || isMetadataLikeText(flat)) return;
-          const rect = el.getBoundingClientRect();
-          candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top });
-        });
-      } catch (_) {}
-    });
-
-    // Fallback: any visible article/div with enough text
-    if (candidates.length === 0) {
-      Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
-        if (isComposerElement(el)) return;
-        const raw = normalizeText(el.innerText || el.textContent);
-        const flat = flatText(raw);
-        if (flat.length < 80 || isMetadataLikeText(flat)) return;
-        const rect = el.getBoundingClientRect();
-        candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top });
-      });
+    function textLooksLikeUiNoise(flat) {
+      const t = String(flat || '').toLowerCase();
+      if (!t) return true;
+      if (t === 'source' || t.startsWith('source ')) return true;
+      if (t.includes('open sidebar') || t.includes('download comet')) return true;
+      if (t.includes('answer links images')) return true;
+      if (t.includes('ask a follow-up') || t === 'model') return true;
+      if (t.includes('temporary chat') || t.includes('incognito chat')) return true;
+      if (t.includes('chatgpt can make mistakes') || t.includes('can make mistakes')) return true;
+      if (t.includes('check important info') || t.includes('cookie preferences')) return true;
+      return false;
+    }
+    function looksLikePromptEcho(flat) {
+      const t = String(flat || '').toLowerCase().trim();
+      if (!normalizedPrompt || !t) return false;
+      if (t === normalizedPrompt) return true;
+      if (t === 'you said ' + normalizedPrompt) return true;
+      if (t.startsWith('you said') && t.includes(normalizedPrompt) && t.length <= normalizedPrompt.length + 24) return true;
+      if (t.includes(normalizedPrompt) && t.length <= normalizedPrompt.length + 18) return true;
+      return false;
     }
 
+    const selectors = serviceId === 'perplexity'
+      ? [
+          '[data-message-author-role="assistant"] div[class*="prose"]',
+          '[data-message-author-role="assistant"] article',
+          '[data-testid*="answer"] div[class*="prose"]',
+          'main div[class*="prose"]',
+          'article div[class*="prose"]',
+          '[data-message-author-role="assistant"]'
+        ]
+      : [
+          '[data-message-author-role="assistant"]',
+          '[data-testid*="assistant"]',
+          '[class*="assistant"][class*="message"]',
+          'article div[class*="prose"]',
+          'main div[class*="prose"]',
+          '[class*="answer"]'
+        ];
+
+    const candidates = [];
+    function pushCandidate(el) {
+      if (!visible(el)) return;
+      if (isComposerElement(el)) return;
+      const raw = normalizeText(el.innerText || el.textContent);
+      const flat = flatText(raw);
+      if (flat.length < 24 || isMetadataLikeText(flat) || textLooksLikeUiNoise(flat)) return;
+      if (looksLikePromptEcho(flat)) return;
+      const rect = el.getBoundingClientRect();
+      const viewportArea = Math.max(window.innerWidth * window.innerHeight, 1);
+      const area = Math.max(rect.width * rect.height, 0);
+      if (area > viewportArea * 0.70) return;
+      let score = rect.bottom + Math.min(flat.length, 2000) * 0.15;
+      if (serviceId === 'perplexity' && /\\b(answer|links|images|model)\\b/i.test(flat)) score -= 4000;
+      if (flat.length < 40) score -= 1500;
+      candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top, score });
+    }
+
+    selectors.forEach((sel) => {
+      try { document.querySelectorAll(sel).forEach((el) => pushCandidate(el)); } catch (_) {}
+    });
+
+    if (candidates.length === 0) {
+      try { document.querySelectorAll('article, section, div').forEach((el) => pushCandidate(el)); } catch (_) {}
+    }
     if (candidates.length === 0) return null;
 
-    // Drop nested short fragments when a parent candidate carries the full reply.
     const pruned = candidates.filter((candidate) => {
       return !candidates.some((other) => {
         if (other === candidate) return false;
@@ -2060,11 +2087,11 @@ async function getLatestAssistantReply(slot) {
     const nearBottom = source.filter(c => c.bottom >= maxBottom - 260);
     const pool = nearBottom.length > 0 ? nearBottom : source;
     pool.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
       if (b.flat.length !== a.flat.length) return b.flat.length - a.flat.length;
       return b.bottom - a.bottom;
     });
     return pool[0].raw;
-
   } catch (e) { return null; }
 })();
 `;
@@ -2102,7 +2129,14 @@ async function collectLatestRepliesFromEnabledSlots() {
 
     const reply = await getLatestAssistantReply(slot);
     const cleanedReply = sanitizeScrapedReply(serviceId, reply || '', sourcePrompt);
-    if (cleanedReply && cleanedReply.trim().length > 0) {
+    const normalizedPrompt = normalizeMultilineText(sourcePrompt).replace(/\s+/g, ' ').trim().toLowerCase();
+    const normalizedClean = normalizeMultilineText(cleanedReply).replace(/\s+/g, ' ').trim().toLowerCase();
+    const isPromptEcho = normalizedPrompt && (
+      normalizedClean === normalizedPrompt ||
+      normalizedClean === `you said ${normalizedPrompt}` ||
+      (normalizedClean.startsWith('you said') && normalizedClean.includes(normalizedPrompt) && normalizedClean.length <= normalizedPrompt.length + 24)
+    );
+    if (cleanedReply && cleanedReply.trim().length > 0 && !isPromptEcho) {
       const preview = cleanedReply.length > 120 ? `${cleanedReply.slice(0, 120)}...` : cleanedReply;
       const meta = {
         slot,
