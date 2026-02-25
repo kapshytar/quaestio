@@ -70,6 +70,72 @@ const DREAM_RPC_NAMES = {
 const DREAM_DEBUG_RPC_PATH = '/rest/v1/rpc/log_ingest_debug_v1';
 const INGEST_DEBUG_PLATFORM = 'windows';
 const INGEST_DEBUG_APP_NAME = 'chat-aggregator-windows';
+const DEFAULT_SUPABASE_URL = 'https://bjqkvlsneujrcfpvcvzf.supabase.co';
+const DEFAULT_SUPABASE_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJqcWt2bHNuZXVqcmNmcHZjdnpmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTc3OTcyMywiZXhwIjoyMDg3MzU1NzIzfQ.NJQV4V8yZ_qDaPKlbDkbw-iRbYl8ePUkp1KpqEU1HBo';
+
+function parseEnvFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return;
+    const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIndex = trimmed.indexOf('=');
+      if (eqIndex <= 0) continue;
+      const key = trimmed.slice(0, eqIndex).trim();
+      const value = trimmed.slice(eqIndex + 1).trim().replace(/^['"]|['"]$/g, '');
+      if (!process.env[key] && value) process.env[key] = value;
+    }
+  } catch (error) {
+    console.warn('[env] failed to parse', filePath, error?.message || error);
+  }
+}
+
+function loadSupabaseEnv() {
+  const candidates = [
+    path.join(__dirname, '.env'),
+    path.join(__dirname, '..', 'dream-tracker', '.env')
+  ];
+  candidates.forEach(parseEnvFile);
+}
+
+function getSupabaseConfig() {
+  return {
+    supabaseUrl:
+      process.env.SUPABASE_URL ||
+      process.env.DREAM_TRACKER_SUPABASE_URL ||
+      process.env.VITE_SUPABASE_URL ||
+      DEFAULT_SUPABASE_URL,
+    serviceRoleKey:
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.DREAM_TRACKER_SERVICE_ROLE_KEY ||
+      DEFAULT_SUPABASE_SERVICE_ROLE_KEY
+  };
+}
+
+function logSessionRpc(message, meta = null) {
+  const ts = new Date().toISOString();
+  const line = `[${ts}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ''}\n`;
+  try {
+    const logsDir = path.join(__dirname, 'debug-runs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    fs.appendFileSync(path.join(logsDir, 'session-rpc.log'), line, 'utf8');
+  } catch (_) {
+    // Ignore logging failure.
+  }
+  console.log(`[SessionRPC] ${message}`, meta || '');
+}
+
+loadSupabaseEnv();
+{
+  const cfg = getSupabaseConfig();
+  logSessionRpc('Supabase config resolved', {
+    hasUrl: Boolean(cfg.supabaseUrl),
+    hasKey: Boolean(cfg.serviceRoleKey),
+    url: cfg.supabaseUrl,
+    keyPrefix: cfg.serviceRoleKey ? `${cfg.serviceRoleKey.slice(0, 12)}...` : ''
+  });
+}
 
 function getPrimaryWindow() {
   const focused = BrowserWindow.getFocusedWindow();
@@ -376,6 +442,37 @@ function normalizeDreamKind(kind) {
   return null;
 }
 
+async function callSupabaseRpc(rpcName, body) {
+  const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('Supabase env is not configured (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).');
+  }
+
+  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${rpcName}`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body || {})
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    logSessionRpc(`RPC ${rpcName} error`, { status: response.status, body: rawText });
+    throw new Error(`RPC ${rpcName} failed: ${response.status} ${rawText}`);
+  }
+  logSessionRpc(`RPC ${rpcName} ok`);
+
+  if (!rawText) return null;
+  try {
+    return JSON.parse(rawText);
+  } catch (_) {
+    return rawText;
+  }
+}
+
 function isValidDreamPayload(kind, payload) {
   if (!payload || typeof payload !== 'object') return false;
 
@@ -416,8 +513,7 @@ async function ingestDreamRpc(kindInput, params) {
 
     const rpcName = DREAM_RPC_NAMES[kind];
 
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.DREAM_TRACKER_SUPABASE_URL || '';
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.DREAM_TRACKER_SERVICE_ROLE_KEY || '';
+    const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
     if (!isValidDreamPayload(kind, payload)) {
       const errorText = `Invalid payload for kind=${kind}.`;
       await emitIngestDebugEvent({
@@ -629,6 +725,46 @@ ipcMain.handle('dream-send-clarification', async (_event, params) => {
   return ingestDreamRpc('clarification', params);
 });
 
+ipcMain.handle('dream-save-session', async (_event, params) => {
+  try {
+    return await callSupabaseRpc('save_aggregator_session', {
+      p_session_id: params?.sessionId ?? null,
+      p_name: String(params?.name || '').trim(),
+      p_slot_config: params?.slotConfig || {},
+      p_slot_urls: params?.slotUrls || {},
+      p_slot_enabled: params?.slotEnabled || {}
+    });
+  } catch (error) {
+    console.error('[dream-save-session] failed:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
+  try {
+    const parsedSessionId = Number.isInteger(sessionId) ? sessionId : null;
+    const data = await callSupabaseRpc('list_aggregator_sessions', {
+      p_session_id: parsedSessionId,
+      p_limit: 20
+    });
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('[dream-load-sessions] failed:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('dream-delete-session', async (_event, sessionId) => {
+  try {
+    return await callSupabaseRpc('delete_aggregator_session', {
+      p_session_id: String(sessionId || '')
+    });
+  } catch (error) {
+    console.error('[dream-delete-session] failed:', error);
+    throw error;
+  }
+});
+
 ipcMain.handle('clipboard-read-text', async () => {
   try {
     return clipboard.readText() || '';
@@ -686,6 +822,81 @@ ipcMain.handle('import-cookies', async (event, jsonContent) => {
     return { ok: true, message: 'Cookies imported. Webviews are reloading...' };
   } catch (err) {
     console.error('IPC import error:', err);
+    return { ok: false, message: `Error: ${err.message}` };
+  }
+});
+
+ipcMain.handle('save-page', async (event, { pageContent, pageUrl }) => {
+  try {
+    const urlObj = new URL(pageUrl);
+    const hostname = urlObj.hostname.replace(/[^a-z0-9.-]/gi, '_');
+    const defaultFilename = `${hostname}_${Date.now()}.html`;
+
+    const result = await dialog.showSaveDialog(getPrimaryWindow() || undefined, {
+      title: 'Save Web Page',
+      defaultPath: defaultFilename,
+      filters: [
+        { name: 'HTML Files', extensions: ['html'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { ok: false, message: 'Save canceled' };
+    }
+
+    fs.writeFileSync(result.filePath, pageContent, 'utf8');
+    console.log(`[SavePage] Saved to ${result.filePath}`);
+    return { ok: true, message: `Saved to ${result.filePath}` };
+  } catch (err) {
+    console.error('[SavePage] Error:', err);
+    return { ok: false, message: `Error: ${err.message}` };
+  }
+});
+
+ipcMain.handle('save-all-pages', async (event, pages) => {
+  try {
+    const result = await dialog.showOpenDialog(getPrimaryWindow() || undefined, {
+      title: 'Select Folder to Save All Pages',
+      properties: ['openDirectory', 'createDirectory']
+    });
+
+    if (result.canceled || !result.filePaths.length) {
+      return { ok: false, message: 'Save canceled' };
+    }
+
+    const folderPath = result.filePaths[0];
+    const timestamp = Date.now();
+    const savedFiles = [];
+
+    for (const page of pages) {
+      if (!page.content || !page.url) continue;
+
+      try {
+        const urlObj = new URL(page.url);
+        const hostname = urlObj.hostname.replace(/[^a-z0-9.-]/gi, '_');
+        const filename = `${page.slot}_${hostname}_${timestamp}.html`;
+        const filepath = path.join(folderPath, filename);
+
+        fs.writeFileSync(filepath, page.content, 'utf8');
+        savedFiles.push(filename);
+        console.log(`[SaveAllPages] Saved ${page.slot} to ${filepath}`);
+      } catch (pageErr) {
+        console.error(`[SaveAllPages] Error saving ${page.slot}:`, pageErr);
+      }
+    }
+
+    if (savedFiles.length === 0) {
+      return { ok: false, message: 'Failed to save any pages' };
+    }
+
+    return {
+      ok: true,
+      message: `Saved ${savedFiles.length} page(s) to ${folderPath}`,
+      files: savedFiles
+    };
+  } catch (err) {
+    console.error('[SaveAllPages] Error:', err);
     return { ok: false, message: `Error: ${err.message}` };
   }
 });
@@ -789,6 +1000,57 @@ async function createWindow() {
           accelerator: 'CmdOrCtrl+N',
           click: () => {
             createWindow();
+          }
+        },
+        {
+          label: 'Save All Pages...',
+          accelerator: 'CmdOrCtrl+Shift+S',
+          click: () => {
+            const win = getPrimaryWindow();
+            if (win) {
+              win.webContents.executeJavaScript(`
+                (async function() {
+                  const pages = [];
+                  for (const slot of SLOTS) {
+                    const webview = webviews[slot];
+                    if (!webview) continue;
+
+                    try {
+                      const url = getWebviewCurrentUrl(slot);
+                      if (!url) continue;
+
+                      const content = await webview.executeJavaScript(\`
+                        (function() {
+                          return document.documentElement.outerHTML;
+                        })()
+                      \`);
+
+                      if (content) {
+                        pages.push({ slot, url, content });
+                      }
+                    } catch (err) {
+                      console.error('Error getting page from ' + slot, err);
+                    }
+                  }
+
+                  if (pages.length === 0) {
+                    window.alert('No pages loaded to save');
+                    return;
+                  }
+
+                  try {
+                    const result = await window.electronAPI.saveAllPages(pages);
+                    if (result.ok) {
+                      window.alert(result.message);
+                    } else {
+                      window.alert('Error: ' + result.message);
+                    }
+                  } catch (err) {
+                    window.alert('Error: ' + err.message);
+                  }
+                })();
+              `).catch(err => console.error('Menu click error:', err));
+            }
           }
         },
         { type: 'separator' },

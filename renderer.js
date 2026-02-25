@@ -159,7 +159,7 @@ const INGEST_POLL_INTERVAL_MS = 2000;
 const INGEST_INITIAL_DELAY_MS = 5000;
 const INGEST_GENERATION_WAIT_ATTEMPTS = 15;
 const INGEST_GENERATION_CHECK_MS = 2000;
-const INGEST_MIN_REPLY_CHARS = 30;
+const INGEST_MIN_REPLY_CHARS = 20;
 let activeIngestTraceId = '';
 let ingestSequenceCounter = 0;
 let ingestSequenceBySourceMessageId = new Map();
@@ -2746,7 +2746,7 @@ async function getLatestAssistantReply(slot) {
         if (isComposerElement(el)) return;
         const raw = normalizeText(el.innerText || el.textContent);
         const flat = flatText(raw);
-        if (flat.length < 30 || isMetadataLikeText(flat)) return;
+        if (flat.length < 20 || isMetadataLikeText(flat)) return;
         const rect = el.getBoundingClientRect();
         candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top });
       });
@@ -3245,6 +3245,17 @@ async function runMerge(isClarification = false, clarificationText = '', previou
 // ========== SESSION MANAGEMENT ==========
 const SESSIONS_KEY = 'chat-aggregator-sessions';
 const MAX_SESSIONS = 20;
+let sessionsNotice = { text: '', kind: 'info' };
+
+function setSessionsNotice(text, kind = 'info') {
+  sessionsNotice = { text: String(text || '').trim(), kind };
+}
+
+function errorToText(error) {
+  if (!error) return 'Unknown error';
+  if (typeof error === 'string') return error;
+  return String(error.message || error);
+}
 
 async function saveSessionSnapshot() {
   const sessionData = {
@@ -3266,18 +3277,23 @@ async function saveSessionSnapshot() {
   if (window.electronAPI?.saveSession) {
     try {
       const result = await window.electronAPI.saveSession(sessionData);
+      if (!result || typeof result !== 'object' || !result.id) {
+        throw new Error('DB save returned empty result');
+      }
       console.log('[saveSessionSnapshot] Saved to DB:', result);
+      setSessionsNotice('Saved to database.', 'ok');
       // Also update local cache
-      let sessions = loadSessionsList();
+      let sessions = await loadSessionsList();
       sessions.unshift(result);
       if (sessions.length > MAX_SESSIONS) {
         sessions = sessions.slice(0, MAX_SESSIONS);
       }
       localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-      updateSessionsUI();
+      await updateSessionsUI();
       return result;
     } catch (error) {
       console.error('[saveSessionSnapshot] DB save failed:', error);
+      setSessionsNotice(`DB save failed, using local cache: ${errorToText(error)}`, 'warn');
       // Fallback to localStorage only
     }
   }
@@ -3289,14 +3305,15 @@ async function saveSessionSnapshot() {
     ...sessionData
   };
 
-  let sessions = loadSessionsList();
+  let sessions = await loadSessionsList();
   sessions.unshift(snapshot);
   if (sessions.length > MAX_SESSIONS) {
     sessions = sessions.slice(0, MAX_SESSIONS);
   }
 
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-  updateSessionsUI();
+  setSessionsNotice('Saved to local cache only.', 'warn');
+  await updateSessionsUI();
   return snapshot;
 }
 
@@ -3304,15 +3321,20 @@ async function loadSessionsList() {
   // Try to load from database first
   if (window.electronAPI?.loadSessions) {
     try {
-      const sessionId = getCurrentSessionId();
-      const dbSessions = await window.electronAPI.loadSessions(sessionId);
+      // Sessions tab should show global history, not only current ingest session.
+      const dbSessions = await window.electronAPI.loadSessions(null);
       if (Array.isArray(dbSessions) && dbSessions.length > 0) {
         // Cache in localStorage
         localStorage.setItem(SESSIONS_KEY, JSON.stringify(dbSessions));
+        setSessionsNotice('Loaded from database.', 'ok');
         return dbSessions;
+      }
+      if (Array.isArray(dbSessions) && dbSessions.length === 0) {
+        setSessionsNotice('Database returned 0 sessions.', 'info');
       }
     } catch (error) {
       console.error('[loadSessionsList] DB load failed:', error);
+      setSessionsNotice(`DB load failed, using local cache: ${errorToText(error)}`, 'warn');
       // Fall through to localStorage
     }
   }
@@ -3335,11 +3357,12 @@ function getCurrentSessionId() {
   }
 }
 
-function loadSession(sessionId) {
-  const sessions = loadSessionsList();
+async function loadSession(sessionId) {
+  const sessions = await loadSessionsList();
   const session = sessions.find(s => s.id === sessionId);
   if (!session) {
     console.warn('Session not found:', sessionId);
+    setSessionsNotice(`Session not found: ${sessionId}`, 'warn');
     return;
   }
 
@@ -3348,26 +3371,54 @@ function loadSession(sessionId) {
   saveSlotConfig(slotConfig);
 
   // Restore enabled state
-  const slotEnabled = { ...session.slotEnabled };
+  const slotEnabled = {};
   SLOTS.forEach(slot => {
+    const hasExplicitFlag = Object.prototype.hasOwnProperty.call(session.slotEnabled || {}, slot);
+    const hasSlotData = Boolean(session.slotConfig?.[slot] || session.slotUrls?.[slot]);
+    slotEnabled[slot] = hasExplicitFlag ? session.slotEnabled[slot] !== false : hasSlotData;
     if (toggles[slot]) {
-      toggles[slot].checked = slotEnabled[slot] !== false;
+      toggles[slot].checked = slotEnabled[slot];
     }
   });
   saveSlotEnabledState(slotEnabled);
 
-  // Load URLs in webviews
+  // Restore service selectors and navigate webviews for active slots.
   SLOTS.forEach(slot => {
-    const url = session.slotUrls[slot];
-    if (url && webviews[slot]) {
-      webviews[slot].src = url;
+    const serviceId = session.slotConfig?.[slot];
+    if (serviceId) {
+      slotConfig[slot] = serviceId;
+      const select = document.querySelector(`.service-select[data-slot="${slot}"]`);
+      if (select && select.value !== serviceId) {
+        select.value = serviceId;
+      }
+    }
+
+    if (!slotEnabled[slot]) {
+      updateSlotLabel(slot, serviceId || slotConfig[slot]);
+      return;
+    }
+
+    const webview = webviews[slot];
+    const url = session.slotUrls?.[slot] || SERVICE_PRESETS[serviceId]?.url || '';
+    if (url && webview) {
+      try {
+        const currentUrl = webview.getURL?.() || webview.getAttribute?.('src') || '';
+        if (!currentUrl || currentUrl !== url) {
+          webview.loadURL(url);
+        }
+      } catch (_) {
+        webview.src = url;
+      }
       const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
       if (urlInput) urlInput.value = url;
     }
-    updateSlotLabel(slot, session.slotConfig[slot]);
+    updateSlotLabel(slot, serviceId || slotConfig[slot]);
   });
+  saveSlotConfig(slotConfig);
 
   console.log('Session loaded:', sessionId);
+  setSessionsNotice(`Session loaded: ${session.name || sessionId}`, 'ok');
+  await updateSessionsUI();
 }
 
 async function deleteSession(sessionId) {
@@ -3376,8 +3427,10 @@ async function deleteSession(sessionId) {
     try {
       await window.electronAPI.deleteSession(sessionId);
       console.log('[deleteSession] Deleted from DB:', sessionId);
+      setSessionsNotice(`Deleted from database: ${sessionId}`, 'ok');
     } catch (error) {
       console.error('[deleteSession] DB delete failed:', error);
+      setSessionsNotice(`DB delete failed, cleaning local cache only: ${errorToText(error)}`, 'warn');
     }
   }
 
@@ -3395,8 +3448,13 @@ async function updateSessionsUI() {
   const sessions = await loadSessionsList();
   container.innerHTML = '';
 
+  if (sessionsNotice.text) {
+    const color = sessionsNotice.kind === 'warn' ? '#ffb366' : sessionsNotice.kind === 'ok' ? '#9ad89a' : '#9aa0aa';
+    container.innerHTML += `<div style="padding:6px 8px;color:${color};font-size:10px;line-height:1.3;border:1px solid #333;border-radius:4px;margin-bottom:6px;">${sessionsNotice.text}</div>`;
+  }
+
   if (sessions.length === 0) {
-    container.innerHTML = '<div style="padding:8px;color:#666;font-size:11px;text-align:center;">No sessions saved yet</div>';
+    container.innerHTML += '<div style="padding:8px;color:#666;font-size:11px;text-align:center;">No sessions saved yet</div>';
     return;
   }
 
