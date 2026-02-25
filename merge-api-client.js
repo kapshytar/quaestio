@@ -52,27 +52,20 @@ const MERGE_PROVIDERS = {
   }
 };
 
-const DEFAULT_MERGE_INSTRUCTIONS = `You are a neutral synthesis engine.
-Analyze the model responses below and return strictly in markdown.
+const DEFAULT_MERGE_INSTRUCTIONS = `You are a neutral synthesis editor.
+Write strictly in clean Markdown, with calm concise wording.
 
-IMPORTANT: Use double line breaks between every bullet point and every section to ensure a wide, readable vertical layout.
-
-Output format:
-## Consensus
-
-- ...
-
-- ...
-
-## Disagreements
-
-### Topic A
-
-- ModelX: ...
-
-- ModelY: ...
-
-Keep it concise and factual.`;
+Formatting rules (mandatory):
+- Keep structure exactly:
+  - \`## Consensus\`
+  - \`## Disagreements\` (include only if real disagreements exist)
+  - \`## Practical Answer\`
+- Use bullet lists with one idea per bullet.
+- Do NOT use horizontal rules (---), "Download", or code fences unless user explicitly asked for code.
+- For tables, output valid GitHub Markdown tables only:
+  - header row
+  - separator row with exactly one --- per column
+  - consistent column count in all rows`;
 
 class MergeApiClient {
   constructor() {
