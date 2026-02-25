@@ -3363,7 +3363,10 @@ function updateSessionsUI() {
 }
 
 // Initialize sessions UI and save button
+// NOTE: Sessions are stored but NOT auto-restored on app restart.
+// User must manually select "Load" to restore a saved session.
 function initSessionsTab() {
+  // Display list of saved sessions
   updateSessionsUI();
 
   const saveSessionBtn = document.getElementById('save-session-btn');
