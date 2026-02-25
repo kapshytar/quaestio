@@ -154,6 +154,9 @@ const AGGREGATED_SESSION_ID_KEY = 'aggregated-ingest-session-id';
 const SLOT_ENABLED_STATE_KEY = 'slot-enabled-state';
 const INGEST_POLL_ATTEMPTS = 30;
 const INGEST_POLL_INTERVAL_MS = 2000;
+let activeIngestTraceId = '';
+let ingestSequenceCounter = 0;
+let ingestSequenceBySourceMessageId = new Map();
 
 function stableStringify(value) {
   const sort = (v) => {
@@ -176,6 +179,38 @@ function hashString(input) {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function createIngestTraceId() {
+  return `trace_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function startIngestTrace() {
+  activeIngestTraceId = createIngestTraceId();
+  ingestSequenceCounter = 0;
+  ingestSequenceBySourceMessageId = new Map();
+  return activeIngestTraceId;
+}
+
+function getIngestTraceContext(sourceMessageId) {
+  if (!activeIngestTraceId) startIngestTrace();
+
+  const sourceKey = String(sourceMessageId || '').trim();
+  if (sourceKey && ingestSequenceBySourceMessageId.has(sourceKey)) {
+    return {
+      traceId: activeIngestTraceId,
+      sequence: ingestSequenceBySourceMessageId.get(sourceKey)
+    };
+  }
+
+  ingestSequenceCounter += 1;
+  const sequence = ingestSequenceCounter;
+  if (sourceKey) ingestSequenceBySourceMessageId.set(sourceKey, sequence);
+
+  return {
+    traceId: activeIngestTraceId,
+    sequence
+  };
 }
 
 function getStoredAggregatedSessionId() {
@@ -208,13 +243,15 @@ function buildAggregatedPayload(params) {
   };
 }
 
-async function ingestAggregatedPayload(payload, providerId, externalChatId) {
+async function ingestAggregatedPayload(payload, providerId, externalChatId, traceContext = null) {
   if (!window.electronAPI || typeof window.electronAPI.sendAggregated !== 'function') {
     return { ok: false, error: 'Ingest bridge is not available in preload.' };
   }
   return window.electronAPI.sendAggregated({
     payload,
-    sourceMessageId: externalChatId || `${providerId || 'aggregated'}:${hashString(stableStringify(payload))}`
+    sourceMessageId: externalChatId || `${providerId || 'aggregated'}:${hashString(stableStringify(payload))}`,
+    traceId: traceContext?.traceId || activeIngestTraceId || startIngestTrace(),
+    sequence: Number.isInteger(traceContext?.sequence) ? traceContext.sequence : undefined
   });
 }
 
@@ -339,7 +376,8 @@ async function sendAggregated(sessionId, title, responses, activeSegmentId) {
   };
 
   const sourceMessageId = `msg_${hashString(stableStringify(payload))}`;
-  return ingestAggregatedPayload(payload, 'aggregated', sourceMessageId);
+  const traceContext = getIngestTraceContext(sourceMessageId);
+  return ingestAggregatedPayload(payload, 'aggregated', sourceMessageId, traceContext);
 }
 
 async function sendMerge(sessionId, title, markdown) {
@@ -357,7 +395,13 @@ async function sendMerge(sessionId, title, markdown) {
     markdown: pickMarkdown(markdown)
   };
   const sourceMessageId = `msg_${hashString(stableStringify(payload))}`;
-  return window.electronAPI.sendMerge({ payload, sourceMessageId });
+  const traceContext = getIngestTraceContext(sourceMessageId);
+  return window.electronAPI.sendMerge({
+    payload,
+    sourceMessageId,
+    traceId: traceContext.traceId,
+    sequence: traceContext.sequence
+  });
 }
 
 async function sendClarification(sessionId, title, markdown) {
@@ -375,7 +419,13 @@ async function sendClarification(sessionId, title, markdown) {
     markdown: pickMarkdown(markdown)
   };
   const sourceMessageId = `msg_${hashString(stableStringify(payload))}`;
-  return window.electronAPI.sendClarification({ payload, sourceMessageId });
+  const traceContext = getIngestTraceContext(sourceMessageId);
+  return window.electronAPI.sendClarification({
+    payload,
+    sourceMessageId,
+    traceId: traceContext.traceId,
+    sequence: traceContext.sequence
+  });
 }
 
 function sleep(ms) {
@@ -1471,6 +1521,9 @@ async function sendToAll() {
   if (window.mergeApiClient) {
     window.mergeApiClient.lastSourcePrompt = text;
   }
+
+  const traceId = startIngestTrace();
+  mergeLog(`Ingest trace started: ${traceId}`, 'info');
 
   const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
 

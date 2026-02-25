@@ -62,6 +62,14 @@ const DREAM_RPC_PATHS = {
   merge: '/rest/v1/rpc/ingest_merge_v1',
   clarification: '/rest/v1/rpc/ingest_clarification_v1'
 };
+const DREAM_RPC_NAMES = {
+  aggregated: 'ingest_aggregated_v1',
+  merge: 'ingest_merge_v1',
+  clarification: 'ingest_clarification_v1'
+};
+const DREAM_DEBUG_RPC_PATH = '/rest/v1/rpc/log_ingest_debug_v1';
+const INGEST_DEBUG_PLATFORM = 'windows';
+const INGEST_DEBUG_APP_NAME = 'chat-aggregator-windows';
 
 function getPrimaryWindow() {
   const focused = BrowserWindow.getFocusedWindow();
@@ -242,9 +250,122 @@ function sha256(input) {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
-function buildIdempotencyKey({ kind, sessionId, sourceMessageId }) {
-  const sessionPart = Number.isInteger(sessionId) && sessionId > 0 ? String(sessionId) : 'new';
-  return `${kind}:${sessionPart}:${sourceMessageId}`;
+function sanitizeTraceId(rawTraceId) {
+  const normalized = String(rawTraceId || '').trim();
+  if (normalized) return normalized;
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function sanitizeSequence(rawSequence, fallbackValue = '') {
+  const parsed = Number.parseInt(rawSequence, 10);
+  if (Number.isInteger(parsed) && parsed > 0) return String(parsed);
+
+  const fallback = String(fallbackValue || '').trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+  return fallback || '1';
+}
+
+function buildIdempotencyKey({ kind, sessionId, sequence, traceId }) {
+  const sessionPart = Number.isInteger(sessionId) && sessionId > 0 ? String(sessionId) : 'tmp';
+  return `windows:${kind}:${sessionPart}:${sequence}:${traceId}`;
+}
+
+function extractRpcSessionId(rpcResult) {
+  if (Number.isInteger(rpcResult?.session_id)) return rpcResult.session_id;
+  if (Array.isArray(rpcResult) && Number.isInteger(rpcResult[0]?.session_id)) return rpcResult[0].session_id;
+  return null;
+}
+
+function ensureDebugRunsDir() {
+  const cwdDir = path.join(process.cwd(), 'debug-runs');
+  try {
+    fs.mkdirSync(cwdDir, { recursive: true });
+    return cwdDir;
+  } catch (cwdError) {
+    const fallbackDir = path.join(app.getPath('userData'), 'debug-runs');
+    fs.mkdirSync(fallbackDir, { recursive: true });
+    return fallbackDir;
+  }
+}
+
+function appendDebugArtifact(traceId, eventPayload) {
+  try {
+    const dir = ensureDebugRunsDir();
+    const safeTraceId = String(traceId || 'unknown').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const artifactPath = path.join(dir, `${safeTraceId}.json`);
+    const nowIso = new Date().toISOString();
+
+    let artifact = null;
+    if (fs.existsSync(artifactPath)) {
+      try {
+        artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+      } catch (_) {
+        artifact = null;
+      }
+    }
+
+    if (!artifact || typeof artifact !== 'object') {
+      artifact = {
+        trace_id: traceId,
+        platform: INGEST_DEBUG_PLATFORM,
+        app_name: INGEST_DEBUG_APP_NAME,
+        app_version: app.getVersion(),
+        created_at: nowIso,
+        updated_at: nowIso,
+        events: []
+      };
+    }
+
+    artifact.updated_at = nowIso;
+    if (!Array.isArray(artifact.events)) artifact.events = [];
+    artifact.events.push({
+      ts: nowIso,
+      ...eventPayload
+    });
+
+    fs.writeFileSync(artifactPath, JSON.stringify(artifact, null, 2), 'utf8');
+  } catch (error) {
+    console.warn('[IngestDebug] Failed to write local artifact:', error?.message || error);
+  }
+}
+
+async function emitIngestDebugEvent({ supabaseUrl, serviceRoleKey, eventPayload }) {
+  const payload = {
+    trace_id: eventPayload?.trace_id || sanitizeTraceId(),
+    platform: INGEST_DEBUG_PLATFORM,
+    app_name: INGEST_DEBUG_APP_NAME,
+    app_version: app.getVersion(),
+    session_id: Number.isInteger(eventPayload?.session_id) ? eventPayload.session_id : null,
+    step: eventPayload?.step || 'error',
+    rpc_name: eventPayload?.rpc_name || '',
+    idempotency_key: eventPayload?.idempotency_key || '',
+    payload: eventPayload?.payload ?? null,
+    rpc_result: eventPayload?.rpc_result ?? null,
+    error_text: eventPayload?.error_text ? String(eventPayload.error_text) : null
+  };
+
+  appendDebugArtifact(payload.trace_id, payload);
+
+  if (!supabaseUrl || !serviceRoleKey) return;
+
+  try {
+    const response = await fetch(`${supabaseUrl}${DREAM_DEBUG_RPC_PATH}`, {
+      method: 'POST',
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ p_event: payload })
+    });
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      console.warn('[IngestDebug] Supabase logging failed:', response.status, responseText);
+    }
+  } catch (error) {
+    console.warn('[IngestDebug] Supabase logging exception:', error?.message || error);
+  }
 }
 
 function normalizeDreamKind(kind) {
@@ -270,36 +391,73 @@ function isValidDreamPayload(kind, payload) {
 
 async function ingestDreamRpc(kindInput, params) {
   const startedAt = Date.now();
+  const traceId = sanitizeTraceId(params?.traceId);
+  const payload = params?.payload;
+  const sourceMessageId = String(params?.sourceMessageId || '').trim();
 
   try {
     const kind = normalizeDreamKind(kindInput);
-    if (!kind) return { ok: false, error: 'Unsupported ingest kind.' };
+    if (!kind) {
+      const errorText = 'Unsupported ingest kind.';
+      await emitIngestDebugEvent({
+        eventPayload: {
+          trace_id: traceId,
+          step: 'error',
+          rpc_name: '',
+          payload,
+          error_text: errorText
+        }
+      });
+      return { ok: false, error: errorText, traceId };
+    }
+
+    const rpcName = DREAM_RPC_NAMES[kind];
 
     const supabaseUrl = process.env.SUPABASE_URL || process.env.DREAM_TRACKER_SUPABASE_URL || '';
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.DREAM_TRACKER_SERVICE_ROLE_KEY || '';
-
-    if (!supabaseUrl || !serviceRoleKey) {
-      return {
-        ok: false,
-        error: 'Supabase env is not configured (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).'
-      };
-    }
-
-    const payload = params?.payload;
     if (!isValidDreamPayload(kind, payload)) {
-      return { ok: false, error: `Invalid payload for kind=${kind}.` };
+      const errorText = `Invalid payload for kind=${kind}.`;
+      await emitIngestDebugEvent({
+        supabaseUrl,
+        serviceRoleKey,
+        eventPayload: {
+          trace_id: traceId,
+          step: 'error',
+          rpc_name: rpcName,
+          payload,
+          error_text: errorText
+        }
+      });
+      return { ok: false, error: errorText, traceId };
     }
 
     const payloadStr = stableStringify(payload);
     const payloadHash = sha256(payloadStr);
-    const sourceMessageId = String(params?.sourceMessageId || payloadHash.slice(0, 16)).trim();
-    if (!sourceMessageId) return { ok: false, error: 'sourceMessageId is required.' };
+    const normalizedSourceMessageId = sourceMessageId || payloadHash.slice(0, 16);
+    const sequence = sanitizeSequence(params?.sequence, normalizedSourceMessageId);
+    if (!normalizedSourceMessageId) {
+      const errorText = 'sourceMessageId is required.';
+      await emitIngestDebugEvent({
+        supabaseUrl,
+        serviceRoleKey,
+        eventPayload: {
+          trace_id: traceId,
+          session_id: Number.isInteger(payload?.session_id) ? payload.session_id : null,
+          step: 'error',
+          rpc_name: rpcName,
+          payload,
+          error_text: errorText
+        }
+      });
+      return { ok: false, error: errorText, traceId };
+    }
 
     const sessionId = Number.isInteger(payload.session_id) ? payload.session_id : null;
     const idempotencyKey = buildIdempotencyKey({
       kind,
       sessionId,
-      sourceMessageId
+      sequence,
+      traceId
     });
 
     const requestBody = {
@@ -308,10 +466,41 @@ async function ingestDreamRpc(kindInput, params) {
       p_payload_hash: payloadHash
     };
 
+    await emitIngestDebugEvent({
+      supabaseUrl,
+      serviceRoleKey,
+      eventPayload: {
+        trace_id: traceId,
+        session_id: sessionId,
+        step: kind,
+        rpc_name: rpcName,
+        idempotency_key: idempotencyKey,
+        payload
+      }
+    });
+
+    if (!supabaseUrl || !serviceRoleKey) {
+      const errorText = 'Supabase env is not configured (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).';
+      await emitIngestDebugEvent({
+        eventPayload: {
+          trace_id: traceId,
+          session_id: sessionId,
+          step: 'error',
+          rpc_name: rpcName,
+          idempotency_key: idempotencyKey,
+          payload,
+          error_text: errorText
+        }
+      });
+      return { ok: false, error: errorText, traceId, payloadHash, idempotencyKey };
+    }
+
     console.log('[IngestRPC] Request', {
       url: `${supabaseUrl}${DREAM_RPC_PATHS[kind]}`,
       kind,
-      sourceMessageId,
+      sourceMessageId: normalizedSourceMessageId,
+      sequence,
+      traceId,
       idempotencyKey,
       payloadHash,
       sessionId
@@ -336,18 +525,34 @@ async function ingestDreamRpc(kindInput, params) {
     }
 
     if (!response.ok) {
+      const errorText = `RPC ${kind} failed: ${response.status}`;
       console.error('[IngestRPC] HTTP error', {
         kind,
         status: response.status,
         body: rawText
       });
+      await emitIngestDebugEvent({
+        supabaseUrl,
+        serviceRoleKey,
+        eventPayload: {
+          trace_id: traceId,
+          session_id: sessionId,
+          step: 'error',
+          rpc_name: rpcName,
+          idempotency_key: idempotencyKey,
+          payload,
+          rpc_result: parsed || rawText || null,
+          error_text: errorText
+        }
+      });
       return {
         ok: false,
-        error: `RPC ${kind} failed: ${response.status}`,
+        error: errorText,
         status: response.status,
         responseText: rawText,
         payloadHash,
-        idempotencyKey
+        idempotencyKey,
+        traceId
       };
     }
 
@@ -358,19 +563,47 @@ async function ingestDreamRpc(kindInput, params) {
       body: parsed
     });
 
+    const resultSessionId = extractRpcSessionId(parsed);
+    await emitIngestDebugEvent({
+      supabaseUrl,
+      serviceRoleKey,
+      eventPayload: {
+        trace_id: traceId,
+        session_id: Number.isInteger(resultSessionId) ? resultSessionId : sessionId,
+        step: 'result',
+        rpc_name: rpcName,
+        idempotency_key: idempotencyKey,
+        payload,
+        rpc_result: parsed
+      }
+    });
+
     return {
       ok: true,
       data: parsed,
       status: response.status,
       payloadHash,
       idempotencyKey,
-      kind
+      kind,
+      traceId,
+      sequence
     };
   } catch (error) {
     console.error('[IngestRPC] Unexpected error', error);
+    await emitIngestDebugEvent({
+      eventPayload: {
+        trace_id: traceId,
+        session_id: Number.isInteger(payload?.session_id) ? payload.session_id : null,
+        step: 'error',
+        rpc_name: DREAM_RPC_NAMES[normalizeDreamKind(kindInput)] || '',
+        payload,
+        error_text: error?.message || 'Unexpected ingest error'
+      }
+    });
     return {
       ok: false,
-      error: error.message || 'Unexpected ingest error'
+      error: error.message || 'Unexpected ingest error',
+      traceId
     };
   }
 }
