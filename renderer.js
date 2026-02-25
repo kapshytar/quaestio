@@ -3246,10 +3246,10 @@ async function runMerge(isClarification = false, clarificationText = '', previou
 const SESSIONS_KEY = 'chat-aggregator-sessions';
 const MAX_SESSIONS = 20;
 
-function saveSessionSnapshot() {
-  const snapshot = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
-    timestamp: Date.now(),
+async function saveSessionSnapshot() {
+  const sessionData = {
+    sessionId: getCurrentSessionId(),
+    name: `Session ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`,
     slotConfig: { ...slotConfig },
     slotUrls: {},
     slotEnabled: { ...getCurrentSlotEnabledState() }
@@ -3258,9 +3258,36 @@ function saveSessionSnapshot() {
   SLOTS.forEach(slot => {
     const webview = webviews[slot];
     if (webview && webview.src) {
-      snapshot.slotUrls[slot] = webview.src;
+      sessionData.slotUrls[slot] = webview.src;
     }
   });
+
+  // Save to database via IPC
+  if (window.electronAPI?.saveSession) {
+    try {
+      const result = await window.electronAPI.saveSession(sessionData);
+      console.log('[saveSessionSnapshot] Saved to DB:', result);
+      // Also update local cache
+      let sessions = loadSessionsList();
+      sessions.unshift(result);
+      if (sessions.length > MAX_SESSIONS) {
+        sessions = sessions.slice(0, MAX_SESSIONS);
+      }
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+      updateSessionsUI();
+      return result;
+    } catch (error) {
+      console.error('[saveSessionSnapshot] DB save failed:', error);
+      // Fallback to localStorage only
+    }
+  }
+
+  // Fallback: save to localStorage only
+  const snapshot = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+    timestamp: Date.now(),
+    ...sessionData
+  };
 
   let sessions = loadSessionsList();
   sessions.unshift(snapshot);
@@ -3273,12 +3300,38 @@ function saveSessionSnapshot() {
   return snapshot;
 }
 
-function loadSessionsList() {
+async function loadSessionsList() {
+  // Try to load from database first
+  if (window.electronAPI?.loadSessions) {
+    try {
+      const sessionId = getCurrentSessionId();
+      const dbSessions = await window.electronAPI.loadSessions(sessionId);
+      if (Array.isArray(dbSessions) && dbSessions.length > 0) {
+        // Cache in localStorage
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(dbSessions));
+        return dbSessions;
+      }
+    } catch (error) {
+      console.error('[loadSessionsList] DB load failed:', error);
+      // Fall through to localStorage
+    }
+  }
+
+  // Fallback to localStorage
   try {
     const raw = localStorage.getItem(SESSIONS_KEY);
     return raw ? JSON.parse(raw) : [];
   } catch (_) {
     return [];
+  }
+}
+
+function getCurrentSessionId() {
+  try {
+    const raw = localStorage.getItem(AGGREGATED_SESSION_ID_KEY);
+    return raw ? Number(raw) : null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -3317,18 +3370,29 @@ function loadSession(sessionId) {
   console.log('Session loaded:', sessionId);
 }
 
-function deleteSession(sessionId) {
-  let sessions = loadSessionsList();
-  sessions = sessions.filter(s => s.id !== sessionId);
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-  updateSessionsUI();
+async function deleteSession(sessionId) {
+  // Delete from database first
+  if (window.electronAPI?.deleteSession) {
+    try {
+      await window.electronAPI.deleteSession(sessionId);
+      console.log('[deleteSession] Deleted from DB:', sessionId);
+    } catch (error) {
+      console.error('[deleteSession] DB delete failed:', error);
+    }
+  }
+
+  // Update local cache
+  const sessions = await loadSessionsList();
+  const filtered = sessions.filter(s => s.id !== sessionId);
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(filtered));
+  await updateSessionsUI();
 }
 
-function updateSessionsUI() {
+async function updateSessionsUI() {
   const container = document.getElementById('sessions-list');
   if (!container) return;
 
-  const sessions = loadSessionsList();
+  const sessions = await loadSessionsList();
   container.innerHTML = '';
 
   if (sessions.length === 0) {
@@ -3340,7 +3404,7 @@ function updateSessionsUI() {
     const item = document.createElement('div');
     item.className = 'session-item';
 
-    const timeStr = new Date(session.timestamp).toLocaleString('ru-RU', {
+    const timeStr = new Date(session.updatedAt || session.timestamp || Date.now()).toLocaleString('ru-RU', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
 
@@ -3350,7 +3414,7 @@ function updateSessionsUI() {
     }).join(', ');
 
     item.innerHTML = `
-      <div style="font-weight:600;color:#fff;">${activeSlots || '(no slots)'}</div>
+      <div style="font-weight:600;color:#fff;">${session.name || activeSlots || '(no slots)'}</div>
       <div class="session-item-time">${timeStr}</div>
       <div class="session-item-actions">
         <button class="session-item-action" onclick="loadSession('${session.id}')">Load</button>
@@ -3363,16 +3427,16 @@ function updateSessionsUI() {
 }
 
 // Initialize sessions UI and save button
-// NOTE: Sessions are stored but NOT auto-restored on app restart.
+// NOTE: Sessions are stored in database but NOT auto-restored on app restart.
 // User must manually select "Load" to restore a saved session.
-function initSessionsTab() {
-  // Display list of saved sessions
-  updateSessionsUI();
+async function initSessionsTab() {
+  // Display list of saved sessions (from database or localStorage)
+  await updateSessionsUI();
 
   const saveSessionBtn = document.getElementById('save-session-btn');
   if (saveSessionBtn) {
-    saveSessionBtn.addEventListener('click', () => {
-      saveSessionSnapshot();
+    saveSessionBtn.addEventListener('click', async () => {
+      await saveSessionSnapshot();
       saveSessionBtn.textContent = '✓ Saved!';
       setTimeout(() => {
         saveSessionBtn.textContent = '💾 Save Current';
