@@ -223,6 +223,20 @@ function pickMarkdown(value) {
   return '';
 }
 
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeMultilineText(value) {
+  return String(value || '')
+    .replace(/\r/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function toNoteTitle(rawText, fallback) {
   const text = pickMarkdown(rawText);
   if (!text) return fallback;
@@ -230,41 +244,72 @@ function toNoteTitle(rawText, fallback) {
   return oneLine.length > 120 ? `${oneLine.slice(0, 117)}...` : oneLine;
 }
 
-function sanitizeScrapedReply(serviceId, rawReply) {
-  let text = pickMarkdown(rawReply);
+function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
+  let text = normalizeMultilineText(pickMarkdown(rawReply));
   if (!text) return '';
 
-  // Common UI leftovers from chat containers.
-  text = text
-    .replace(/\b(Share|Edit|Retry|Copy|Regenerate)\b/gi, ' ')
-    .replace(/\b(Open sidebar|Reply\.\.\.)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const normalizedPrompt = normalizeMultilineText(sourcePrompt).replace(/\n+/g, ' ').trim();
+  if (normalizedPrompt) {
+    const escapedPrompt = escapeRegExp(normalizedPrompt);
+    text = text
+      .replace(new RegExp(`^\\s*${escapedPrompt}[\\s:—\\-]*\\n+`, 'i'), '')
+      .replace(new RegExp(`^(?:you said|вы сказали)\\s+${escapedPrompt}[\\s:—\\-]*`, 'i'), '')
+      .replace(new RegExp(`\\b(?:you said|вы сказали)\\s+${escapedPrompt}\\b`, 'ig'), '')
+      .trim();
+  }
 
   if (serviceId === 'gemini') {
     text = text
       .replace(/^conversation with gemini\s*/i, '')
       .replace(/\byou said\b[\s\S]*?\bgemini said\b[:\s]*/i, '')
       .replace(/\bgemini said\b[:\s]*/i, '')
-      .replace(/\bfast gemini is ai and can make mistakes\.?\s*$/i, '')
       .trim();
   }
 
-  if (serviceId === 'chatgpt') {
-    text = text
-      .replace(/\btemporary chat\b/ig, '')
-      .replace(/\bchatgpt can make mistakes\.? check important info\.? see cookie preferences\.?\b/ig, '')
-      .trim();
-  }
+  const dropLine = (lineLower) => {
+    if (!lineLower) return true;
+    if (lineLower === 'source') return true;
+    if (lineLower === 'share' || lineLower === 'edit' || lineLower === 'retry' || lineLower === 'copy' || lineLower === 'regenerate') return true;
+    if (lineLower === 'open sidebar' || lineLower === 'reply...' || lineLower === 'temporary chat' || lineLower === 'incognito chat') return true;
+    if (lineLower === 'tools' || lineLower === 'fast') return true;
+    if (lineLower.startsWith('model:') || lineLower.includes('window.__')) return true;
+    if (lineLower.includes('переключить боковую панель')) return true;
+    if (lineLower.includes('can make mistakes') || lineLower.includes('please double-check responses')) return true;
+    if (lineLower.includes('check important info') || lineLower.includes('see cookie preferences')) return true;
+    return false;
+  };
 
-  if (serviceId === 'claude') {
-    text = text
-      .replace(/\bincognito chat\b/ig, '')
-      .replace(/\bclaude is ai and can make mistakes\.? please double-check responses\.?\b/ig, '')
-      .trim();
-  }
+  const lines = text.split('\n');
+  const cleanedLines = [];
+  let pendingBlank = false;
 
-  return text.replace(/\s+/g, ' ').trim();
+  lines.forEach((rawLine) => {
+    const line = rawLine.replace(/\t/g, '  ').replace(/[ \t]+$/g, '');
+    const compact = line.replace(/[ \t]+/g, ' ').trim();
+    const lower = compact.toLowerCase();
+
+    if (dropLine(lower)) return;
+
+    if (!compact) {
+      if (cleanedLines.length > 0) pendingBlank = true;
+      return;
+    }
+
+    if (pendingBlank) {
+      cleanedLines.push('');
+      pendingBlank = false;
+    }
+    cleanedLines.push(line);
+  });
+
+  text = cleanedLines.join('\n').trim();
+
+  text = text
+    .replace(/(?:^|\n)(?:share|edit|retry|copy|regenerate)(?:\s+(?:share|edit|retry|copy|regenerate))*\s*$/i, '')
+    .replace(/(?:^|\n)(?:reply\.\.\.|open sidebar)\s*$/ig, '')
+    .trim();
+
+  return normalizeMultilineText(text);
 }
 
 function extractSessionId(result) {
@@ -1738,35 +1783,20 @@ async function getLatestAssistantReply(slot) {
       return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
     }
 
-    function cleanText(t) { return (t || '').replace(/\\s+/g, ' ').trim(); }
-    function normalizeCandidateText(rawText) {
-      let txt = cleanText(rawText);
-      if (serviceId === 'gemini') {
-        txt = txt.replace(/^conversation with gemini\\s*/i, '');
-        txt = txt.replace(/\\byou said\\b[\\s\\S]*?\\bgemini said\\b[:\\s]*/i, '');
-        txt = txt.replace(/\\bgemini said\\b[:\\s]*/i, '');
-        txt = txt.replace(/\\bfast gemini is ai and can make mistakes\\.?\\s*$/i, '');
-        txt = cleanText(txt);
-      }
-      return txt;
+    function normalizeText(t) {
+      return String(t || '')
+        .replace(/\\r/g, '')
+        .replace(/\\u00a0/g, ' ')
+        .replace(/[ \\t]+\\n/g, '\\n')
+        .replace(/\\n{3,}/g, '\\n\\n')
+        .trim();
+    }
+    function flatText(t) {
+      return normalizeText(t).replace(/\\n+/g, ' ').replace(/\\s+/g, ' ').trim();
     }
     function isComposerElement(el) {
       if (!el) return false;
-      return !!el.closest('form, footer, textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"]');
-    }
-    function isSidebarLikeElement(el, text) {
-      if (!el) return false;
-      if (serviceId === 'grok') {
-        return !!el.closest('aside, nav, header, [role="navigation"], [data-testid*="sidebar"], [class*="sidebar"], [class*="history"], [class*="conversation-list"]');
-      }
-      if (el.closest('aside, nav, header, [role="navigation"], [data-testid*="sidebar"], [class*="sidebar"], [class*="history"], [class*="conversation-list"]')) {
-        return true;
-      }
-      const t = (text || '').toLowerCase();
-      if (t.includes('your chats') || t.includes('temporary chat') || t.includes('chat history')) return true;
-      const linksAndButtons = el.querySelectorAll('a, button').length;
-      if (linksAndButtons >= 8 && (text || '').length < linksAndButtons * 40) return true;
-      return false;
+      return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"]');
     }
     function isMetadataLikeText(text) {
       const t = (text || '').toLowerCase();
@@ -1778,10 +1808,7 @@ async function getLatestAssistantReply(slot) {
         t === 'copy' ||
         t === 'regenerate' ||
         t.startsWith('model:') ||
-        t.includes('window.__') ||
-        t.includes('temporary chat') ||
-        t.includes('reply...') ||
-        t.includes('open sidebar')
+        t.includes('window.__')
       );
     }
 
@@ -1799,108 +1826,43 @@ async function getLatestAssistantReply(slot) {
     // Perplexity: prepend prose selector
     if (serviceId === 'perplexity') { selectors.unshift('div[class*="prose"]'); }
 
-    // Grok: prefer explicit message/markdown blocks before generic scraping.
-    if (serviceId === 'grok') {
-      const grokSelectors = [
-        '[data-testid*="assistant"]',
-        '[data-testid*="response"]',
-        '[class*="message"]',
-        '[class*="assistant"] [class*="markdown"]',
-        '[class*="message"] [class*="markdown"]',
-        'article [class*="markdown"]',
-        'article'
-      ];
-      const grokCandidates = [];
-      grokSelectors.forEach((sel) => {
-        try {
-          document.querySelectorAll(sel).forEach((el) => {
-            if (!visible(el)) return;
-            if (isComposerElement(el)) return;
-            const txt = cleanText(el.innerText || el.textContent);
-            if (txt.length < 20 || txt.length > 12000 || isMetadataLikeText(txt)) return;
-            if (isSidebarLikeElement(el, txt)) return;
-            const rect = el.getBoundingClientRect();
-            grokCandidates.push({ el: el, text: txt, bottom: rect.bottom, top: rect.top });
-          });
-        } catch (_) {}
-      });
-
-      if (grokCandidates.length > 0) {
-        const maxBottom = grokCandidates.reduce((acc, c) => Math.max(acc, c.bottom), -Infinity);
-        const nearBottom = grokCandidates.filter(c => c.bottom >= maxBottom - 220);
-        const pool = nearBottom.length > 0 ? nearBottom : grokCandidates;
-        pool.sort((a, b) => {
-          const bottomDiff = b.bottom - a.bottom;
-          if (Math.abs(bottomDiff) > 24) return bottomDiff;
-          return b.text.length - a.text.length;
-        });
-        return pool[0].text;
-      }
-
-      // Grok fallback: nearest substantial visible block right above the composer.
-      const composer = Array.from(document.querySelectorAll('textarea, [role="textbox"], [contenteditable="true"]'))
-        .find((el) => visible(el));
-      const composerTop = composer ? composer.getBoundingClientRect().top : window.innerHeight;
-      const nearComposerCandidates = [];
-      Array.from(document.querySelectorAll('article, section, div, p')).forEach((el) => {
-        if (!visible(el)) return;
-        if (isComposerElement(el)) return;
-        const txt = cleanText(el.innerText || el.textContent);
-        if (txt.length < 30 || txt.length > 4000) return;
-        if (isMetadataLikeText(txt) || isSidebarLikeElement(el, txt)) return;
-        const rect = el.getBoundingClientRect();
-        if (rect.bottom > composerTop - 6) return;
-        nearComposerCandidates.push({ el: el, text: txt, bottom: rect.bottom, top: rect.top });
-      });
-      if (nearComposerCandidates.length > 0) {
-        nearComposerCandidates.sort((a, b) => {
-          const bottomDiff = b.bottom - a.bottom;
-          if (Math.abs(bottomDiff) > 24) return bottomDiff;
-          return b.text.length - a.text.length;
-        });
-        return nearComposerCandidates[0].text;
-      }
-    }
-
     const candidates = [];
     selectors.forEach((sel) => {
       try {
         document.querySelectorAll(sel).forEach((el) => {
           if (!visible(el)) return;
           if (isComposerElement(el)) return;
-          const txt = normalizeCandidateText(el.innerText || el.textContent);
-          if (txt.length < 20 || txt.length > 12000 || isMetadataLikeText(txt)) return;
-          if (isSidebarLikeElement(el, txt)) return;
+          const raw = normalizeText(el.innerText || el.textContent);
+          const flat = flatText(raw);
+          if (flat.length < 20 || isMetadataLikeText(flat)) return;
           const rect = el.getBoundingClientRect();
-          candidates.push({ el: el, text: txt, bottom: rect.bottom, top: rect.top });
+          candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top });
         });
       } catch (_) {}
     });
 
-    // Fallback: only inside main content to avoid sidebar/history blobs
+    // Fallback: any visible article/div with enough text
     if (candidates.length === 0) {
-      const root = document.querySelector('main, [role="main"], #__next') || document.body;
-      Array.from(root.querySelectorAll('article, div')).filter(visible).forEach((el) => {
+      Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
         if (isComposerElement(el)) return;
-        const txt = normalizeCandidateText(el.innerText || el.textContent);
-        if (isSidebarLikeElement(el, txt)) return;
-        if (txt.length >= 80 && txt.length <= 12000 && !isMetadataLikeText(txt)) {
-          const rect = el.getBoundingClientRect();
-          candidates.push({ el: el, text: txt, bottom: rect.bottom, top: rect.top });
-        }
+        const raw = normalizeText(el.innerText || el.textContent);
+        const flat = flatText(raw);
+        if (flat.length < 80 || isMetadataLikeText(flat)) return;
+        const rect = el.getBoundingClientRect();
+        candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top });
       });
     }
 
     if (candidates.length === 0) return null;
 
-    // Drop broad wrapper containers when a nested child already has substantial text.
+    // Drop nested short fragments when a parent candidate carries the full reply.
     const pruned = candidates.filter((candidate) => {
       return !candidates.some((other) => {
         if (other === candidate) return false;
-        if (!candidate.el.contains(other.el)) return false;
-        if (other.text.length < 120) return false;
-        if (other.text.length < candidate.text.length * 0.2) return false;
-        return Math.abs(other.bottom - candidate.bottom) <= 220;
+        if (!other.el.contains(candidate.el)) return false;
+        if (other.flat.length < 120) return false;
+        if (candidate.flat.length >= other.flat.length * 0.8) return false;
+        return Math.abs(other.bottom - candidate.bottom) <= 180;
       });
     });
 
@@ -1909,11 +1871,10 @@ async function getLatestAssistantReply(slot) {
     const nearBottom = source.filter(c => c.bottom >= maxBottom - 260);
     const pool = nearBottom.length > 0 ? nearBottom : source;
     pool.sort((a, b) => {
-      const bottomDiff = b.bottom - a.bottom;
-      if (Math.abs(bottomDiff) > 24) return bottomDiff;
-      return a.text.length - b.text.length;
+      if (b.flat.length !== a.flat.length) return b.flat.length - a.flat.length;
+      return b.bottom - a.bottom;
     });
-    return normalizeCandidateText(pool[0].text);
+    return pool[0].raw;
 
   } catch (e) { return null; }
 })();
@@ -1933,6 +1894,7 @@ async function collectLatestRepliesFromEnabledSlots() {
   mergeLog(`Scraping ${enabledSlots.length} slot(s): ${enabledSlots.join(', ')}`, 'scrape');
   const responsesByModel = {};
   const aggregatedResponses = [];
+  const sourcePrompt = (window.mergeApiClient?.lastSourcePrompt || '').trim();
 
   const reserveModelName = (baseName) => {
     if (!responsesByModel[baseName]) return baseName;
@@ -1949,10 +1911,10 @@ async function collectLatestRepliesFromEnabledSlots() {
     const serviceName = SERVICE_PRESETS[serviceId]?.name || labels[slot]?.textContent || slot;
 
     const reply = await getLatestAssistantReply(slot);
-    const cleanedReply = sanitizeScrapedReply(serviceId, reply || '');
+    const cleanedReply = sanitizeScrapedReply(serviceId, reply || '', sourcePrompt);
     if (cleanedReply && cleanedReply.trim().length > 0) {
-      const preview = cleanedReply.length > 120 ? cleanedReply.slice(0, 120) + '…' : cleanedReply;
-      mergeLog(`${serviceName}: scraped ${cleanedReply.length} chars — "${preview}"`, 'scrape', cleanedReply);
+      const preview = cleanedReply.length > 120 ? `${cleanedReply.slice(0, 120)}...` : cleanedReply;
+      mergeLog(`${serviceName}: scraped ${cleanedReply.length} chars - "${preview}"`, 'scrape', cleanedReply);
       const modelName = reserveModelName(serviceName);
       responsesByModel[modelName] = cleanedReply;
       aggregatedResponses.push({
@@ -2099,8 +2061,7 @@ function mergeLog(message, type = 'info', detail = null) {
   const ts = new Date().toLocaleTimeString('ru', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const entry = document.createElement('div');
   entry.className = `debug-entry ${type}`;
-
-  const prefix = { info: '·', send: '↑', recv: '↓', error: '✗', warn: '!', scrape: '◎' }[type] || '·';
+  const safePrefix = { info: '*', send: '>', recv: '<', error: 'x', warn: '!', scrape: 'o' }[type] || '*';
 
   if (detail) {
     const header = document.createElement('div');
@@ -2115,12 +2076,12 @@ function mergeLog(message, type = 'info', detail = null) {
       body.classList.toggle('visible');
       expandBtn.textContent = body.classList.contains('visible') ? ' [collapse]' : ' [expand]';
     });
-    header.innerHTML = `<span class="debug-ts">${ts}</span><span>${prefix} ${message}</span>`;
+    header.innerHTML = `<span class="debug-ts">${ts}</span><span>${safePrefix} ${message}</span>`;
     header.appendChild(expandBtn);
     entry.appendChild(header);
     entry.appendChild(body);
   } else {
-    entry.innerHTML = `<span class="debug-ts">${ts}</span>${prefix} ${message}`;
+    entry.innerHTML = `<span class="debug-ts">${ts}</span>${safePrefix} ${message}`;
   }
 
   debugLogDiv.appendChild(entry);
