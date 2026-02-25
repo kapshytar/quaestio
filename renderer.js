@@ -3049,6 +3049,14 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestCo
       localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionId));
     }
     setIngestSessionIndicator(sessionId);
+    // Auto-save session snapshot to DB after successful ingest
+    // so the session appears in the list without manual "Save" click.
+    // Fire-and-forget — don't block the ingest flow.
+    const autoSaveName = String(sourcePrompt || '').trim().slice(0, 60) ||
+      `Session ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+    saveSessionSnapshot(autoSaveName, sessionId).catch(e =>
+      mergeLog(`Auto-save after ingest failed: ${e?.message || e}`, 'warn')
+    );
   }
 
   mergeLog(
@@ -3278,10 +3286,11 @@ function errorToText(error) {
   return String(error.message || error);
 }
 
-async function saveSessionSnapshot() {
+async function saveSessionSnapshot(customName, ingestSessionId) {
   const sessionData = {
-    sessionId: getCurrentSessionId(),
-    name: `Session ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`,
+    sessionId: ingestSessionId ?? getCurrentSessionId() ?? activeSessionId,
+    name: customName ||
+      `Session ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`,
     slotConfig: { ...slotConfig },
     slotUrls: {},
     slotEnabled: { ...getCurrentSlotEnabledState() }
@@ -3462,6 +3471,26 @@ async function deleteSession(sessionId) {
   await updateSessionsUI();
 }
 
+async function openSessionInNewWindow(sessionId) {
+  const sessions = await loadSessionsList();
+  const session = sessions.find(s => s.id === sessionId);
+  if (!session) {
+    setSessionsNotice(`Session not found: ${sessionId}`, 'warn');
+    return;
+  }
+  if (!window.electronAPI?.openSessionWindow) {
+    // Fallback: loadSession in current window
+    await loadSession(sessionId);
+    return;
+  }
+  try {
+    await window.electronAPI.openSessionWindow(session);
+  } catch (err) {
+    console.error('[openSessionInNewWindow] failed:', err);
+    setSessionsNotice(`Failed to open new window: ${err?.message || err}`, 'warn');
+  }
+}
+
 async function updateSessionsUI() {
   const container = document.getElementById('sessions-list');
   if (!container) return;
@@ -3497,6 +3526,7 @@ async function updateSessionsUI() {
       <div class="session-item-time">${timeStr}</div>
       <div class="session-item-actions">
         <button class="session-item-action" onclick="loadSession('${session.id}')">Load</button>
+        <button class="session-item-action" onclick="openSessionInNewWindow('${session.id}')">New Window</button>
         <button class="session-item-action" onclick="deleteSession('${session.id}')">Delete</button>
       </div>
     `;
@@ -3506,21 +3536,31 @@ async function updateSessionsUI() {
 }
 
 // Initialize sessions UI and save button
-// NOTE: Sessions are stored in database but NOT auto-restored on app restart.
-// User must manually select "Load" to restore a saved session.
 async function initSessionsTab() {
-  // Display list of saved sessions (from database or localStorage)
   await updateSessionsUI();
 
   const saveSessionBtn = document.getElementById('save-session-btn');
   if (saveSessionBtn) {
     saveSessionBtn.addEventListener('click', async () => {
       await saveSessionSnapshot();
-      saveSessionBtn.textContent = 'Γ£ô Saved!';
-      setTimeout(() => {
-        saveSessionBtn.textContent = '≡ƒÆ╛ Save Current';
-      }, 2000);
+      saveSessionBtn.textContent = '✓ Saved!';
+      setTimeout(() => { saveSessionBtn.textContent = '💾 Save Current'; }, 2000);
     });
+  }
+
+  // Auto-restore session passed via window query string (opened from another window)
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const sessionRaw = params.get('session');
+    if (sessionRaw) {
+      const session = JSON.parse(decodeURIComponent(sessionRaw));
+      if (session && session.id) {
+        // Small delay to let webviews init
+        setTimeout(() => loadSession(session.id), 1500);
+      }
+    }
+  } catch (e) {
+    console.warn('[initSessionsTab] Failed to parse session from query:', e);
   }
 }
 

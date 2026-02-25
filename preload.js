@@ -15,4 +15,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveSession: (params) => ipcRenderer.invoke('dream-save-session', params),
   loadSessions: (sessionId) => ipcRenderer.invoke('dream-load-sessions', sessionId),
   deleteSession: (sessionId) => ipcRenderer.invoke('dream-delete-session', sessionId),
+  openSessionWindow: (session) => ipcRenderer.invoke('dream-open-session-window', session),
 });

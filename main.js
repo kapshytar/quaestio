@@ -751,9 +751,49 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       p_session_id: parsedSessionId,
       p_limit: 20
     });
-    return Array.isArray(data) ? data : [];
+    const rows = Array.isArray(data) ? data : [];
+    // Map snake_case DB fields → camelCase for renderer
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      slotConfig: row.slot_config || row.slotConfig || {},
+      slotUrls: row.slot_urls || row.slotUrls || {},
+      slotEnabled: row.slot_enabled || row.slotEnabled || {},
+      updatedAt: row.updated_at || row.updatedAt || null
+    }));
   } catch (error) {
     console.error('[dream-load-sessions] failed:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('dream-open-session-window', async (_event, session) => {
+  try {
+    const win = new BrowserWindow({
+      width: 1600,
+      height: 1000,
+      minWidth: 1200,
+      minHeight: 800,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        nodeIntegration: false,
+        contextIsolation: true,
+        webviewTag: true,
+        webSecurity: false,
+        backgroundThrottling: true
+      },
+      backgroundColor: '#1a1a1a',
+      title: `Gunshi — ${session?.name || 'Session'}`,
+      icon: path.join(__dirname, IS_MAC ? 'icon.png' : 'icon.ico')
+    });
+    // Pass session as query param so the new window can restore it
+    const encoded = encodeURIComponent(JSON.stringify(session));
+    win.loadFile('index.html', { query: { session: encoded } });
+    win.on('focus', () => { mainWindow = win; });
+    win.on('closed', () => { if (mainWindow === win) mainWindow = getPrimaryWindow(); });
+    return { ok: true };
+  } catch (error) {
+    console.error('[dream-open-session-window] failed:', error);
     throw error;
   }
 });
