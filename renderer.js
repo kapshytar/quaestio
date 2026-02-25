@@ -164,6 +164,8 @@ let activeIngestTraceId = '';
 let ingestSequenceCounter = 0;
 let ingestSequenceBySourceMessageId = new Map();
 let activeSessionFingerprint = '';
+let activeSessionId = null; // in-memory session_id — set immediately when RPC returns
+let ingestQueue = Promise.resolve();
 
 function stableStringify(value) {
   const sort = (v) => {
@@ -526,6 +528,201 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
 
   try {
     // Focus the webview so the page's clipboard API works
+    try { webview.focus(); } catch (_) { }
+    await sleep(100);
+
+    const clickInfo = await webview.executeJavaScript(code);
+    if (!clickInfo || !clickInfo.clicked) {
+      return {
+        text: null,
+        diagnostics: {
+          method: 'copy',
+          clicked: false,
+          reason: clickInfo?.reason || 'unknown',
+          debug: clickInfo?.debug || null,
+          candidates: clickInfo?.candidates || 0
+        }
+      };
+    }
+
+    for (let attempt = 1; attempt <= 20; attempt += 1) {
+      await sleep(200);
+      // Try system clipboard first
+      const current = await readClipboardTextSafe();
+      const normalized = normalizeMultilineText(current);
+      if (normalized && current !== probeText) {
+        return {
+          text: current,
+          diagnostics: {
+            method: 'copy',
+            clicked: true,
+            source: 'clipboard',
+            attempts: attempt,
+            label: clickInfo.label || '',
+            candidates: clickInfo.candidates || 0
+          }
+        };
+      }
+      // Fallback: check intercepted clipboard.writeText inside webview
+      try {
+        const captured = await webview.executeJavaScript('window.__gunshiCopyCapture');
+        if (captured && typeof captured === 'string' && captured.trim().length > 0) {
+          return {
+            text: captured,
+            diagnostics: {
+              method: 'copy',
+              clicked: true,
+              source: 'interceptor',
+              attempts: attempt,
+              label: clickInfo.label || '',
+              candidates: clickInfo.candidates || 0
+            }
+          };
+        }
+      } catch (_) { }
+    }
+    return {
+      text: null,
+      diagnostics: {
+        method: 'copy',
+        clicked: true,
+        clipboardTimeout: true,
+        label: clickInfo.label || '',
+        candidates: clickInfo.candidates || 0
+      }
+    };
+  } catch (err) {
+    return {
+      text: null,
+      diagnostics: {
+        method: 'copy',
+        clicked: false,
+        reason: 'exception',
+        error: String(err?.message || err)
+      }
+    };
+  } finally {
+    await writeClipboardTextSafe(previousClipboard);
+  }
+}
+
+function readSessionContext() {
+  const raw = localStorage.getItem(AGGREGATED_SESSION_CONTEXT_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const sessionId = Number(parsed?.session_id);
+    const fingerprint = String(parsed?.fingerprint || '').trim();
+    if (!Number.isInteger(sessionId) || sessionId <= 0 || !fingerprint) return null;
+    return {
+      session_id: sessionId,
+      fingerprint
+    };
+    selectorHits[sel] = found.length;
+    found.forEach((el) => {
+      if (!el || seen.has(el)) return;
+      seen.add(el);
+      // Skip excluded-area check for ChatGPT's exact copy button (data-testid="copy-turn-action-button")
+      const isExactChatGPT = sel === '[data-testid="copy-turn-action-button"]';
+      if (!isExactChatGPT && inExcludedArea(el)) { rejected.push({ sel, reason: 'excluded-area', tag: el.tagName, label: labelOf(el).slice(0, 40) }); return; }
+      if (!hasLayout(el)) { rejected.push({ sel, reason: 'no-layout', tag: el.tagName, label: labelOf(el).slice(0, 40) }); return; }
+      const label = labelOf(el);
+      if (!isCopyLike(label, el)) { rejected.push({ sel, reason: 'not-copy-like', tag: el.tagName, label: label.slice(0, 40) }); return; }
+      const rect = el.getBoundingClientRect();
+      const msg = messageContainer(el);
+      const msgText = (msg?.innerText || msg?.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!msgText || msgText.length < 20) { rejected.push({ sel, reason: 'msg-too-short', tag: el.tagName, label: label.slice(0, 40), msgLen: msgText.length, hasContainer: !!msg }); return; }
+      let score = rect.bottom + Math.min(msgText.length, 5000) * 0.04;
+      if (sid === 'perplexity' && msgText.toLowerCase().includes('ask a follow-up')) score -= 1200;
+      candidates.push({ el, label, score, bottom: rect.bottom });
+    });
+  } catch (_) { }
+});
+
+// Fallback: scan ALL buttons on the page for debug
+let allButtonsSample = [];
+if (candidates.length === 0) {
+  try {
+    allButtonsSample = Array.from(document.querySelectorAll('button, [role="button"]')).slice(-20).map((el) => {
+      const lbl = (el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('mattooltip') || '').slice(0, 50);
+      const txt = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 50);
+      const tid = el.getAttribute('data-testid') || el.getAttribute('data-test-id') || '';
+      const cls = (el.className || '').toString().slice(0, 80);
+      return { tag: el.tagName, lbl, txt, tid, cls, w: Math.round(el.getBoundingClientRect().width), h: Math.round(el.getBoundingClientRect().height) };
+    });
+  } catch (_) { }
+}
+
+if (candidates.length === 0) return { clicked: false, reason: 'no-copy-button', debug: { lastContainerFound: !!lastContainer, selectorsChecked: selectors.length, selectorHits, rejected: rejected.slice(0, 10), allButtonsSample } };
+candidates.sort((a, b) => (b.score - a.score) || (b.bottom - a.bottom));
+const target = candidates[0];
+// Hover the button itself + its parent to ensure it becomes interactive
+const hoverTarget = target.el.closest('[class*="group"]') || target.el.parentElement || target.el;
+['mouseenter', 'mouseover', 'mousemove'].forEach((evt) => {
+  try { hoverTarget.dispatchEvent(new MouseEvent(evt, { bubbles: true })); } catch (_) { }
+  try { target.el.dispatchEvent(new MouseEvent(evt, { bubbles: true })); } catch (_) { }
+});
+try { target.el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_) { }
+try { window.focus(); } catch (_) { }
+
+// Intercept clipboard.writeText so we capture the text even if clipboard permission is denied
+window.__gunshiCopyCapture = null;
+try {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    const origWrite = navigator.clipboard.writeText.bind(navigator.clipboard);
+    navigator.clipboard.writeText = function (text) {
+      window.__gunshiCopyCapture = text;
+      return origWrite(text).catch(() => { });
+    };
+  }
+} catch (_) { }
+// Intercept clipboard.write() (ClipboardItem API) — used by Gemini, Grok
+try {
+  if (navigator.clipboard && navigator.clipboard.write) {
+    const origClipWrite = navigator.clipboard.write.bind(navigator.clipboard);
+    navigator.clipboard.write = async function (items) {
+      try {
+        for (const item of items) {
+          if (item.types && item.types.includes('text/plain')) {
+            const blob = await item.getType('text/plain');
+            window.__gunshiCopyCapture = await blob.text();
+            break;
+          }
+          // Also try text/html → strip tags as fallback
+          if (item.types && item.types.includes('text/html') && !window.__gunshiCopyCapture) {
+            const blob = await item.getType('text/html');
+            const html = await blob.text();
+            const tmp = document.createElement('div');
+            tmp.innerHTML = html;
+            window.__gunshiCopyCapture = tmp.textContent || tmp.innerText || '';
+          }
+        }
+      } catch (_) { }
+      return origClipWrite(items).catch(() => { });
+    };
+  }
+} catch (_) { }
+// Also intercept execCommand('copy') for older implementations
+try {
+  const origExec = document.execCommand.bind(document);
+  document.execCommand = function (cmd) {
+    if (cmd === 'copy') {
+      try { window.__gunshiCopyCapture = window.getSelection().toString(); } catch (_) { }
+    }
+    return origExec.apply(document, arguments);
+  };
+} catch (_) { }
+
+target.el.click();
+return { clicked: true, label: target.label, score: target.score, candidates: candidates.length };
+  } catch (e) {
+  return { clicked: false, reason: String(e && e.message || e) };
+}
+}) ();
+`;
+
+  try {
+    // Focus the webview so the page's clipboard API works
     try { webview.focus(); } catch (_) {}
     await sleep(100);
 
@@ -623,6 +820,7 @@ function readSessionContext() {
 
 function persistSessionContext(sessionId, fingerprint) {
   if (!Number.isInteger(sessionId) || sessionId <= 0 || !fingerprint) return;
+  activeSessionId = sessionId; // always keep in-memory copy
   const context = {
     session_id: sessionId,
     fingerprint,
@@ -633,6 +831,7 @@ function persistSessionContext(sessionId, fingerprint) {
 }
 
 function clearStoredSessionContext() {
+  activeSessionId = null;
   localStorage.removeItem(AGGREGATED_SESSION_CONTEXT_KEY);
   localStorage.removeItem(AGGREGATED_SESSION_ID_KEY);
 }
@@ -647,7 +846,7 @@ function getStoredSessionIdForFingerprint(fingerprint) {
 
 function extractConversationKey(serviceId, rawUrl) {
   const sid = String(serviceId || 'unknown').toLowerCase();
-  const fallback = `${sid}:no-url`;
+  const fallback = `${ sid }: no - url`;
   if (!rawUrl) return fallback;
 
   try {
@@ -684,10 +883,10 @@ function extractConversationKey(serviceId, rawUrl) {
       if (looksLikeId(tail)) chatId = tail;
     }
 
-    if (chatId) return `${sid}:${chatId}`;
-    return `${sid}:${origin}${path.toLowerCase()}`;
+    if (chatId) return `${ sid }:${ chatId } `;
+    return `${ sid }:${ origin }${ path.toLowerCase() } `;
   } catch (_) {
-    return `${sid}:${String(rawUrl).trim().toLowerCase()}`;
+    return `${ sid }:${ String(rawUrl).trim().toLowerCase() } `;
   }
 }
 
@@ -697,11 +896,52 @@ function buildSessionFingerprint(slots) {
     const url = getWebviewCurrentUrl(slot);
     const serviceId = detectServiceByUrl(url) || slotConfig[slot] || 'unknown';
     const conversationKey = extractConversationKey(serviceId, url);
-    return `${slot}:${conversationKey}`;
+    return `${ slot }:${ conversationKey } `;
   }).sort();
 
   if (parts.length === 0) return '';
-  return `fp_${hashString(stableStringify(parts))}`;
+  return `fp_${ hashString(stableStringify(parts)) } `;
+}
+
+function buildSessionFingerprintFromSnapshot(snapshot, slotEnabledState = null) {
+  const enabledState = slotEnabledState && typeof slotEnabledState === 'object'
+    ? slotEnabledState
+    : (snapshot?.slotEnabled || {});
+
+  const parts = SLOTS
+    .filter((slot) => enabledState[slot] !== false)
+    .map((slot) => {
+      const url = String(snapshot?.slotUrls?.[slot] || '').trim();
+      const serviceId = String(snapshot?.slotConfig?.[slot] || detectServiceByUrl(url) || 'unknown');
+      const conversationKey = extractConversationKey(serviceId, url);
+      return `${ slot }:${ conversationKey } `;
+    })
+    .sort();
+
+  if (parts.length === 0) return '';
+  return `fp_${ hashString(stableStringify(parts)) } `;
+}
+
+async function getLiveSlotUrl(slot) {
+  const webview = webviews[slot];
+  if (!webview) return '';
+
+  try {
+    const href = await webview.executeJavaScript(`
+  (function () {
+    try {
+      return String(window.location && window.location.href || '').trim();
+    } catch (_) {
+      return '';
+    }
+  })();
+`);
+    if (typeof href === 'string' && href.trim()) return href.trim();
+  } catch (_) {
+    // Fallback below.
+  }
+
+  return getWebviewCurrentUrl(slot);
 }
 
 function getStoredAggregatedSessionId() {
@@ -715,7 +955,7 @@ function getStoredAggregatedSessionId() {
 
 function buildAggregatedPayload(params) {
   const sourcePrompt = (params.sourcePrompt || '').trim();
-  const title = sourcePrompt || `Gunshi merge ${new Date().toISOString()}`;
+  const title = sourcePrompt || `Gunshi merge ${ new Date().toISOString() } `;
   const sessionId = Number.isInteger(params?.sessionId) && params.sessionId > 0
     ? params.sessionId
     : null;
@@ -739,7 +979,7 @@ async function ingestAggregatedPayload(payload, providerId, externalChatId, trac
   return window.electronAPI.sendAggregated({
     payload,
     scrapeMeta: Array.isArray(traceContext?.scrapeMeta) ? traceContext.scrapeMeta : [],
-    sourceMessageId: externalChatId || `${providerId || 'aggregated'}:${hashString(stableStringify(payload))}`,
+    sourceMessageId: externalChatId || `${ providerId || 'aggregated' }:${ hashString(stableStringify(payload)) } `,
     traceId: traceContext?.traceId || activeIngestTraceId || startIngestTrace(),
     sequence: Number.isInteger(traceContext?.sequence) ? traceContext.sequence : undefined
   });
@@ -771,7 +1011,7 @@ function normalizeTableDividerCell(cell) {
   const right = raw.endsWith(':');
   const hyphenCount = (raw.match(/-/g) || []).length;
   const core = '-'.repeat(Math.max(3, hyphenCount));
-  return `${left ? ':' : ''}${core}${right ? ':' : ''}`;
+  return `${ left ? ':' : '' }${ core }${ right ? ':' : '' } `;
 }
 
 function looksLikePipeRow(line) {
@@ -821,10 +1061,10 @@ function isOrderedListLine(line) {
 
 function normalizeListLine(line) {
   let out = String(line || '');
-  // UI bullets / dashes -> markdown list marker
+  // UI bullets / dashes → markdown list marker
   out = out.replace(/^\s*[•◦●▪▫‣∙]\s+/, '- ');
   out = out.replace(/^\s*[–—−]\s+/, '- ');
-  // "1) item" -> "1. item"
+  // "1) item" → "1. item"
   out = out.replace(/^(\s*)(\d+)\)\s+/, '$1$2. ');
   return out;
 }
@@ -850,7 +1090,7 @@ function toNoteTitle(rawText, fallback) {
   const text = pickMarkdown(rawText);
   if (!text) return fallback;
   const oneLine = text.replace(/\s+/g, ' ').trim();
-  return oneLine.length > 120 ? `${oneLine.slice(0, 117)}...` : oneLine;
+  return oneLine.length > 120 ? `${ oneLine.slice(0, 117) }...` : oneLine;
 }
 
 function isQualityReply(text, sourcePrompt = '') {
@@ -897,19 +1137,19 @@ function csvBlockToMarkdown(csvText) {
   if (lines.some(l => l.startsWith('|'))) return null;
   // Must not look like markdown heading, list, or code
   if (lines.some(l => /^[#>\-*`]/.test(l))) return null;
-  // All lines must have at least one comma
-  if (!lines.every(l => l.includes(','))) return null;
+// All lines must have at least one comma
+if (!lines.every(l => l.includes(','))) return null;
 
-  const rows = lines.map(parseCsvLine);
-  const expectedCols = rows[0].length;
-  if (expectedCols < 2) return null;
-  // Column count must be consistent (allow trailing empty cell)
-  if (!rows.every(r => r.length === expectedCols || r.length === expectedCols - 1)) return null;
+const rows = lines.map(parseCsvLine);
+const expectedCols = rows[0].length;
+if (expectedCols < 2) return null;
+// Column count must be consistent (allow trailing empty cell)
+if (!rows.every(r => r.length === expectedCols || r.length === expectedCols - 1)) return null;
 
-  const esc = s => String(s).replace(/\|/g, '\\|');
-  const fmtRow = r => '| ' + r.map(esc).join(' | ') + ' |';
-  const sep = '| ' + rows[0].map(() => '---').join(' | ') + ' |';
-  return [fmtRow(rows[0]), sep, ...rows.slice(1).map(fmtRow)].join('\n');
+const esc = s => String(s).replace(/\|/g, '\\|');
+const fmtRow = r => '| ' + r.map(esc).join(' | ') + ' |';
+const sep = '| ' + rows[0].map(() => '---').join(' | ') + ' |';
+return [fmtRow(rows[0]), sep, ...rows.slice(1).map(fmtRow)].join('\n');
 }
 
 // Convert pure-CSV reply OR CSV blocks embedded within text
@@ -1146,7 +1386,13 @@ async function sendAggregated(sessionId, title, responses, scrapeMeta = []) {
   const sourceMessageId = `msg_${hashString(stableStringify(payload))}`;
   const traceContext = getIngestTraceContext(sourceMessageId);
   traceContext.scrapeMeta = Array.isArray(scrapeMeta) ? scrapeMeta : [];
-  return ingestAggregatedPayload(payload, 'aggregated', sourceMessageId, traceContext);
+  return window.electronAPI.sendAggregated({
+    payload,
+    scrapeMeta: Array.isArray(scrapeMeta) ? scrapeMeta : [],
+    sourceMessageId,
+    traceId: traceContext?.traceId || activeIngestTraceId || startIngestTrace(),
+    sequence: Number.isInteger(traceContext?.sequence) ? traceContext.sequence : undefined
+  });
 }
 
 async function sendMerge(sessionId, title, markdown, scrapeMeta = []) {
@@ -1245,7 +1491,7 @@ function safeReload(slot) {
   // Fallback: get current URL via getURL() or pendingNavigation or static src
   let fallbackUrl = pendingNavigation[slot];
   if (!fallbackUrl) {
-    try { fallbackUrl = webview.getURL(); } catch (e) {}
+    try { fallbackUrl = webview.getURL(); } catch (e) { }
   }
   if (!fallbackUrl) {
     fallbackUrl = webview.getAttribute('src');
@@ -1738,6 +1984,10 @@ function clearIngestSessionIndicator() {
   if (ingestSessionLabel) ingestSessionLabel.textContent = 'Session ID';
 }
 
+// Fresh app start must not auto-attach to any previous ingest session.
+// Session reuse is allowed only after user explicitly loads a saved session
+// or after current runtime creates a new session via ingest RPC.
+clearStoredSessionContext();
 clearIngestSessionIndicator();
 
 function setIngestSessionIndicator(sessionId) {
@@ -1846,7 +2096,7 @@ function clearWebviewFindSelections() {
   SLOTS.forEach(slot => {
     try {
       webviews[slot]?.stopFindInPage('clearSelection');
-    } catch (_) {}
+    } catch (_) { }
   });
 }
 
@@ -1952,13 +2202,13 @@ function searchWebviews(scope, query, direction, isNewSearch) {
 
   if (scope === 'global') {
     SLOTS.forEach(slot => {
-      try { webviews[slot]?.findInPage(query, options); } catch (_) {}
+      try { webviews[slot]?.findInPage(query, options); } catch (_) { }
     });
     return;
   }
 
   if (!SLOTS.includes(scope)) return;
-  try { webviews[scope]?.findInPage(query, options); } catch (_) {}
+  try { webviews[scope]?.findInPage(query, options); } catch (_) { }
 }
 
 function runScopedSearch(direction = 'forward') {
@@ -2095,7 +2345,7 @@ function getSelectorsForSlot(slot) {
   let currentUrl = '';
   try {
     currentUrl = webview.getURL();
-  } catch (e) {}
+  } catch (e) { }
 
   const serviceId = detectServiceByUrl(currentUrl);
 
@@ -2139,7 +2389,7 @@ async function sendMessage(slot, text) {
 
   // Detect service for Perplexity-specific hack
   let currentUrl = '';
-  try { currentUrl = webview.getURL(); } catch (e) {}
+  try { currentUrl = webview.getURL(); } catch (e) { }
   const serviceId = detectServiceByUrl(currentUrl) || '';
 
   const messageJson = JSON.stringify(text);
@@ -2355,15 +2605,35 @@ async function sendToAll() {
   const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
   const sessionFingerprint = buildSessionFingerprint(enabledSlots);
   activeSessionFingerprint = sessionFingerprint;
-  const sessionIdHint = getStoredSessionIdForFingerprint(sessionFingerprint);
+  const sessionIdByFingerprint = getStoredSessionIdForFingerprint(sessionFingerprint);
+  const lastStoredSessionId = getStoredAggregatedSessionId();
+  // activeSessionId is updated in-memory as soon as the RPC returns, avoiding
+  // the race where a second message fires before localStorage is written.
+  const sessionIdHint = Number.isInteger(sessionIdByFingerprint) && sessionIdByFingerprint > 0
+    ? sessionIdByFingerprint
+    : (Number.isInteger(activeSessionId) && activeSessionId > 0
+      ? activeSessionId
+      : (Number.isInteger(lastStoredSessionId) && lastStoredSessionId > 0 ? lastStoredSessionId : null));
 
   if (Number.isInteger(sessionIdHint) && sessionIdHint > 0) {
-    localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionIdHint));
+    if (!sessionIdByFingerprint && Number.isInteger(sessionIdHint) && sessionIdHint > 0) {
+      mergeLog(
+        `Reusing session_id=${sessionIdHint} for fingerprint=${sessionFingerprint}`,
+        'info',
+        { fingerprint: sessionFingerprint }
+      );
+    }
+    if (sessionFingerprint) {
+      persistSessionContext(sessionIdHint, sessionFingerprint);
+    } else {
+      activeSessionId = sessionIdHint;
+      localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionIdHint));
+    }
     setIngestSessionIndicator(sessionIdHint);
   } else {
     clearStoredSessionContext();
     clearIngestSessionIndicator();
-    mergeLog('Session context reset: fresh chat fingerprint detected', 'info');
+    mergeLog('Session context reset: no prior session_id found', 'info');
   }
 
   for (const slot of enabledSlots) {
@@ -2374,12 +2644,15 @@ async function sendToAll() {
   messageInput.value = '';
   messageInput.focus();
 
-  ingestAfterSlotsPolling(text, enabledSlots.length, {
-    sessionFingerprint,
-    sessionIdHint
-  }).catch((error) => {
-    mergeLog(`Ingest polling failed: ${error?.message || error}`, 'error');
-  });
+  ingestQueue = ingestQueue
+    .catch(() => { })
+    .then(() => ingestAfterSlotsPolling(text, enabledSlots.length, {
+      sessionFingerprint,
+      sessionIdHint
+    }))
+    .catch((error) => {
+      mergeLog(`Ingest polling failed: ${error?.message || error}`, 'error');
+    });
 }
 
 sendBtn.addEventListener('click', sendToAll);
@@ -2634,6 +2907,10 @@ function initMergePanel() {
         applyTabsCollapsed();
       }
       localStorage.setItem('cfg-tabs-active', tab);
+      // Refresh sessions list whenever the sessions tab is opened
+      if (tab === 'sessions') {
+        updateSessionsUI().catch(err => console.warn('[sessions] refresh failed:', err));
+      }
     });
   });
 
@@ -2663,7 +2940,7 @@ async function getLatestAssistantReply(slot) {
   let currentUrl = '';
   try {
     currentUrl = webview.getURL();
-  } catch (e) {}
+  } catch (e) { }
   const serviceId = detectServiceByUrl(currentUrl) || '';
 
   const code = `
@@ -2831,7 +3108,7 @@ async function collectLatestRepliesFromEnabledSlots() {
   for (const slot of enabledSlots) {
     // Use service name from preset, not toggle label
     let currentUrl = '';
-    try { currentUrl = webviews[slot]?.getURL() || ''; } catch (e) {}
+    try { currentUrl = webviews[slot]?.getURL() || ''; } catch (e) { }
     const serviceId = detectServiceByUrl(currentUrl) || slotConfig[slot] || slot;
     const serviceName = SERVICE_PRESETS[serviceId]?.name || labels[slot]?.textContent || slot;
 
@@ -2880,7 +3157,7 @@ async function collectLatestRepliesFromEnabledSlots() {
         markdown: cleanedReply
       });
     } else {
-      mergeLog(`${serviceName}: no reply found (slot=${slot}, url=${currentUrl.slice(0,60)})`, 'warn');
+      mergeLog(`${serviceName}: no reply found (slot=${slot}, url=${currentUrl.slice(0, 60)})`, 'warn');
       const diagnostics = await getScrapeDiagnostics(slot, serviceId);
       mergeLog(`${serviceName} scrape diagnostics`, 'warn', diagnostics);
     }
@@ -2894,7 +3171,7 @@ async function getScrapeDiagnostics(slot, serviceIdHint = '') {
   if (!webview || !webviewReady[slot]) return null;
 
   let currentUrl = '';
-  try { currentUrl = webview.getURL() || ''; } catch (_) {}
+  try { currentUrl = webview.getURL() || ''; } catch (_) { }
   const serviceId = serviceIdHint || detectServiceByUrl(currentUrl) || '';
 
   const code = `
@@ -3001,39 +3278,31 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestCo
     return;
   }
 
+  const fingerprintForLookup = String(ingestContext.sessionFingerprint || activeSessionFingerprint || '').trim();
+  const sessionIdByFingerprint = fingerprintForLookup
+    ? getStoredSessionIdForFingerprint(fingerprintForLookup)
+    : null;
+  const runtimeSessionId = Number.isInteger(ingestContext.sessionIdHint) && ingestContext.sessionIdHint > 0
+    ? ingestContext.sessionIdHint
+    : (Number.isInteger(sessionIdByFingerprint) && sessionIdByFingerprint > 0
+      ? sessionIdByFingerprint
+      : getStoredAggregatedSessionId());
+
+  if (Number.isInteger(runtimeSessionId) && runtimeSessionId > 0) {
+    if (fingerprintForLookup) {
+      persistSessionContext(runtimeSessionId, fingerprintForLookup);
+    } else {
+      localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(runtimeSessionId));
+    }
+    setIngestSessionIndicator(runtimeSessionId);
+  }
+
   const payloadBuild = buildAggregatedPayload({
     sourcePrompt: sourcePrompt || '',
     responses: collected.aggregatedResponses,
-    sessionId: ingestContext.sessionIdHint
+    sessionId: runtimeSessionId
   });
-
-  mergeLog('Ingest aggregated request prepared', 'send', {
-    payload: payloadBuild.payload,
-    scrape_meta: collected.scrapeMeta || []
-  });
-
-  const ingestResult = await sendAggregated(
-    payloadBuild.sessionId,
-    payloadBuild.payload.title,
-    payloadBuild.payload.responses,
-    collected.scrapeMeta || []
-  );
-
-  const sessionId = extractSessionId(ingestResult);
-  if (ingestResult?.ok && sessionId) {
-    const fingerprint = String(ingestContext.sessionFingerprint || activeSessionFingerprint || '').trim();
-    if (fingerprint) {
-      persistSessionContext(sessionId, fingerprint);
-    } else {
-      localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionId));
-    }
-    setIngestSessionIndicator(sessionId);
-  }
-
-  mergeLog(
-    ingestResult?.ok ? 'Ingest RPC success' : 'Ingest RPC failed',
-    ingestResult?.ok ? 'recv' : 'warn',
-    ingestResult
+  ingestResult
   );
 }
 
@@ -3257,6 +3526,28 @@ function errorToText(error) {
   return String(error.message || error);
 }
 
+function normalizeSessionSnapshot(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const slotConfig = raw.slotConfig || raw.slot_config || {};
+  const slotUrls = raw.slotUrls || raw.slot_urls || {};
+  const slotEnabled = raw.slotEnabled || raw.slot_enabled || {};
+  const sessionIdRaw = raw.sessionId ?? raw.session_id ?? null;
+  const sessionId = Number.isInteger(sessionIdRaw)
+    ? sessionIdRaw
+    : (Number.isInteger(Number(sessionIdRaw)) ? Number(sessionIdRaw) : null);
+  return {
+    ...raw,
+    id: String(raw.id || ''),
+    sessionId,
+    name: String(raw.name || ''),
+    slotConfig: typeof slotConfig === 'object' && slotConfig ? slotConfig : {},
+    slotUrls: typeof slotUrls === 'object' && slotUrls ? slotUrls : {},
+    slotEnabled: typeof slotEnabled === 'object' && slotEnabled ? slotEnabled : {},
+    createdAt: raw.createdAt || raw.created_at || null,
+    updatedAt: raw.updatedAt || raw.updated_at || null
+  };
+}
+
 async function saveSessionSnapshot() {
   const sessionData = {
     sessionId: getCurrentSessionId(),
@@ -3266,12 +3557,13 @@ async function saveSessionSnapshot() {
     slotEnabled: { ...getCurrentSlotEnabledState() }
   };
 
-  SLOTS.forEach(slot => {
-    const webview = webviews[slot];
-    if (webview && webview.src) {
-      sessionData.slotUrls[slot] = webview.src;
-    }
-  });
+  for (const slot of SLOTS) {
+    const liveUrl = await getLiveSlotUrl(slot);
+    const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
+    const fallbackUrl = String(urlInput?.value || '').trim();
+    const resolvedUrl = liveUrl || fallbackUrl;
+    if (resolvedUrl) sessionData.slotUrls[slot] = resolvedUrl;
+  }
 
   // Save to database via IPC
   if (window.electronAPI?.saveSession) {
@@ -3359,7 +3651,8 @@ function getCurrentSessionId() {
 
 async function loadSession(sessionId) {
   const sessions = await loadSessionsList();
-  const session = sessions.find(s => s.id === sessionId);
+  const rawSession = sessions.find(s => String(s?.id || '') === String(sessionId || ''));
+  const session = normalizeSessionSnapshot(rawSession);
   if (!session) {
     console.warn('Session not found:', sessionId);
     setSessionsNotice(`Session not found: ${sessionId}`, 'warn');
@@ -3382,6 +3675,19 @@ async function loadSession(sessionId) {
   });
   saveSlotEnabledState(slotEnabled);
 
+  const restoredSessionId = Number(session?.sessionId);
+  if (Number.isInteger(restoredSessionId) && restoredSessionId > 0) {
+    const restoredFingerprint = buildSessionFingerprintFromSnapshot(session, slotEnabled);
+    if (restoredFingerprint) {
+      persistSessionContext(restoredSessionId, restoredFingerprint);
+    } else {
+      localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(restoredSessionId));
+    }
+    setIngestSessionIndicator(restoredSessionId);
+  } else {
+    clearIngestSessionIndicator();
+  }
+
   // Restore service selectors and navigate webviews for active slots.
   SLOTS.forEach(slot => {
     const serviceId = session.slotConfig?.[slot];
@@ -3393,13 +3699,10 @@ async function loadSession(sessionId) {
       }
     }
 
-    if (!slotEnabled[slot]) {
-      updateSlotLabel(slot, serviceId || slotConfig[slot]);
-      return;
-    }
-
     const webview = webviews[slot];
     const url = session.slotUrls?.[slot] || SERVICE_PRESETS[serviceId]?.url || '';
+    const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
+    if (urlInput) urlInput.value = url;
     if (url && webview) {
       try {
         const currentUrl = webview.getURL?.() || webview.getAttribute?.('src') || '';
@@ -3409,8 +3712,6 @@ async function loadSession(sessionId) {
       } catch (_) {
         webview.src = url;
       }
-      const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
-      if (urlInput) urlInput.value = url;
     }
     updateSlotLabel(slot, serviceId || slotConfig[slot]);
   });
@@ -3458,20 +3759,23 @@ async function updateSessionsUI() {
     return;
   }
 
-  sessions.forEach(session => {
-    const item = document.createElement('div');
-    item.className = 'session-item';
+  sessions
+    .map(normalizeSessionSnapshot)
+    .filter(Boolean)
+    .forEach(session => {
+      const item = document.createElement('div');
+      item.className = 'session-item';
 
-    const timeStr = new Date(session.updatedAt || session.timestamp || Date.now()).toLocaleString('ru-RU', {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
+      const timeStr = new Date(session.updatedAt || session.timestamp || Date.now()).toLocaleString('ru-RU', {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
 
-    const activeSlots = SLOTS.filter(s => session.slotEnabled[s] !== false).map(s => {
-      const service = session.slotConfig[s] || 'unknown';
-      return service.replace(/_api$/, '').toUpperCase();
-    }).join(', ');
+      const activeSlots = SLOTS.filter(s => session.slotEnabled[s] !== false).map(s => {
+        const service = session.slotConfig[s] || 'unknown';
+        return service.replace(/_api$/, '').toUpperCase();
+      }).join(', ');
 
-    item.innerHTML = `
+      item.innerHTML = `
       <div style="font-weight:600;color:#fff;">${session.name || activeSlots || '(no slots)'}</div>
       <div class="session-item-time">${timeStr}</div>
       <div class="session-item-actions">
@@ -3480,8 +3784,8 @@ async function updateSessionsUI() {
       </div>
     `;
 
-    container.appendChild(item);
-  });
+      container.appendChild(item);
+    });
 }
 
 // Initialize sessions UI and save button
