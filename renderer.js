@@ -1804,6 +1804,7 @@ async function getLatestAssistantReply(slot) {
       const grokSelectors = [
         '[data-testid*="assistant"]',
         '[data-testid*="response"]',
+        '[class*="message"]',
         '[class*="assistant"] [class*="markdown"]',
         '[class*="message"] [class*="markdown"]',
         'article [class*="markdown"]',
@@ -2291,3 +2292,4 @@ async function runMerge(isClarification = false, clarificationText = '', previou
 }
 
 console.log('Renderer initialized');
+
