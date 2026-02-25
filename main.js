@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, session, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -627,6 +627,23 @@ ipcMain.handle('dream-send-merge', async (_event, params) => {
 
 ipcMain.handle('dream-send-clarification', async (_event, params) => {
   return ingestDreamRpc('clarification', params);
+});
+
+ipcMain.handle('clipboard-read-text', async () => {
+  try {
+    return clipboard.readText() || '';
+  } catch (_) {
+    return '';
+  }
+});
+
+ipcMain.handle('clipboard-write-text', async (_event, text) => {
+  try {
+    clipboard.writeText(String(text || ''));
+    return true;
+  } catch (_) {
+    return false;
+  }
 });
 
 ipcMain.handle('import-cookies', async (event, jsonContent) => {

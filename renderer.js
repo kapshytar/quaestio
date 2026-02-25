@@ -226,6 +226,143 @@ function getWebviewCurrentUrl(slot) {
   }
 }
 
+async function readClipboardTextSafe() {
+  if (!window.electronAPI || typeof window.electronAPI.readClipboardText !== 'function') return '';
+  try {
+    return String(await window.electronAPI.readClipboardText() || '');
+  } catch (_) {
+    return '';
+  }
+}
+
+async function writeClipboardTextSafe(text) {
+  if (!window.electronAPI || typeof window.electronAPI.writeClipboardText !== 'function') return false;
+  try {
+    return !!(await window.electronAPI.writeClipboardText(String(text || '')));
+  } catch (_) {
+    return false;
+  }
+}
+
+async function tryCopyLatestAssistantReply(slot, serviceId = '') {
+  const webview = webviews[slot];
+  if (!webview || !webviewReady[slot]) return null;
+  if (!window.electronAPI || typeof window.electronAPI.readClipboardText !== 'function' || typeof window.electronAPI.writeClipboardText !== 'function') {
+    return null;
+  }
+
+  const previousClipboard = await readClipboardTextSafe();
+  const probeText = `__gunshi_copy_probe_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  await writeClipboardTextSafe(probeText);
+
+  const code = `
+(function() {
+  try {
+    const sid = ${JSON.stringify(serviceId || '')};
+    function visible(el) {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
+    }
+    function labelOf(el) {
+      return String(
+        el?.getAttribute?.('aria-label') ||
+        el?.getAttribute?.('title') ||
+        el?.textContent ||
+        ''
+      ).replace(/\\s+/g, ' ').trim();
+    }
+    function isCopyLike(label) {
+      const l = String(label || '').toLowerCase();
+      if (!l) return false;
+      return l.includes('copy') || l.includes('скоп') || l.includes('копир');
+    }
+    function inExcludedArea(el) {
+      if (!el) return true;
+      return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [class*="composer"], [class*="input"], form, nav, aside, [class*="sidebar"], [class*="history"]');
+    }
+    function messageContainer(el) {
+      return el?.closest?.('[data-message-author-role="assistant"], [data-testid*="assistant"], [class*="assistant"][class*="message"], article, [class*="response"], [class*="answer"]') || null;
+    }
+
+    const selectors = [
+      'button[aria-label*="Copy" i]',
+      'button[title*="Copy" i]',
+      '[role="button"][aria-label*="Copy" i]',
+      '[data-testid*="copy" i]',
+      'button[aria-label*="Скоп" i]',
+      'button[title*="Скоп" i]'
+    ];
+
+    const seen = new Set();
+    const candidates = [];
+    selectors.forEach((sel) => {
+      try {
+        document.querySelectorAll(sel).forEach((el) => {
+          if (!el || seen.has(el)) return;
+          seen.add(el);
+          if (!visible(el) || inExcludedArea(el)) return;
+          const label = labelOf(el);
+          if (!isCopyLike(label)) return;
+          const rect = el.getBoundingClientRect();
+          const msg = messageContainer(el);
+          const msgText = (msg?.innerText || msg?.textContent || '').replace(/\\s+/g, ' ').trim();
+          if (!msgText || msgText.length < 24) return;
+          let score = rect.bottom + Math.min(msgText.length, 5000) * 0.04;
+          if (sid === 'perplexity' && msgText.toLowerCase().includes('ask a follow-up')) score -= 1200;
+          candidates.push({ el, label, score, bottom: rect.bottom });
+        });
+      } catch (_) {}
+    });
+
+    if (candidates.length === 0) return { clicked: false, reason: 'no-copy-button' };
+    candidates.sort((a, b) => (b.score - a.score) || (b.bottom - a.bottom));
+    const target = candidates[0];
+    ['mouseenter', 'mouseover', 'mousemove'].forEach((evt) => {
+      try { target.el.dispatchEvent(new MouseEvent(evt, { bubbles: true })); } catch (_) {}
+    });
+    try { target.el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_) {}
+    target.el.click();
+    return { clicked: true, label: target.label, score: target.score, candidates: candidates.length };
+  } catch (e) {
+    return { clicked: false, reason: String(e && e.message || e) };
+  }
+})();
+`;
+
+  let copiedText = '';
+  let clickInfo = null;
+  try {
+    clickInfo = await webview.executeJavaScript(code);
+    if (!clickInfo || !clickInfo.clicked) return null;
+
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+      await sleep(120);
+      const current = await readClipboardTextSafe();
+      const normalized = normalizeMultilineText(current);
+      if (!normalized) continue;
+      if (current === probeText) continue;
+      copiedText = current;
+      return {
+        text: copiedText,
+        diagnostics: {
+          method: 'copy',
+          clicked: true,
+          attempts: attempt,
+          label: clickInfo.label || '',
+          candidates: clickInfo.candidates || 0
+        }
+      };
+    }
+    return null;
+  } catch (_) {
+    return null;
+  } finally {
+    await writeClipboardTextSafe(previousClipboard);
+  }
+}
+
 function readSessionContext() {
   const raw = localStorage.getItem(AGGREGATED_SESSION_CONTEXT_KEY);
   if (!raw) return null;
@@ -2156,7 +2293,9 @@ async function collectLatestRepliesFromEnabledSlots() {
     const serviceId = detectServiceByUrl(currentUrl) || slotConfig[slot] || slot;
     const serviceName = SERVICE_PRESETS[serviceId]?.name || labels[slot]?.textContent || slot;
 
-    const reply = await getLatestAssistantReply(slot);
+    const copied = await tryCopyLatestAssistantReply(slot, serviceId);
+    const reply = copied?.text || await getLatestAssistantReply(slot);
+    const extractionMethod = copied?.text ? 'copy' : 'dom';
     const cleanedReply = sanitizeScrapedReply(serviceId, reply || '', sourcePrompt);
     const normalizedPrompt = normalizeMultilineText(sourcePrompt).replace(/\s+/g, ' ').trim().toLowerCase();
     const normalizedClean = normalizeMultilineText(cleanedReply).replace(/\s+/g, ' ').trim().toLowerCase();
@@ -2178,11 +2317,13 @@ async function collectLatestRepliesFromEnabledSlots() {
         slot,
         service_id: serviceId || 'unknown',
         service_name: serviceName,
+        extraction_method: extractionMethod,
         source_url: currentUrl || SERVICE_PRESETS[serviceId]?.url || '',
         raw_chars: String(reply || '').length,
         clean_chars: cleanedReply.length,
         dropped_chars: Math.max(String(reply || '').length - cleanedReply.length, 0),
-        clean_preview: preview
+        clean_preview: preview,
+        copy_diagnostics: copied?.diagnostics || null
       };
       scrapeMeta.push(meta);
       slotReplies[slot] = {
