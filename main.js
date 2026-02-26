@@ -755,6 +755,9 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
     // Map snake_case DB fields → camelCase for renderer
     return rows.map(row => ({
       id: row.id,
+      sessionId: Number.isInteger(row.session_id)
+        ? row.session_id
+        : (Number.isInteger(row.sessionId) ? row.sessionId : null),
       name: row.name,
       slotConfig: row.slot_config || row.slotConfig || {},
       slotUrls: row.slot_urls || row.slotUrls || {},

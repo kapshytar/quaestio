@@ -3396,16 +3396,20 @@ async function loadSession(sessionId) {
     return;
   }
 
+  const sessionSlotConfig = session.slotConfig || session.slot_config || {};
+  const sessionSlotUrls = session.slotUrls || session.slot_urls || {};
+  const sessionSlotEnabled = session.slotEnabled || session.slot_enabled || {};
+
   // Restore slot configuration
-  Object.assign(slotConfig, session.slotConfig);
+  Object.assign(slotConfig, sessionSlotConfig);
   saveSlotConfig(slotConfig);
 
   // Restore enabled state
   const slotEnabled = {};
   SLOTS.forEach(slot => {
-    const hasExplicitFlag = Object.prototype.hasOwnProperty.call(session.slotEnabled || {}, slot);
-    const hasSlotData = Boolean(session.slotConfig?.[slot] || session.slotUrls?.[slot]);
-    slotEnabled[slot] = hasExplicitFlag ? session.slotEnabled[slot] !== false : hasSlotData;
+    const hasExplicitFlag = Object.prototype.hasOwnProperty.call(sessionSlotEnabled, slot);
+    const hasSlotData = Boolean(sessionSlotConfig?.[slot] || sessionSlotUrls?.[slot]);
+    slotEnabled[slot] = hasExplicitFlag ? sessionSlotEnabled[slot] !== false : hasSlotData;
     if (toggles[slot]) {
       toggles[slot].checked = slotEnabled[slot];
     }
@@ -3414,7 +3418,7 @@ async function loadSession(sessionId) {
 
   // Restore service selectors and navigate webviews for active slots.
   SLOTS.forEach(slot => {
-    const serviceId = session.slotConfig?.[slot];
+    const serviceId = sessionSlotConfig?.[slot];
     if (serviceId) {
       slotConfig[slot] = serviceId;
       const select = document.querySelector(`.service-select[data-slot="${slot}"]`);
@@ -3429,7 +3433,7 @@ async function loadSession(sessionId) {
     }
 
     const webview = webviews[slot];
-    const url = session.slotUrls?.[slot] || SERVICE_PRESETS[serviceId]?.url || '';
+    const url = sessionSlotUrls?.[slot] || SERVICE_PRESETS[serviceId]?.url || '';
     if (url && webview) {
       try {
         const currentUrl = webview.getURL?.() || webview.getAttribute?.('src') || '';
@@ -3447,7 +3451,7 @@ async function loadSession(sessionId) {
   saveSlotConfig(slotConfig);
 
   // Restore session context so subsequent messages continue in THIS session
-  const numericId = Number(sessionId);
+  const numericId = Number(session.sessionId ?? session.session_id ?? sessionId);
   if (Number.isInteger(numericId) && numericId > 0) {
     activeSessionId = numericId;
     const enabledSlots = SLOTS.filter(slot => slotEnabled[slot]);
@@ -3455,6 +3459,9 @@ async function loadSession(sessionId) {
     activeSessionFingerprint = fingerprint;
     persistSessionContext(numericId, fingerprint);
     setIngestSessionIndicator(numericId);
+  } else {
+    clearStoredSessionContext();
+    clearIngestSessionIndicator();
   }
 
   console.log('Session loaded:', sessionId, '→ activeSessionId =', activeSessionId);
@@ -3523,18 +3530,22 @@ async function updateSessionsUI() {
     const item = document.createElement('div');
     item.className = 'session-item';
 
-    const timeStr = new Date(session.updatedAt || session.timestamp || Date.now()).toLocaleString('ru-RU', {
+    const slotConfigMap = session.slotConfig || session.slot_config || {};
+    const slotEnabledMap = session.slotEnabled || session.slot_enabled || {};
+    const displaySessionId = session.sessionId ?? session.session_id ?? session.id;
+
+    const timeStr = new Date(session.updatedAt || session.updated_at || session.timestamp || Date.now()).toLocaleString('ru-RU', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
 
-    const activeSlots = SLOTS.filter(s => session.slotEnabled[s] !== false).map(s => {
-      const service = session.slotConfig[s] || 'unknown';
+    const activeSlots = SLOTS.filter(s => slotEnabledMap[s] !== false).map(s => {
+      const service = slotConfigMap[s] || 'unknown';
       return service.replace(/_api$/, '').toUpperCase();
     }).join(', ');
 
     item.innerHTML = `
       <div style="font-weight:600;color:#fff;">
-        <span style="color:#9ad89a;font-size:10px;font-weight:400;margin-right:4px;">#${session.id}</span>
+        <span style="color:#9ad89a;font-size:10px;font-weight:400;margin-right:4px;">#${displaySessionId}</span>
         ${session.name || activeSlots || '(no slots)'}
       </div>
       <div class="session-item-time">${timeStr}</div>
