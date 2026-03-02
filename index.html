@@ -98,6 +98,121 @@
       border-radius: 4px; color: #ccc; cursor: pointer; font-size: 11px; transition: background 0.2s;
     }
     .control-btn:hover { background: #444; color: #fff; }
+    #project-selector-btn {
+      width: 28px;
+      min-width: 28px;
+      padding: 0;
+      font-size: 15px;
+      line-height: 1;
+      text-align: center;
+    }
+    #project-selector-btn.active {
+      color: #9cc4ff;
+      border-color: #3b82f6;
+      background: #1a2a42;
+    }
+    #project-panel-scrim {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.42);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+      z-index: 2200;
+    }
+    #project-panel-scrim.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    #project-panel {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 320px;
+      max-width: calc(100vw - 36px);
+      height: 100vh;
+      background: #252525;
+      border-right: 1px solid #3a3a3a;
+      box-shadow: 2px 0 16px rgba(0, 0, 0, 0.4);
+      transform: translateX(-100%);
+      transition: transform 0.2s ease;
+      z-index: 2300;
+      display: flex;
+      flex-direction: column;
+    }
+    #project-panel.visible { transform: translateX(0); }
+    #project-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 12px 10px;
+      border-bottom: 1px solid #3a3a3a;
+      background: #1f1f1f;
+    }
+    #project-panel-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #d7d7d7;
+    }
+    #project-panel-close {
+      border: 1px solid #4a4a4a;
+      background: #2a2a2a;
+      color: #c8c8c8;
+      border-radius: 4px;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      line-height: 1;
+    }
+    #project-panel-close:hover { background: #353535; color: #fff; }
+    #project-tree {
+      padding: 8px 6px 12px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .project-tree-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      min-height: 28px;
+      border-radius: 6px;
+      padding: 2px 6px;
+      color: #d4d4d4;
+      font-size: 13px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .project-tree-row:hover { background: #313131; }
+    .project-tree-row.selected {
+      background: rgba(59, 130, 246, 0.2);
+      color: #b8d7ff;
+    }
+    .project-tree-chevron {
+      width: 26px;
+      height: 26px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: #aeb8c8;
+      font-size: 17px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+      flex: 0 0 26px;
+    }
+    .project-tree-chevron:hover { background: #383838; color: #d8e5ff; }
+    .project-tree-chevron.placeholder {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .project-tree-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
     #side-panel-wrapper { display: flex; flex-shrink: 0; position: relative; }
     #side-panel {
       width: 420px; min-width: 300px; max-width: 45vw;
@@ -419,6 +534,7 @@
         <div class="toggle"><input type="checkbox" id="toggle-slot-2" checked><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
         <div class="toggle"><input type="checkbox" id="toggle-slot-3" checked><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
         <div class="toggle"><input type="checkbox" id="toggle-slot-4" checked><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
+        <button class="control-btn" id="project-selector-btn" title="Projects">☰</button>
         <button class="control-btn" id="toggle-address-bar-btn">Hide Address Bar</button>
         <button class="control-btn" id="import-cookies-btn">Import 📥</button>
         <div id="mobile-ua-toggle" title="Switch to mobile user-agent (loads lighter mobile pages)">
@@ -438,6 +554,15 @@
       </div>
     </div>
   </div>
+
+  <div id="project-panel-scrim"></div>
+  <aside id="project-panel" aria-label="Project selector">
+    <div id="project-panel-header">
+      <span id="project-panel-title">Projects</span>
+      <button id="project-panel-close" title="Close projects">×</button>
+    </div>
+    <div id="project-tree"></div>
+  </aside>
 
   <!-- Side Panel Wrapper -->
   <div id="side-panel-wrapper">

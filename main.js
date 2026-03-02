@@ -473,6 +473,51 @@ async function callSupabaseRpc(rpcName, body) {
   }
 }
 
+function buildSupabaseRestUrl(endpointPath) {
+  const { supabaseUrl } = getSupabaseConfig();
+  const base = String(supabaseUrl || '').replace(/\/+$/, '');
+  const endpoint = String(endpointPath || '').replace(/^\/+/, '');
+  return `${base}/rest/v1/${endpoint}`;
+}
+
+async function callSupabaseRestGet(endpointPath, allow404 = false) {
+  const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('Supabase env is not configured (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).');
+  }
+
+  const response = await fetch(buildSupabaseRestUrl(endpointPath), {
+    method: 'GET',
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      Accept: 'application/json'
+    }
+  });
+
+  const rawText = await response.text();
+  if (allow404 && response.status === 404) {
+    return [];
+  }
+  if (!response.ok) {
+    throw new Error(`REST ${endpointPath} failed: ${response.status} ${rawText}`);
+  }
+  if (!rawText) return [];
+  try {
+    return JSON.parse(rawText);
+  } catch (_) {
+    return [];
+  }
+}
+
+function normalizeSlotUrlEntry(value) {
+  if (typeof value === 'string') return value.trim();
+  if (!value || typeof value !== 'object') return '';
+  if (typeof value.url === 'string' && value.url.trim()) return value.url.trim();
+  if (typeof value.value === 'string' && value.value.trim()) return value.value.trim();
+  return '';
+}
+
 function isValidDreamPayload(kind, payload) {
   if (!payload || typeof payload !== 'object') return false;
 
@@ -809,6 +854,43 @@ ipcMain.handle('dream-delete-session', async (_event, sessionId) => {
   } catch (error) {
     console.error('[dream-delete-session] failed:', error);
     throw error;
+  }
+});
+
+ipcMain.handle('dream-list-project-tree-data', async () => {
+  try {
+    const tags = await callSupabaseRestGet('tags?select=id,name&order=name.asc');
+    const tagParents = await callSupabaseRestGet('tag_parents?select=tag_id,parent_id', true);
+    return {
+      ok: true,
+      tags: Array.isArray(tags) ? tags : [],
+      tagParents: Array.isArray(tagParents) ? tagParents : []
+    };
+  } catch (error) {
+    console.error('[dream-list-project-tree-data] failed:', error);
+    return { ok: false, error: error?.message || 'Failed to load projects', tags: [], tagParents: [] };
+  }
+});
+
+ipcMain.handle('dream-get-project-slot-urls', async (_event, projectId) => {
+  const normalizedId = String(projectId || '').trim();
+  if (!normalizedId) {
+    return { ok: true, slotUrls: {} };
+  }
+  try {
+    const encodedId = encodeURIComponent(normalizedId);
+    const rows = await callSupabaseRestGet(`tags?select=id,slot_urls&id=eq.${encodedId}&limit=1`);
+    const row = Array.isArray(rows) && rows.length > 0 && rows[0] && typeof rows[0] === 'object' ? rows[0] : null;
+    const rawSlotUrls = row && row.slot_urls && typeof row.slot_urls === 'object' ? row.slot_urls : {};
+    const slotUrls = {};
+    Object.entries(rawSlotUrls).forEach(([key, value]) => {
+      const url = normalizeSlotUrlEntry(value);
+      if (url) slotUrls[key] = url;
+    });
+    return { ok: true, slotUrls };
+  } catch (error) {
+    console.error('[dream-get-project-slot-urls] failed:', error);
+    return { ok: false, error: error?.message || 'Failed to load project URLs', slotUrls: {} };
   }
 });
 

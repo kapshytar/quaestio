@@ -131,6 +131,11 @@ const importCookiesBtn = document.getElementById('import-cookies-btn');
 const toggleAddressBarBtn = document.getElementById('toggle-address-bar-btn');
 const collapseBtn = document.getElementById('collapse-toolbar');
 const togglesContainer = document.getElementById('toggles');
+const projectSelectorBtn = document.getElementById('project-selector-btn');
+const projectPanelEl = document.getElementById('project-panel');
+const projectPanelScrimEl = document.getElementById('project-panel-scrim');
+const projectPanelCloseBtn = document.getElementById('project-panel-close');
+const projectTreeEl = document.getElementById('project-tree');
 
 // Merge panel elements (populated after DOM ready)
 let mergeProviderSelect, mergeApiKeyInput, mergeEndpointInput, mergeModelInput;
@@ -151,6 +156,13 @@ let focusedSearchScope = 'global'; // global | merge | slot-1..slot-4
 let searchSession = { query: '', scope: 'global' };
 const mergeSearchState = { query: '', marks: [], index: -1 };
 let searchDebounceTimer = null;
+let activeProjectId = null;
+let activeProjectSlotUrls = {};
+let projectTreeNodes = [];
+let isProjectPanelVisible = false;
+let isProjectTreeLoaded = false;
+const expandedProjectNodeIds = new Set();
+let projectSlotUrlLoadGeneration = 0;
 const AGGREGATED_SESSION_ID_KEY = 'aggregated-ingest-session-id';
 const AGGREGATED_SESSION_CONTEXT_KEY = 'aggregated-ingest-session-context';
 const SLOT_ENABLED_STATE_KEY = 'slot-enabled-state';
@@ -1281,6 +1293,280 @@ function saveSlotConfig(config) {
 
 const slotConfig = loadSlotConfig();
 
+function parseSlotIndex(slotId) {
+  const match = String(slotId || '').match(/^slot-(\d+)$/);
+  if (!match) return -1;
+  const idx = Number(match[1]) - 1;
+  return Number.isInteger(idx) && idx >= 0 ? idx : -1;
+}
+
+function buildProjectUrlLookupKeys(slotId, serviceId) {
+  const slotIndex = parseSlotIndex(slotId);
+  const slotKey = slotIndex >= 0 ? `slot-${slotIndex + 1}` : String(slotId || '').trim().toLowerCase();
+  const normalizedServiceId = String(serviceId || '').trim().toLowerCase();
+  return Array.from(new Set([slotKey, normalizedServiceId].filter(Boolean)));
+}
+
+function resolveActiveProjectUrlForSlot(slotId, serviceId) {
+  if (!activeProjectId || !activeProjectSlotUrls || typeof activeProjectSlotUrls !== 'object') return '';
+  const keys = buildProjectUrlLookupKeys(slotId, serviceId);
+  for (const key of keys) {
+    const value = String(activeProjectSlotUrls[key] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function getCurrentSlotUrl(slotId) {
+  const webview = webviews[slotId];
+  if (!webview) return '';
+  try {
+    return String(webview.getURL?.() || webview.getAttribute?.('src') || '').trim();
+  } catch (_) {
+    return String(webview.getAttribute?.('src') || '').trim();
+  }
+}
+
+function applyProjectOverridesToVisibleSlots() {
+  SLOTS.forEach((slot) => {
+    const serviceId = String(slotConfig[slot] || '').trim();
+    if (!serviceId) return;
+    const overrideUrl = resolveActiveProjectUrlForSlot(slot, serviceId);
+    if (!overrideUrl) return;
+    safeLoadURL(slot, overrideUrl);
+    const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
+    if (urlInput) urlInput.value = overrideUrl;
+  });
+}
+
+async function loadProjectSlotUrls(projectId) {
+  if (!window.electronAPI || typeof window.electronAPI.getProjectSlotUrls !== 'function') {
+    return {};
+  }
+  const response = await window.electronAPI.getProjectSlotUrls(projectId);
+  if (!response || response.ok !== true || !response.slotUrls || typeof response.slotUrls !== 'object') {
+    return {};
+  }
+  return response.slotUrls;
+}
+
+function buildProjectTreeNodes(tags, tagParents) {
+  const namesById = new Map();
+  (Array.isArray(tags) ? tags : []).forEach((row) => {
+    const id = String(row?.id || '').trim();
+    const name = String(row?.name || '').trim();
+    if (!id || !name) return;
+    namesById.set(id, name);
+  });
+  if (namesById.size === 0) return [];
+
+  const parentIdsByChild = new Map();
+  namesById.forEach((_, id) => parentIdsByChild.set(id, new Set()));
+  (Array.isArray(tagParents) ? tagParents : []).forEach((edge) => {
+    const childId = String(edge?.tag_id || edge?.tagId || '').trim();
+    const parentId = String(edge?.parent_id || edge?.parentId || '').trim();
+    if (!childId || !parentId) return;
+    if (!namesById.has(childId) || !namesById.has(parentId) || childId === parentId) return;
+    parentIdsByChild.get(childId)?.add(parentId);
+  });
+
+  const childrenByParent = new Map();
+  const pushChild = (parentId, childId) => {
+    const list = childrenByParent.get(parentId) || [];
+    list.push(childId);
+    childrenByParent.set(parentId, list);
+  };
+
+  parentIdsByChild.forEach((parentIds, childId) => {
+    if (!parentIds || parentIds.size === 0) {
+      pushChild(null, childId);
+      return;
+    }
+    parentIds.forEach((parentId) => pushChild(parentId, childId));
+  });
+
+  childrenByParent.forEach((list, parentId) => {
+    const deduped = Array.from(new Set(list));
+    deduped.sort((a, b) => {
+      const an = String(namesById.get(a) || '').toLowerCase();
+      const bn = String(namesById.get(b) || '').toLowerCase();
+      return an.localeCompare(bn);
+    });
+    childrenByParent.set(parentId, deduped);
+  });
+
+  const buildNode = (nodeId, pathSet) => {
+    const nextPath = new Set(pathSet);
+    nextPath.add(nodeId);
+    const childNodes = (childrenByParent.get(nodeId) || [])
+      .filter((childId) => !nextPath.has(childId))
+      .map((childId) => buildNode(childId, nextPath));
+    return { id: nodeId, name: namesById.get(nodeId) || '', children: childNodes };
+  };
+
+  const rootIds = childrenByParent.get(null) || [];
+  const finalRootIds = rootIds.length > 0
+    ? rootIds
+    : Array.from(namesById.keys()).sort((a, b) => {
+      const an = String(namesById.get(a) || '').toLowerCase();
+      const bn = String(namesById.get(b) || '').toLowerCase();
+      return an.localeCompare(bn);
+    });
+
+  return Array.from(new Set(finalRootIds)).map((rootId) => buildNode(rootId, new Set()));
+}
+
+function ensureExpandedProjectNodes(nodes) {
+  if (expandedProjectNodeIds.size > 0) return;
+  const walk = (list) => {
+    list.forEach((node) => {
+      if (!node || !Array.isArray(node.children) || node.children.length === 0) return;
+      expandedProjectNodeIds.add(node.id);
+      walk(node.children);
+    });
+  };
+  walk(Array.isArray(nodes) ? nodes : []);
+}
+
+function renderProjectTreeNode(container, node, depth) {
+  const hasChildren = Array.isArray(node.children) && node.children.length > 0;
+  const isExpanded = expandedProjectNodeIds.has(node.id);
+  const isSelected = activeProjectId === node.id;
+
+  const row = document.createElement('div');
+  row.className = `project-tree-row${isSelected ? ' selected' : ''}`;
+  row.style.paddingLeft = `${6 + depth * 14}px`;
+
+  const chevron = document.createElement('button');
+  chevron.type = 'button';
+  chevron.className = `project-tree-chevron${hasChildren ? '' : ' placeholder'}`;
+  chevron.textContent = hasChildren ? (isExpanded ? '\u25BE' : '\u25B8') : '\u25B8';
+  if (hasChildren) {
+    chevron.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (expandedProjectNodeIds.has(node.id)) expandedProjectNodeIds.delete(node.id);
+      else expandedProjectNodeIds.add(node.id);
+      renderProjectPanel(projectTreeNodes);
+    });
+  }
+  row.appendChild(chevron);
+
+  const name = document.createElement('span');
+  name.className = 'project-tree-name';
+  name.textContent = node.name || 'Untitled';
+  row.appendChild(name);
+
+  row.addEventListener('click', async () => {
+    await setActiveProject(node.id);
+    hideProjectPanel();
+  });
+
+  container.appendChild(row);
+
+  if (hasChildren && isExpanded) {
+    node.children.forEach((child) => renderProjectTreeNode(container, child, depth + 1));
+  }
+}
+
+function renderProjectPanel(nodes = projectTreeNodes) {
+  if (!projectTreeEl) return;
+  projectTreeEl.innerHTML = '';
+
+  const noProjectRow = document.createElement('div');
+  noProjectRow.className = `project-tree-row${!activeProjectId ? ' selected' : ''}`;
+  noProjectRow.style.paddingLeft = '6px';
+  noProjectRow.innerHTML = '<button type="button" class="project-tree-chevron placeholder">▸</button><span class="project-tree-name">No Project</span>';
+  noProjectRow.addEventListener('click', async () => {
+    await setActiveProject(null);
+    hideProjectPanel();
+  });
+  projectTreeEl.appendChild(noProjectRow);
+
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.padding = '8px 10px';
+    empty.style.color = '#888';
+    empty.style.fontSize = '12px';
+    empty.textContent = 'No projects found';
+    projectTreeEl.appendChild(empty);
+    return;
+  }
+
+  nodes.forEach((node) => renderProjectTreeNode(projectTreeEl, node, 0));
+}
+
+function setProjectPanelVisible(visible) {
+  isProjectPanelVisible = !!visible;
+  if (projectPanelEl) projectPanelEl.classList.toggle('visible', isProjectPanelVisible);
+  if (projectPanelScrimEl) projectPanelScrimEl.classList.toggle('visible', isProjectPanelVisible);
+}
+
+async function loadAndRenderProjectTree() {
+  if (!window.electronAPI || typeof window.electronAPI.listProjectTreeData !== 'function') {
+    projectTreeNodes = [];
+    renderProjectPanel(projectTreeNodes);
+    return;
+  }
+  try {
+    const response = await window.electronAPI.listProjectTreeData();
+    if (!response || response.ok !== true) {
+      projectTreeNodes = [];
+      renderProjectPanel(projectTreeNodes);
+      return;
+    }
+    projectTreeNodes = buildProjectTreeNodes(response.tags, response.tagParents);
+    ensureExpandedProjectNodes(projectTreeNodes);
+    renderProjectPanel(projectTreeNodes);
+    isProjectTreeLoaded = true;
+  } catch (error) {
+    console.warn('[projects] load failed:', error?.message || error);
+    projectTreeNodes = [];
+    renderProjectPanel(projectTreeNodes);
+  }
+}
+
+function showProjectPanel() {
+  setProjectPanelVisible(true);
+  if (!isProjectTreeLoaded) {
+    loadAndRenderProjectTree();
+    return;
+  }
+  renderProjectPanel(projectTreeNodes);
+}
+
+function hideProjectPanel() {
+  setProjectPanelVisible(false);
+}
+
+async function setActiveProject(projectId) {
+  const normalizedId = projectId ? String(projectId).trim() : '';
+  activeProjectId = normalizedId || null;
+  if (projectSelectorBtn) {
+    projectSelectorBtn.classList.toggle('active', !!activeProjectId);
+  }
+  renderProjectPanel(projectTreeNodes);
+
+  const loadGen = ++projectSlotUrlLoadGeneration;
+  if (!activeProjectId) {
+    activeProjectSlotUrls = {};
+    SLOTS.forEach((slot) => {
+      const serviceId = String(slotConfig[slot] || '').trim();
+      const preset = SERVICE_PRESETS[serviceId];
+      if (preset?.url) {
+        safeLoadURL(slot, preset.url);
+        const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
+        if (urlInput) urlInput.value = preset.url;
+      }
+    });
+    return;
+  }
+
+  const slotUrls = await loadProjectSlotUrls(activeProjectId);
+  if (loadGen !== projectSlotUrlLoadGeneration || activeProjectId !== normalizedId) return;
+  activeProjectSlotUrls = slotUrls;
+  applyProjectOverridesToVisibleSlots();
+}
+
 function loadSlotEnabledState() {
   const defaults = {};
   SLOTS.forEach(slot => { defaults[slot] = true; });
@@ -1352,10 +1638,12 @@ function initSlot(slot) {
 
   // Load URL
   const preset = SERVICE_PRESETS[serviceId];
-  if (preset) {
-    webview.src = preset.url;
+  const projectOverride = resolveActiveProjectUrlForSlot(slot, serviceId);
+  const targetUrl = projectOverride || (preset ? preset.url : '');
+  if (targetUrl) {
+    webview.src = targetUrl;
     const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
-    if (urlInput) urlInput.value = preset.url;
+    if (urlInput) urlInput.value = targetUrl;
   }
 }
 
@@ -1384,21 +1672,42 @@ document.querySelectorAll('.service-select').forEach(select => {
     saveSlotConfig(slotConfig);
     updateSlotLabel(slot, serviceId);
 
+    const projectOverride = resolveActiveProjectUrlForSlot(slot, serviceId);
     const preset = SERVICE_PRESETS[serviceId];
-    if (preset) {
+    if (projectOverride) {
+      safeLoadURL(slot, projectOverride);
+      const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
+      if (urlInput) urlInput.value = projectOverride;
+    } else if (preset) {
       safeLoadURL(slot, preset.url);
       const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
       if (urlInput) urlInput.value = preset.url;
     } else {
-      // Custom ΓÇö user types URL in address bar
+      // Custom URL: keep current URL visible for editing.
       const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
       if (urlInput) {
-        urlInput.value = '';
+        urlInput.value = getCurrentSlotUrl(slot);
         urlInput.focus();
       }
     }
   });
 });
+
+if (projectSelectorBtn) {
+  projectSelectorBtn.addEventListener('click', () => {
+    if (isProjectPanelVisible) {
+      hideProjectPanel();
+    } else {
+      showProjectPanel();
+    }
+  });
+}
+if (projectPanelCloseBtn) {
+  projectPanelCloseBtn.addEventListener('click', hideProjectPanel);
+}
+if (projectPanelScrimEl) {
+  projectPanelScrimEl.addEventListener('click', hideProjectPanel);
+}
 
 // ========== COLLAPSE TOOLBAR TOGGLE ==========
 let collapsed = localStorage.getItem('top-collapsed');
@@ -2035,6 +2344,12 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
     e.preventDefault();
     openSearchOverlay();
+    return;
+  }
+
+  if (isProjectPanelVisible && e.key === 'Escape') {
+    e.preventDefault();
+    hideProjectPanel();
     return;
   }
 

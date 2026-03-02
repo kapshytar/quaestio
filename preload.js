@@ -16,4 +16,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadSessions: (sessionId) => ipcRenderer.invoke('dream-load-sessions', sessionId),
   deleteSession: (sessionId) => ipcRenderer.invoke('dream-delete-session', sessionId),
   openSessionWindow: (session) => ipcRenderer.invoke('dream-open-session-window', session),
+  listProjectTreeData: () => ipcRenderer.invoke('dream-list-project-tree-data'),
+  getProjectSlotUrls: (projectId) => ipcRenderer.invoke('dream-get-project-slot-urls', projectId),
 });
