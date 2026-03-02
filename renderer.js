@@ -2673,15 +2673,11 @@ async function sendToAll() {
   const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
   const sessionFingerprint = buildSessionFingerprint(enabledSlots);
   activeSessionFingerprint = sessionFingerprint;
-  const sessionIdByFingerprint = getStoredSessionIdForFingerprint(sessionFingerprint);
-  const lastStoredSessionId = getStoredAggregatedSessionId();
-  // activeSessionId is set immediately when ingest RPC returns, bridging the gap
-  // if a second message fires before the first ingest has written to localStorage.
-  const sessionIdHint = Number.isInteger(sessionIdByFingerprint) && sessionIdByFingerprint > 0
-    ? sessionIdByFingerprint
-    : (Number.isInteger(activeSessionId) && activeSessionId > 0
-      ? activeSessionId
-      : (Number.isInteger(lastStoredSessionId) && lastStoredSessionId > 0 ? lastStoredSessionId : null));
+  // Reuse session_id only from current runtime (or explicit session load).
+  // Do not auto-resume old localStorage session on cold start.
+  const sessionIdHint = Number.isInteger(activeSessionId) && activeSessionId > 0
+    ? activeSessionId
+    : null;
 
   if (Number.isInteger(sessionIdHint) && sessionIdHint > 0) {
     if (sessionFingerprint) {
