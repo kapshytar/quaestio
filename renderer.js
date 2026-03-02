@@ -2935,10 +2935,10 @@ function initMergePanel() {
   function applyTabsCollapsed() {
     if (tabsCollapsed) {
       tabsBody?.classList.add('collapsed');
-      if (tabsCollapseBtn) tabsCollapseBtn.textContent = 'Γû╝';
+      if (tabsCollapseBtn) tabsCollapseBtn.textContent = 'v';
     } else {
       tabsBody?.classList.remove('collapsed');
-      if (tabsCollapseBtn) tabsCollapseBtn.textContent = 'Γû▓';
+      if (tabsCollapseBtn) tabsCollapseBtn.textContent = '^';
     }
   }
   applyTabsCollapsed();
