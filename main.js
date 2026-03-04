@@ -772,15 +772,17 @@ ipcMain.handle('dream-send-clarification', async (_event, params) => {
 
 ipcMain.handle('dream-save-session', async (_event, params) => {
   try {
-    const raw = await callSupabaseRpc('save_aggregator_session', {
+    const raw = await callSupabaseRpc('aggregator_sessions_bridge_v1', {
+      p_action: 'save',
+      p_record_id: null,
       p_session_id: params?.sessionId ?? null,
       p_name: String(params?.name || '').trim(),
       p_slot_config: params?.slotConfig || {},
       p_slot_urls: params?.slotUrls || {},
-      p_slot_enabled: params?.slotEnabled || {}
+      p_slot_enabled: params?.slotEnabled || {},
+      p_limit: 20
     });
-    // Supabase RETURNS TABLE gives back an array — unwrap first row
-    const result = Array.isArray(raw) ? raw[0] : raw;
+    const result = raw?.data ?? null;
     logSessionRpc('save_aggregator_session result', { id: result?.id, name: result?.name });
     return result || null;
   } catch (error) {
@@ -792,11 +794,17 @@ ipcMain.handle('dream-save-session', async (_event, params) => {
 ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
   try {
     const parsedSessionId = Number.isInteger(sessionId) ? sessionId : null;
-    const data = await callSupabaseRpc('list_aggregator_sessions', {
+    const data = await callSupabaseRpc('aggregator_sessions_bridge_v1', {
+      p_action: 'list',
+      p_record_id: null,
       p_session_id: parsedSessionId,
+      p_name: null,
+      p_slot_config: null,
+      p_slot_urls: null,
+      p_slot_enabled: null,
       p_limit: 20
     });
-    const rows = Array.isArray(data) ? data : [];
+    const rows = Array.isArray(data?.data) ? data.data : [];
     // Map snake_case DB fields → camelCase for renderer
     return rows.map(row => ({
       id: row.id,
@@ -848,8 +856,15 @@ ipcMain.handle('dream-open-session-window', async (_event, session) => {
 
 ipcMain.handle('dream-delete-session', async (_event, sessionId) => {
   try {
-    return await callSupabaseRpc('delete_aggregator_session', {
-      p_session_id: String(sessionId || '')
+    return await callSupabaseRpc('aggregator_sessions_bridge_v1', {
+      p_action: 'delete',
+      p_record_id: String(sessionId || ''),
+      p_session_id: null,
+      p_name: null,
+      p_slot_config: null,
+      p_slot_urls: null,
+      p_slot_enabled: null,
+      p_limit: 1
     });
   } catch (error) {
     console.error('[dream-delete-session] failed:', error);
