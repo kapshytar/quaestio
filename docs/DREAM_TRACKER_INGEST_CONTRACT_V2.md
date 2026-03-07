@@ -26,6 +26,7 @@ Payload:
   "schema": "aggregated_ingest_v1",
   "session_id": 123, 
   "title": "Aggregated Test Node",
+  "project_tag_id": "8d4f75ea-a4cf-4625-9c89-b82aa3642c06",
   "active_segment_id": "gemini",
   "responses": [
     {
@@ -49,6 +50,8 @@ Payload:
 Notes:
 - If `session_id` omitted/null, backend allocates new integer `session_id`.
 - Repeated calls with same `session_id` upsert the same aggregated note.
+- If `project_tag_id` is provided, backend attaches the aggregated note to that Dream Tracker project.
+- If `project_tag_id` is omitted and this aggregated note continues an existing session chain, backend inherits `note_tags` from the previous aggregated note.
 - Response contains `note_id` and `session_id`.
 
 ---
@@ -70,6 +73,7 @@ Payload:
 Behavior:
 - Always creates NEW note (`type=2`) under aggregated note (`type=1`) for this `session_id`.
 - Backend derives canonical note title from `prompt_text`.
+- Backend inherits project membership (`note_tags`) from the parent aggregated note.
 - Legacy `title` payloads are still accepted, but clients should treat them as deprecated.
 
 ---
@@ -95,6 +99,7 @@ Behavior:
   - latest merge if no clarifications yet.
 - So calls form chain: `merge -> clar1 -> clar2 -> clar3...`
 - Backend derives canonical note title from `prompt_text`.
+- Backend inherits project membership (`note_tags`) from the parent clarification/merge chain.
 - Legacy `title` payloads are still accepted, but clients should treat them as deprecated.
 
 ---
@@ -176,7 +181,7 @@ Keep source URL in markdown if needed:
 ## Final requirement for both apps
 
 Implement 3 explicit send methods:
-- `sendAggregated(sessionId?, title, responses, activeSegmentId?)`
+- `sendAggregated(sessionId?, title, responses, activeSegmentId?, projectTagId?)`
 - `sendMerge(sessionId, title, markdown)`
 - `sendClarification(sessionId, title, markdown)`
 
