@@ -734,12 +734,14 @@ function buildAggregatedPayload(params) {
   const sessionId = Number.isInteger(params?.sessionId) && params.sessionId > 0
     ? params.sessionId
     : null;
+  const projectTagId = String(params?.projectTagId || '').trim() || null;
   const responses = Array.isArray(params?.responses) ? params.responses : [];
 
   return {
     payload: {
       schema: 'aggregated_ingest_v1',
       session_id: sessionId,
+      project_tag_id: projectTagId,
       title,
       responses
     },
@@ -1141,7 +1143,7 @@ function extractSessionId(result) {
   return null;
 }
 
-async function sendAggregated(sessionId, title, responses, scrapeMeta = []) {
+async function sendAggregated(sessionId, title, responses, scrapeMeta = [], projectTagId = null) {
   const normalizedResponses = Array.isArray(responses)
     ? responses.map((item, idx) => ({
       segment_id: String(item?.segment_id || `segment_${idx + 1}`),
@@ -1154,6 +1156,7 @@ async function sendAggregated(sessionId, title, responses, scrapeMeta = []) {
   const payload = {
     schema: 'aggregated_ingest_v1',
     session_id: Number.isInteger(sessionId) ? sessionId : null,
+    project_tag_id: String(projectTagId || '').trim() || null,
     title: title || `Aggregated ${new Date().toISOString()}`,
     responses: normalizedResponses
   };
@@ -3335,7 +3338,8 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestCo
   const payloadBuild = buildAggregatedPayload({
     sourcePrompt: sourcePrompt || '',
     responses: collected.aggregatedResponses,
-    sessionId: ingestContext.sessionIdHint
+    sessionId: ingestContext.sessionIdHint,
+    projectTagId: activeProjectId
   });
 
   mergeLog('Ingest aggregated request prepared', 'send', {
@@ -3347,7 +3351,8 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestCo
     payloadBuild.sessionId,
     payloadBuild.payload.title,
     payloadBuild.payload.responses,
-    collected.scrapeMeta || []
+    collected.scrapeMeta || [],
+    payloadBuild.payload.project_tag_id
   );
 
   const sessionId = extractSessionId(ingestResult);

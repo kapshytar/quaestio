@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.3] - 2026-03-07
+
+### Changed
+- Desktop aggregated ingest now forwards the selected project as `project_tag_id` so newly created notes land in the active Dream Tracker project.
+
+### Fixed
+- Project-selected desktop chats now create aggregated notes that attach to the chosen project and keep that attachment for downstream merge/clarification notes via backend inheritance.
+
 ## [v0.1.2] - 2026-03-07
 
 ### Changed
