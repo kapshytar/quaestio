@@ -62,13 +62,15 @@ Payload:
 {
   "schema": "merge_ingest_v1",
   "session_id": 123,
-  "title": "Merged Clarification A",
+  "prompt_text": "Original user prompt for this merge",
   "markdown": "Merged summary across providers..."
 }
 ```
 
 Behavior:
 - Always creates NEW note (`type=2`) under aggregated note (`type=1`) for this `session_id`.
+- Backend derives canonical note title from `prompt_text`.
+- Legacy `title` payloads are still accepted, but clients should treat them as deprecated.
 
 ---
 
@@ -81,7 +83,7 @@ Payload:
 {
   "schema": "clarification_ingest_v1",
   "session_id": 123,
-  "title": "Clarification step 1",
+  "prompt_text": "Follow-up question from the user",
   "markdown": "Follow-up clarification..."
 }
 ```
@@ -92,6 +94,8 @@ Behavior:
   - latest clarification in chain of latest merge, or
   - latest merge if no clarifications yet.
 - So calls form chain: `merge -> clar1 -> clar2 -> clar3...`
+- Backend derives canonical note title from `prompt_text`.
+- Legacy `title` payloads are still accepted, but clients should treat them as deprecated.
 
 ---
 

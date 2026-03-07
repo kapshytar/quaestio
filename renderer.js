@@ -1164,7 +1164,7 @@ async function sendAggregated(sessionId, title, responses, scrapeMeta = []) {
   return ingestAggregatedPayload(payload, 'aggregated', sourceMessageId, traceContext);
 }
 
-async function sendMerge(sessionId, title, markdown, scrapeMeta = []) {
+async function sendMerge(sessionId, promptText, markdown, scrapeMeta = []) {
   if (!Number.isInteger(sessionId) || sessionId <= 0) {
     return { ok: false, error: 'session_id is required for merge.' };
   }
@@ -1175,7 +1175,7 @@ async function sendMerge(sessionId, title, markdown, scrapeMeta = []) {
   const payload = {
     schema: 'merge_ingest_v1',
     session_id: sessionId,
-    title: title || `Merge ${new Date().toISOString()}`,
+    prompt_text: String(promptText || '').trim(),
     markdown: pickMarkdown(markdown)
   };
   const sourceMessageId = `msg_${hashString(stableStringify(payload))}`;
@@ -1189,7 +1189,7 @@ async function sendMerge(sessionId, title, markdown, scrapeMeta = []) {
   });
 }
 
-async function sendClarification(sessionId, title, markdown, scrapeMeta = []) {
+async function sendClarification(sessionId, promptText, markdown, scrapeMeta = []) {
   if (!Number.isInteger(sessionId) || sessionId <= 0) {
     return { ok: false, error: 'session_id is required for clarification.' };
   }
@@ -1200,7 +1200,7 @@ async function sendClarification(sessionId, title, markdown, scrapeMeta = []) {
   const payload = {
     schema: 'clarification_ingest_v1',
     session_id: sessionId,
-    title: title || `Clarification ${new Date().toISOString()}`,
+    prompt_text: String(promptText || '').trim(),
     markdown: pickMarkdown(markdown)
   };
   const sourceMessageId = `msg_${hashString(stableStringify(payload))}`;
@@ -3548,14 +3548,12 @@ async function runMerge(isClarification = false, clarificationText = '', previou
 
     const sessionId = getStoredAggregatedSessionId();
     if (Number.isInteger(sessionId) && sessionId > 0) {
-      const clarificationTitle = toNoteTitle(clarificationText, `Clarification ${new Date().toISOString()}`);
-      const mergeTitle = toNoteTitle(client.lastSourcePrompt, `Merge ${new Date().toISOString()}`);
-      const rpcTitle = isClarification
-        ? clarificationTitle
-        : mergeTitle;
+      const promptText = isClarification
+        ? clarificationText
+        : client.lastSourcePrompt;
       const rpcResult = isClarification
-        ? await sendClarification(sessionId, rpcTitle, cleanResponse, lastScrapeMeta)
-        : await sendMerge(sessionId, rpcTitle, cleanResponse, lastScrapeMeta);
+        ? await sendClarification(sessionId, promptText, cleanResponse, lastScrapeMeta)
+        : await sendMerge(sessionId, promptText, cleanResponse, lastScrapeMeta);
 
       mergeLog(
         rpcResult?.ok

@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.2] - 2026-03-07
+
+### Changed
+- Desktop merge/clarification ingest now sends raw `prompt_text` to Dream Tracker instead of generating canonical note titles locally.
+
+### Fixed
+- Merge notes created from desktop now inherit the same canonical `Merge:` title behavior as Android through backend ingest normalization.
+
 ## [v0.1.1] - 2026-03-05
 
 ### Added
