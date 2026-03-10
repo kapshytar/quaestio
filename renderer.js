@@ -1143,6 +1143,18 @@ function extractSessionId(result) {
   return null;
 }
 
+function getOriginPlatformCode() {
+  const platform = String(navigator?.platform || '').toLowerCase();
+  const userAgent = String(navigator?.userAgent || '').toLowerCase();
+
+  if (userAgent.includes('android')) return 'AND';
+  if (/(iphone|ipad|ipod)/.test(userAgent) || /(iphone|ipad|ipod)/.test(platform)) return 'IOS';
+  if (platform.includes('win') || userAgent.includes('windows')) return 'WIN';
+  if (platform.includes('mac') || userAgent.includes('mac os')) return 'MAC';
+  if (platform.includes('linux') || userAgent.includes('linux')) return 'LNX';
+  return 'WEB';
+}
+
 async function sendAggregated(sessionId, title, responses, scrapeMeta = [], projectTagId = null) {
   const normalizedResponses = Array.isArray(responses)
     ? responses.map((item, idx) => ({
@@ -1157,6 +1169,7 @@ async function sendAggregated(sessionId, title, responses, scrapeMeta = [], proj
     schema: 'aggregated_ingest_v1',
     session_id: Number.isInteger(sessionId) ? sessionId : null,
     project_tag_id: String(projectTagId || '').trim() || null,
+    platform_code: getOriginPlatformCode(),
     title: title || `Aggregated ${new Date().toISOString()}`,
     responses: normalizedResponses
   };
@@ -1178,6 +1191,7 @@ async function sendMerge(sessionId, promptText, markdown, scrapeMeta = []) {
   const payload = {
     schema: 'merge_ingest_v1',
     session_id: sessionId,
+    platform_code: getOriginPlatformCode(),
     prompt_text: String(promptText || '').trim(),
     markdown: pickMarkdown(markdown)
   };
@@ -1203,6 +1217,7 @@ async function sendClarification(sessionId, promptText, markdown, scrapeMeta = [
   const payload = {
     schema: 'clarification_ingest_v1',
     session_id: sessionId,
+    platform_code: getOriginPlatformCode(),
     prompt_text: String(promptText || '').trim(),
     markdown: pickMarkdown(markdown)
   };

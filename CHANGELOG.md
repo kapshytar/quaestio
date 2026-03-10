@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.4] - 2026-03-10
+
+### Changed
+- Desktop aggregated, merge, and clarification ingest now send `platform_code` so Dream Tracker can stamp each created note with its immutable stage origin (`WIN`/`MAC`/`LNX`).
+
+### Fixed
+- Cross-device session chains can now be diagnosed per note stage instead of only at session level.
+
 ## [v0.1.3] - 2026-03-07
 
 ### Changed
