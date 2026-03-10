@@ -27,20 +27,33 @@
     constructor() {
       this.paused = false;
       this.pendingMerge = null;
+      this.pendingAggregation = null;
     }
 
     beginPendingMerge(payload) {
       this.pendingMerge = payload;
-      this.paused = false;
     }
 
     clearPendingMerge() {
       this.pendingMerge = null;
-      this.paused = false;
     }
 
     hasPendingMerge() {
       return !!this.pendingMerge;
+    }
+
+    beginPendingAggregation(payload) {
+      this.pendingAggregation = payload;
+      this.paused = false;
+    }
+
+    clearPendingAggregation() {
+      this.pendingAggregation = null;
+      if (!this.pendingMerge) this.paused = false;
+    }
+
+    hasPendingAggregation() {
+      return !!this.pendingAggregation;
     }
 
     pause() {

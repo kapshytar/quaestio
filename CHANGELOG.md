@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.7] - 2026-03-11
+
+### Changed
+- `Collect now` in desktop aggregation now re-scrapes the latest slot replies and re-ingests the current aggregated root note instead of overwriting the most recent type-1 note by session.
+- Desktop aggregation state now tracks the active aggregated note UUID separately from `session_id`, so restored sessions can continue with a new question without corrupting older roots in the same session.
+
+### Fixed
+- After restoring a session and asking a new question, forced aggregation no longer rewrites the previous question root just because both notes share the same session number.
+- Manual re-collection now overwrites only the exact current aggregated note when one already exists; otherwise it creates the first aggregated note for the current question.
+
 ## [v0.1.6] - 2026-03-11
 
 ### Added

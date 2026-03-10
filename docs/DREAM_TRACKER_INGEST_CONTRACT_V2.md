@@ -27,6 +27,8 @@ Payload:
   "session_id": 123, 
   "title": "Aggregated Test Node",
   "project_tag_id": "8d4f75ea-a4cf-4625-9c89-b82aa3642c06",
+  "aggregated_note_id": "2a5e5d59-bb22-4d90-86e1-4c0e80bf50d2",
+  "replace_existing": true,
   "platform_code": "WIN",
   "active_segment_id": "gemini",
   "responses": [
@@ -50,7 +52,8 @@ Payload:
 
 Notes:
 - If `session_id` omitted/null, backend allocates new integer `session_id`.
-- Repeated calls with same `session_id` upsert the same aggregated note.
+- Normal create path inserts a new aggregated note for the current question in that session.
+- Manual overwrite path must pass both `aggregated_note_id` and `replace_existing=true`; backend will then update that exact aggregated root note only.
 - If `project_tag_id` is provided, backend attaches the aggregated note to that Dream Tracker project.
 - If `project_tag_id` is omitted and this aggregated note continues an existing session chain, backend inherits `note_tags` from the previous aggregated note.
 - Backend persists immutable `origin_platform_code` on the created note from `platform_code` (`WIN`, `MAC`, `LNX`, `AND`, `IOS`, `WEB`).
@@ -187,7 +190,7 @@ Keep source URL in markdown if needed:
 ## Final requirement for both apps
 
 Implement 3 explicit send methods:
-- `sendAggregated(sessionId?, title, responses, activeSegmentId?, projectTagId?)`
+- `sendAggregated(sessionId?, title, responses, activeSegmentId?, projectTagId?, aggregatedNoteId?, replaceExisting?)`
 - `sendMerge(sessionId, title, markdown)`
 - `sendClarification(sessionId, title, markdown)`
 

@@ -179,9 +179,22 @@ let ingestSequenceBySourceMessageId = new Map();
 const lastDomScrapeDebugBySlot = new Map();
 let activeSessionFingerprint = '';
 let activeSessionId = null; // in-memory session_id — set immediately when RPC returns
+let activeAggregatedNoteId = null; // current question root note for manual Collect now overwrite
 const aggregationControl = window.AggregationControl
   ? new window.AggregationControl.AggregationControlState()
-  : { paused: false, pendingMerge: null, beginPendingMerge(payload) { this.pendingMerge = payload; this.paused = false; }, clearPendingMerge() { this.pendingMerge = null; this.paused = false; }, hasPendingMerge() { return !!this.pendingMerge; }, pause() { this.paused = true; }, resume() { this.paused = false; } };
+  : {
+    paused: false,
+    pendingMerge: null,
+    pendingAggregation: null,
+    beginPendingMerge(payload) { this.pendingMerge = payload; },
+    clearPendingMerge() { this.pendingMerge = null; if (!this.pendingAggregation) this.paused = false; },
+    hasPendingMerge() { return !!this.pendingMerge; },
+    beginPendingAggregation(payload) { this.pendingAggregation = payload; this.paused = false; },
+    clearPendingAggregation() { this.pendingAggregation = null; if (!this.pendingMerge) this.paused = false; },
+    hasPendingAggregation() { return !!this.pendingAggregation; },
+    pause() { this.paused = true; },
+    resume() { this.paused = false; }
+  };
 const slotAggregationStatuses = {};
 const AGGREGATION_WAIT_MAX_CHECKS = 12;
 const AGGREGATION_WAIT_INTERVAL_MS = 2500;
@@ -724,6 +737,7 @@ function persistSessionContext(sessionId, fingerprint) {
 
 function clearStoredSessionContext() {
   activeSessionId = null;
+  activeAggregatedNoteId = null;
   localStorage.removeItem(AGGREGATED_SESSION_CONTEXT_KEY);
   localStorage.removeItem(AGGREGATED_SESSION_ID_KEY);
 }
@@ -811,6 +825,8 @@ function buildAggregatedPayload(params) {
     ? params.sessionId
     : null;
   const projectTagId = String(params?.projectTagId || '').trim() || null;
+  const aggregatedNoteId = String(params?.aggregatedNoteId || '').trim() || null;
+  const replaceExisting = !!params?.replaceExisting;
   const responses = Array.isArray(params?.responses) ? params.responses : [];
 
   return {
@@ -818,6 +834,8 @@ function buildAggregatedPayload(params) {
       schema: 'aggregated_ingest_v1',
       session_id: sessionId,
       project_tag_id: projectTagId,
+      aggregated_note_id: aggregatedNoteId,
+      replace_existing: replaceExisting,
       title,
       responses
     },
@@ -1278,7 +1296,7 @@ function getOriginPlatformCode() {
   return 'WEB';
 }
 
-async function sendAggregated(sessionId, title, responses, scrapeMeta = [], projectTagId = null) {
+async function sendAggregated(sessionId, title, responses, scrapeMeta = [], projectTagId = null, replaceExisting = false, aggregatedNoteId = null) {
   const normalizedResponses = Array.isArray(responses)
     ? responses.map((item, idx) => ({
       segment_id: String(item?.segment_id || `segment_${idx + 1}`),
@@ -1292,6 +1310,8 @@ async function sendAggregated(sessionId, title, responses, scrapeMeta = [], proj
     schema: 'aggregated_ingest_v1',
     session_id: Number.isInteger(sessionId) ? sessionId : null,
     project_tag_id: String(projectTagId || '').trim() || null,
+    aggregated_note_id: String(aggregatedNoteId || '').trim() || null,
+    replace_existing: !!replaceExisting,
     platform_code: getOriginPlatformCode(),
     title: title || `Aggregated ${new Date().toISOString()}`,
     responses: normalizedResponses
@@ -2576,14 +2596,16 @@ function renderAggregationSummary(enabledSlots = SLOTS.filter((slot) => toggles[
 }
 
 function updateAggregationActionButtons() {
-  const hasPending = aggregationControl.hasPendingMerge();
+  const hasPending = aggregationControl.hasPendingMerge() || aggregationControl.hasPendingAggregation();
+  const canPauseAggregation = !!aggregationControl.pendingAggregation?.waiting || aggregationControl.hasPendingMerge();
   if (pauseAggregationBtn) {
-    pauseAggregationBtn.disabled = !hasPending;
+    pauseAggregationBtn.disabled = !hasPending || !canPauseAggregation;
     pauseAggregationBtn.textContent = aggregationControl.paused ? 'Resume aggregation' : 'Pause aggregation';
     pauseAggregationBtn.classList.toggle('active', aggregationControl.paused);
   }
   if (collectNowBtn) {
-    collectNowBtn.disabled = !hasPending;
+    const hasPrompt = !!String(window.mergeApiClient?.lastSourcePrompt || '').trim();
+    collectNowBtn.disabled = !hasPending && !hasPrompt;
   }
 }
 
@@ -2891,6 +2913,7 @@ async function sendToAll() {
 
   const traceId = startIngestTrace();
   mergeLog(`Ingest trace started: ${traceId}`, 'info');
+  activeAggregatedNoteId = null;
 
   const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
   const sessionFingerprint = buildSessionFingerprint(enabledSlots);
@@ -2923,10 +2946,28 @@ async function sendToAll() {
   messageInput.value = '';
   messageInput.focus();
 
+  const pendingAggregation = {
+    sourcePrompt: text,
+    expectedSlotCount: enabledSlots.length,
+    waiting: true,
+    ingestContext: {
+      sessionFingerprint,
+      sessionIdHint
+    },
+    aggregatedNoteId: null,
+    runId: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  };
+  aggregationControl.beginPendingAggregation(pendingAggregation);
+  resetAggregationSlotStatuses(enabledSlots);
+  enabledSlots.forEach((slot) => setAggregationSlotStatus(slot, window.AggregationControl?.SLOT_STATUS?.WAITING || 'waiting'));
+  renderAggregationSummary(enabledSlots);
+  updateAggregationActionButtons();
+  mergeLog(`Aggregation armed for ${enabledSlots.length} slot(s)`, 'info', pendingAggregation);
+
   ingestAfterSlotsPolling(text, enabledSlots.length, {
     sessionFingerprint,
     sessionIdHint
-  }).catch((error) => {
+  }, pendingAggregation.runId).catch((error) => {
     mergeLog(`Ingest polling failed: ${error?.message || error}`, 'error');
   });
 }
@@ -3086,11 +3127,28 @@ function initMergePanel() {
 
   runMergeBtn.addEventListener('click', () => runMerge(false, '', ''));
   pauseAggregationBtn?.addEventListener('click', async () => {
-    if (!aggregationControl.hasPendingMerge()) return;
+    const hasPendingAggregation = aggregationControl.hasPendingAggregation();
+    const hasPendingMerge = aggregationControl.hasPendingMerge();
+    if (!hasPendingAggregation && !hasPendingMerge) return;
     if (aggregationControl.paused) {
       aggregationControl.resume();
       updateAggregationActionButtons();
-      setMergeStatus('Resuming aggregation wait...', 'running');
+      setMergeStatus('Resuming aggregation...', 'running');
+      mergeLog('Aggregation resumed', 'info');
+      if (hasPendingAggregation) {
+        const pendingAggregation = aggregationControl.pendingAggregation;
+        if (pendingAggregation) {
+          ingestAfterSlotsPolling(
+            pendingAggregation.sourcePrompt,
+            pendingAggregation.expectedSlotCount,
+            pendingAggregation.ingestContext,
+            pendingAggregation.runId
+          ).catch((error) => {
+            mergeLog(`Aggregation resume failed: ${error?.message || error}`, 'error');
+          });
+        }
+        return;
+      }
       const ready = await waitForAggregationReadyOrPause();
       if (ready) {
         await collectAndMaybeRunPendingMerge(false);
@@ -3103,6 +3161,10 @@ function initMergePanel() {
     setMergeStatus('Aggregation paused. Fix slots and press Resume or Collect now.', 'paused');
   });
   collectNowBtn?.addEventListener('click', async () => {
+    if (aggregationControl.hasPendingAggregation() || String(window.mergeApiClient?.lastSourcePrompt || '').trim()) {
+      await collectNowAggregation(true);
+      return;
+    }
     if (!aggregationControl.hasPendingMerge()) return;
     await collectAndMaybeRunPendingMerge(true);
   });
@@ -3940,16 +4002,29 @@ async function getScrapeDiagnostics(slot, serviceIdHint = '') {
   }
 }
 
-async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestContext = {}) {
+async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestContext = {}, runId = '') {
   mergeLog(`Ingest polling started (expected slots: ${expectedSlotCount})`, 'info');
 
   // Phase 1: Initial delay ΓÇö no LLM responds in under 5 seconds
   mergeLog(`Waiting ${INGEST_INITIAL_DELAY_MS}ms before first scrape attempt`, 'info');
   await sleep(INGEST_INITIAL_DELAY_MS);
+  if (!isSamePendingAggregation(runId)) return;
 
   // Phase 2: Wait for all slots to finish generating
   const enabledSlots = SLOTS.filter(slot => toggles[slot]?.checked);
   for (let waitAttempt = 1; waitAttempt <= INGEST_GENERATION_WAIT_ATTEMPTS; waitAttempt += 1) {
+    if (!isSamePendingAggregation(runId)) return;
+    if (aggregationControl.paused) {
+      enabledSlots.forEach((slot) => {
+        if (slotAggregationStatuses[slot] === (window.AggregationControl?.SLOT_STATUS?.WAITING || 'waiting')) {
+          setAggregationSlotStatus(slot, window.AggregationControl?.SLOT_STATUS?.PAUSED || 'paused');
+        }
+      });
+      renderAggregationSummary(enabledSlots);
+      setMergeStatus('Aggregation paused. Fix slots and press Resume or Collect now.', 'paused');
+      mergeLog('Auto aggregation paused before scrape collection', 'warn');
+      return;
+    }
     let stillGenerating = 0;
     const generatingSlots = [];
     for (const slot of enabledSlots) {
@@ -3970,68 +4045,20 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestCo
   // Safety delay: wait a bit more to ensure content is fully rendered
   mergeLog('Waiting 3000ms for content to fully settle before scraping', 'info');
   await sleep(3000);
-
-  // Phase 3: Scrape with quality validation
-  let collected = { responsesByModel: {}, aggregatedResponses: [], scrapeMeta: [] };
-  for (let attempt = 1; attempt <= INGEST_POLL_ATTEMPTS; attempt += 1) {
-    collected = await collectLatestRepliesFromEnabledSlots();
-    const count = Object.keys(collected.responsesByModel).length;
-    mergeLog(`Ingest polling attempt ${attempt}/${INGEST_POLL_ATTEMPTS}: ${count}/${expectedSlotCount} replies`, 'info');
-
-    if (count >= expectedSlotCount) break;
-    if (attempt < INGEST_POLL_ATTEMPTS) await sleep(INGEST_POLL_INTERVAL_MS);
-  }
-
-  if (collected.aggregatedResponses.length === 0) {
-    mergeLog('Ingest skipped: no replies collected after polling', 'warn');
+  if (!isSamePendingAggregation(runId)) return;
+  if (aggregationControl.paused) {
+    enabledSlots.forEach((slot) => {
+      if (slotAggregationStatuses[slot] === (window.AggregationControl?.SLOT_STATUS?.WAITING || 'waiting')) {
+        setAggregationSlotStatus(slot, window.AggregationControl?.SLOT_STATUS?.PAUSED || 'paused');
+      }
+    });
+    renderAggregationSummary(enabledSlots);
+    setMergeStatus('Aggregation paused. Fix slots and press Resume or Collect now.', 'paused');
+    mergeLog('Auto aggregation paused during settle delay', 'warn');
     return;
   }
 
-  const payloadBuild = buildAggregatedPayload({
-    sourcePrompt: sourcePrompt || '',
-    responses: collected.aggregatedResponses,
-    sessionId: ingestContext.sessionIdHint,
-    projectTagId: activeProjectId
-  });
-
-  mergeLog('Ingest aggregated request prepared', 'send', {
-    payload: payloadBuild.payload,
-    scrape_meta: collected.scrapeMeta || []
-  });
-
-  const ingestResult = await sendAggregated(
-    payloadBuild.sessionId,
-    payloadBuild.payload.title,
-    payloadBuild.payload.responses,
-    collected.scrapeMeta || [],
-    payloadBuild.payload.project_tag_id
-  );
-
-  const sessionId = extractSessionId(ingestResult);
-  if (ingestResult?.ok && sessionId) {
-    activeSessionId = sessionId; // update in-memory immediately
-    const fingerprint = String(ingestContext.sessionFingerprint || activeSessionFingerprint || '').trim();
-    if (fingerprint) {
-      persistSessionContext(sessionId, fingerprint);
-    } else {
-      localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionId));
-    }
-    setIngestSessionIndicator(sessionId);
-    // Auto-save session snapshot to DB after successful ingest
-    // so the session appears in the list without manual "Save" click.
-    // Fire-and-forget — don't block the ingest flow.
-    const autoSaveName = String(sourcePrompt || '').trim().slice(0, 60) ||
-      `Session ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
-    saveSessionSnapshot(autoSaveName, sessionId).catch(e =>
-      mergeLog(`Auto-save after ingest failed: ${e?.message || e}`, 'warn')
-    );
-  }
-
-  mergeLog(
-    ingestResult?.ok ? 'Ingest RPC success' : 'Ingest RPC failed',
-    ingestResult?.ok ? 'recv' : 'warn',
-    ingestResult
-  );
+  await collectNowAggregation(false);
 }
 
 // ========== MERGE FUNCTIONALITY ==========
@@ -4044,6 +4071,129 @@ function setMergeStatus(text, type = 'idle') {
 function clearPendingAggregationState() {
   aggregationControl.clearPendingMerge();
   updateAggregationActionButtons();
+}
+
+function clearPendingAutoAggregationState() {
+  aggregationControl.clearPendingAggregation();
+  updateAggregationActionButtons();
+}
+
+function isSamePendingAggregation(runId) {
+  return !!runId && aggregationControl.pendingAggregation?.runId === runId;
+}
+
+async function finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContext = {}) {
+  const sessionId = extractSessionId(ingestResult);
+  const noteId = String(ingestResult?.data?.note_id || '').trim() || null;
+  if (ingestResult?.ok && sessionId) {
+    activeSessionId = sessionId;
+    if (noteId) activeAggregatedNoteId = noteId;
+    const fingerprint = String(ingestContext.sessionFingerprint || activeSessionFingerprint || '').trim();
+    if (fingerprint) {
+      persistSessionContext(sessionId, fingerprint);
+    } else {
+      localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionId));
+    }
+    setIngestSessionIndicator(sessionId);
+    const autoSaveName = String(sourcePrompt || '').trim().slice(0, 60) ||
+      `Session ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+    saveSessionSnapshot(autoSaveName, sessionId).catch(e =>
+      mergeLog(`Auto-save after ingest failed: ${e?.message || e}`, 'warn')
+    );
+  }
+
+  mergeLog(
+    ingestResult?.ok ? 'Ingest RPC success' : 'Ingest RPC failed',
+    ingestResult?.ok ? 'recv' : 'warn',
+    ingestResult
+  );
+
+  return { sessionId, noteId };
+}
+
+async function collectNowAggregation(manual = true) {
+  const pending = aggregationControl.pendingAggregation;
+  const sourcePrompt = String(pending?.sourcePrompt || window.mergeApiClient?.lastSourcePrompt || '').trim();
+  const ingestContext = pending?.ingestContext || {
+    sessionFingerprint: activeSessionFingerprint,
+    sessionIdHint: getStoredAggregatedSessionId() || activeSessionId || null
+  };
+  const existingAggregatedNoteId = String(pending?.aggregatedNoteId || activeAggregatedNoteId || '').trim() || null;
+  const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
+  const scraping = window.AggregationControl?.SLOT_STATUS?.SCRAPING || 'scraping';
+  const collected = window.AggregationControl?.SLOT_STATUS?.COLLECTED || 'collected';
+  const error = window.AggregationControl?.SLOT_STATUS?.ERROR || 'error';
+
+  if (enabledSlots.length === 0) {
+    setMergeStatus('No enabled slots to collect from.', 'error');
+    mergeLog('Collect now aborted: no enabled slots', 'warn');
+    return null;
+  }
+
+  enabledSlots.forEach((slot) => setAggregationSlotStatus(slot, scraping));
+  renderAggregationSummary(enabledSlots);
+  setMergeStatus(manual ? 'Collecting latest replies and re-ingesting...' : 'Collecting latest replies...', 'running');
+  mergeLog(manual ? 'Collect now requested' : 'Auto aggregation collecting latest replies', 'info', {
+    sourcePrompt,
+    sessionIdHint: ingestContext.sessionIdHint || null,
+    sessionFingerprint: ingestContext.sessionFingerprint || null,
+    enabledSlots
+  });
+
+  const collectedPayload = await collectLatestRepliesFromEnabledSlots();
+  const aggregatedResponses = collectedPayload.aggregatedResponses || [];
+  lastScrapeMeta = collectedPayload.scrapeMeta || [];
+
+  enabledSlots.forEach((slot) => {
+    const serviceId = detectServiceByUrl(getWebviewCurrentUrl(slot)) || slotConfig[slot] || slot;
+    const hasReply = aggregatedResponses.some((item) => item.segment_id === `${slot}:${serviceId}` || item.provider === serviceId);
+    setAggregationSlotStatus(slot, hasReply ? collected : error);
+  });
+  renderAggregationSummary(enabledSlots);
+
+  if (aggregatedResponses.length === 0) {
+    setMergeStatus('Aggregation collect found no replies.', 'error');
+    mergeLog('Collect now failed: no replies collected', 'error');
+    return null;
+  }
+
+  const replaceExisting = manual && Number.isInteger(ingestContext.sessionIdHint) && ingestContext.sessionIdHint > 0 && !!existingAggregatedNoteId;
+  const payloadBuild = buildAggregatedPayload({
+    sourcePrompt,
+    responses: aggregatedResponses,
+    sessionId: ingestContext.sessionIdHint,
+    projectTagId: activeProjectId,
+    aggregatedNoteId: existingAggregatedNoteId,
+    replaceExisting
+  });
+
+  mergeLog(replaceExisting ? 'Re-ingesting aggregated note with overwrite' : 'Creating aggregated note from Collect now', 'send', {
+    payload: payloadBuild.payload,
+    scrape_meta: lastScrapeMeta
+  });
+
+  const ingestResult = await sendAggregated(
+    payloadBuild.sessionId,
+    payloadBuild.payload.title,
+    payloadBuild.payload.responses,
+    lastScrapeMeta,
+    payloadBuild.payload.project_tag_id,
+    payloadBuild.payload.replace_existing,
+    payloadBuild.payload.aggregated_note_id
+  );
+
+  const finalized = await finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContext);
+  if (pending && finalized?.noteId) {
+    pending.aggregatedNoteId = finalized.noteId;
+    pending.waiting = false;
+  }
+  if (ingestResult?.ok) {
+    setMergeStatus(replaceExisting ? 'Aggregation refreshed in database.' : 'Aggregation collected and session created.', 'idle');
+    if (!manual) clearPendingAutoAggregationState();
+  } else {
+    setMergeStatus('Aggregation collect failed.', 'error');
+  }
+  return ingestResult;
 }
 
 async function waitForAggregationReadyOrPause() {
@@ -4487,6 +4637,7 @@ async function loadSession(sessionId) {
   const numericId = Number(session.sessionId ?? session.session_id ?? sessionId);
   if (Number.isInteger(numericId) && numericId > 0) {
     activeSessionId = numericId;
+    activeAggregatedNoteId = null;
     const enabledSlots = SLOTS.filter(slot => slotEnabled[slot]);
     const fingerprint = buildSessionFingerprint(enabledSlots);
     activeSessionFingerprint = fingerprint;
