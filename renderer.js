@@ -142,6 +142,7 @@ let mergeProviderSelect, mergeApiKeyInput, mergeEndpointInput, mergeModelInput;
 let mergeFallbackInput, mergeInstructionsInput, mergeResultDiv, mergeStatusDiv;
 let clarificationContainer, clarificationInput, clarificationSendBtn, resetInstructionsBtn;
 let fallbackModelsField, runMergeBtn;
+let aggregationSummaryDiv, pauseAggregationBtn, collectNowBtn, refreshAggregationBtn;
 let debugLogDiv, debugClearBtn;
 
 // Merge state
@@ -178,6 +179,13 @@ let ingestSequenceBySourceMessageId = new Map();
 const lastDomScrapeDebugBySlot = new Map();
 let activeSessionFingerprint = '';
 let activeSessionId = null; // in-memory session_id — set immediately when RPC returns
+const aggregationControl = window.AggregationControl
+  ? new window.AggregationControl.AggregationControlState()
+  : { paused: false, pendingMerge: null, beginPendingMerge(payload) { this.pendingMerge = payload; this.paused = false; }, clearPendingMerge() { this.pendingMerge = null; this.paused = false; }, hasPendingMerge() { return !!this.pendingMerge; }, pause() { this.paused = true; }, resume() { this.paused = false; } };
+const slotAggregationStatuses = {};
+const AGGREGATION_WAIT_MAX_CHECKS = 12;
+const AGGREGATION_WAIT_INTERVAL_MS = 2500;
+const AGGREGATION_SETTLE_DELAY_MS = 1500;
 
 function stableStringify(value) {
   const sort = (v) => {
@@ -2508,34 +2516,115 @@ searchCloseBtn?.addEventListener('click', closeSearchOverlay);
 
 // ========== MESSAGE SENDING ==========
 
-function setStatus(slot, status) {
+function setStatus(slot, status, options = {}) {
   const el = statuses[slot];
   if (!el) return;
+  const temporary = options.temporary === true;
 
   if (statusTimeouts[slot]) {
     clearTimeout(statusTimeouts[slot]);
     statusTimeouts[slot] = null;
   }
 
-  el.className = `status ${status}`;
+  const meta = window.AggregationControl?.slotStatusMeta
+    ? window.AggregationControl.slotStatusMeta(status)
+    : { text: status === 'success' ? '\u2713' : status === 'pending' ? '\u23F3' : status === 'error' ? '\u2717' : '', className: `status ${status}`, title: '' };
 
-  if (status === 'success') {
-    el.textContent = '\u2713';
-  } else if (status === 'pending') {
-    el.textContent = '\u23F3';
-  } else if (status === 'error') {
-    el.textContent = '\u2717';
-  } else {
-    el.textContent = '';
-  }
+  el.className = meta.className;
+  el.textContent = meta.text;
+  el.title = meta.title || '';
 
-  if (status === 'success' || status === 'error') {
+  if (temporary) {
     statusTimeouts[slot] = setTimeout(() => {
-      el.textContent = '';
-      el.className = 'status';
+      const nextStatus = slotAggregationStatuses[slot] || window.AggregationControl?.SLOT_STATUS?.IDLE || 'idle';
+      setStatus(slot, nextStatus, { temporary: false });
       statusTimeouts[slot] = null;
     }, 4000);
   }
+}
+
+function setAggregationSummary(text = '') {
+  if (aggregationSummaryDiv) aggregationSummaryDiv.textContent = text;
+}
+
+function getSlotDisplayName(slot) {
+  return labels[slot]?.textContent?.trim() || slot;
+}
+
+function setAggregationSlotStatus(slot, status) {
+  slotAggregationStatuses[slot] = status;
+  setStatus(slot, status, { temporary: false });
+}
+
+function resetAggregationSlotStatuses(enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked)) {
+  const idle = window.AggregationControl?.SLOT_STATUS?.IDLE || 'idle';
+  SLOTS.forEach((slot) => {
+    if (!enabledSlots.includes(slot)) {
+      delete slotAggregationStatuses[slot];
+      setStatus(slot, idle, { temporary: false });
+      return;
+    }
+    setAggregationSlotStatus(slot, idle);
+  });
+}
+
+function renderAggregationSummary(enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked)) {
+  const summary = window.AggregationControl?.summarizeStatuses
+    ? window.AggregationControl.summarizeStatuses(slotAggregationStatuses, enabledSlots, getSlotDisplayName)
+    : '';
+  setAggregationSummary(summary || 'Slot aggregation idle');
+}
+
+function updateAggregationActionButtons() {
+  const hasPending = aggregationControl.hasPendingMerge();
+  if (pauseAggregationBtn) {
+    pauseAggregationBtn.disabled = !hasPending;
+    pauseAggregationBtn.textContent = aggregationControl.paused ? 'Resume aggregation' : 'Pause aggregation';
+    pauseAggregationBtn.classList.toggle('active', aggregationControl.paused);
+  }
+  if (collectNowBtn) {
+    collectNowBtn.disabled = !hasPending;
+  }
+}
+
+async function readAggregationStatuses(options = {}) {
+  const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
+  const waiting = window.AggregationControl?.SLOT_STATUS?.WAITING || 'waiting';
+  const ready = window.AggregationControl?.SLOT_STATUS?.READY || 'ready';
+  const paused = window.AggregationControl?.SLOT_STATUS?.PAUSED || 'paused';
+  const error = window.AggregationControl?.SLOT_STATUS?.ERROR || 'error';
+
+  const statusesBySlot = {};
+  for (const slot of enabledSlots) {
+    const webview = webviews[slot];
+    if (!webview || !webviewReady[slot]) {
+      statusesBySlot[slot] = error;
+      continue;
+    }
+    const serviceId = detectServiceByUrl(getWebviewCurrentUrl(slot)) || slotConfig[slot] || '';
+    try {
+      const generating = await isSlotStillGenerating(slot, serviceId);
+      statusesBySlot[slot] = generating ? waiting : ready;
+    } catch (err) {
+      console.warn(`[aggregation] status probe failed for ${slot}`, err);
+      statusesBySlot[slot] = error;
+    }
+  }
+
+  enabledSlots.forEach((slot) => {
+    const nextStatus = aggregationControl.paused && statusesBySlot[slot] === waiting
+      ? paused
+      : statusesBySlot[slot];
+    setAggregationSlotStatus(slot, nextStatus);
+  });
+  renderAggregationSummary(enabledSlots);
+
+  if (!options.silent) {
+    const readyCount = enabledSlots.filter((slot) => statusesBySlot[slot] === ready).length;
+    setMergeStatus(`Aggregation status: ${readyCount}/${enabledSlots.length} ready`, aggregationControl.paused ? 'paused' : 'idle');
+  }
+
+  return statusesBySlot;
 }
 
 function getSelectorsForSlot(slot) {
@@ -2582,11 +2671,11 @@ async function sendMessage(slot, text) {
   const selector = normalizeSelectors(getSelectorsForSlot(slot));
 
   if (!webview || !selector) {
-    setStatus(slot, 'error');
+    setStatus(slot, window.AggregationControl?.SLOT_STATUS?.ERROR || 'error', { temporary: true });
     return;
   }
 
-  setStatus(slot, 'pending');
+  setStatus(slot, window.AggregationControl?.SLOT_STATUS?.SENDING || 'pending', { temporary: true });
 
   // Detect service for Perplexity-specific hack
   let currentUrl = '';
@@ -2778,13 +2867,13 @@ async function sendMessage(slot, text) {
 
     if (result && result.success === false) {
       console.error(`[${slot}] Error:`, result.error);
-      setStatus(slot, 'error');
+      setStatus(slot, window.AggregationControl?.SLOT_STATUS?.ERROR || 'error', { temporary: true });
     } else {
-      setStatus(slot, 'success');
+      setStatus(slot, window.AggregationControl?.SLOT_STATUS?.SENT || 'success', { temporary: true });
     }
   } catch (error) {
     console.error(`[${slot}] Exception:`, error);
-    setStatus(slot, 'error');
+    setStatus(slot, window.AggregationControl?.SLOT_STATUS?.ERROR || 'error', { temporary: true });
   }
 }
 
@@ -2974,6 +3063,10 @@ function initMergePanel() {
   resetInstructionsBtn = document.getElementById('reset-instructions-btn');
   fallbackModelsField = document.getElementById('fallback-models-field');
   runMergeBtn = document.getElementById('run-merge-btn');
+  aggregationSummaryDiv = document.getElementById('aggregation-status-summary');
+  pauseAggregationBtn = document.getElementById('pause-aggregation-btn');
+  collectNowBtn = document.getElementById('collect-now-btn');
+  refreshAggregationBtn = document.getElementById('refresh-aggregation-btn');
   debugLogDiv = document.getElementById('merge-debug-log');
   debugClearBtn = document.getElementById('debug-clear-btn');
 
@@ -2987,8 +3080,35 @@ function initMergePanel() {
 
   loadMergeConfig();
   maybeShowMergeSetupHint(true);
+  resetAggregationSlotStatuses();
+  renderAggregationSummary();
+  updateAggregationActionButtons();
 
   runMergeBtn.addEventListener('click', () => runMerge(false, '', ''));
+  pauseAggregationBtn?.addEventListener('click', async () => {
+    if (!aggregationControl.hasPendingMerge()) return;
+    if (aggregationControl.paused) {
+      aggregationControl.resume();
+      updateAggregationActionButtons();
+      setMergeStatus('Resuming aggregation wait...', 'running');
+      const ready = await waitForAggregationReadyOrPause();
+      if (ready) {
+        await collectAndMaybeRunPendingMerge(false);
+      }
+      return;
+    }
+    aggregationControl.pause();
+    updateAggregationActionButtons();
+    await readAggregationStatuses({ silent: true });
+    setMergeStatus('Aggregation paused. Fix slots and press Resume or Collect now.', 'paused');
+  });
+  collectNowBtn?.addEventListener('click', async () => {
+    if (!aggregationControl.hasPendingMerge()) return;
+    await collectAndMaybeRunPendingMerge(true);
+  });
+  refreshAggregationBtn?.addEventListener('click', async () => {
+    await readAggregationStatuses();
+  });
 
   clarificationSendBtn?.addEventListener('click', () => {
     const text = clarificationInput?.value.trim();
@@ -3921,6 +4041,178 @@ function setMergeStatus(text, type = 'idle') {
   mergeStatusDiv.className = `merge-status ${type}`;
 }
 
+function clearPendingAggregationState() {
+  aggregationControl.clearPendingMerge();
+  updateAggregationActionButtons();
+}
+
+async function waitForAggregationReadyOrPause() {
+  const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
+  const ready = window.AggregationControl?.SLOT_STATUS?.READY || 'ready';
+
+  for (let attempt = 1; attempt <= AGGREGATION_WAIT_MAX_CHECKS; attempt += 1) {
+    if (!aggregationControl.hasPendingMerge()) return false;
+    if (aggregationControl.paused) {
+      setMergeStatus('Aggregation paused. Fix slots and press Resume or Collect now.', 'paused');
+      enabledSlots.forEach((slot) => {
+        if (slotAggregationStatuses[slot] === (window.AggregationControl?.SLOT_STATUS?.WAITING || 'waiting')) {
+          setAggregationSlotStatus(slot, window.AggregationControl?.SLOT_STATUS?.PAUSED || 'paused');
+        }
+      });
+      renderAggregationSummary(enabledSlots);
+      return false;
+    }
+
+    const statusesBySlot = await readAggregationStatuses({ silent: true });
+    const readyCount = enabledSlots.filter((slot) => statusesBySlot[slot] === ready).length;
+    if (readyCount >= enabledSlots.length) {
+      setMergeStatus(`All ${enabledSlots.length} slot(s) ready. Collecting now...`, 'running');
+      await sleep(AGGREGATION_SETTLE_DELAY_MS);
+      return true;
+    }
+
+    setMergeStatus(`Waiting for replies: ${readyCount}/${enabledSlots.length} ready`, 'running');
+    if (attempt < AGGREGATION_WAIT_MAX_CHECKS) {
+      await sleep(AGGREGATION_WAIT_INTERVAL_MS);
+    }
+  }
+
+  setMergeStatus('Aggregation still waiting. Use Collect now or Pause aggregation.', 'idle');
+  return false;
+}
+
+async function collectAndMaybeRunPendingMerge(manual = false) {
+  const pending = aggregationControl.pendingMerge;
+  if (!pending) return;
+
+  const scraping = window.AggregationControl?.SLOT_STATUS?.SCRAPING || 'scraping';
+  const collected = window.AggregationControl?.SLOT_STATUS?.COLLECTED || 'collected';
+  const error = window.AggregationControl?.SLOT_STATUS?.ERROR || 'error';
+  const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
+  enabledSlots.forEach((slot) => setAggregationSlotStatus(slot, scraping));
+  renderAggregationSummary(enabledSlots);
+  setMergeStatus(manual ? 'Collecting current slot replies...' : 'Collecting replies...', 'running');
+
+  const collectedPayload = await collectLatestRepliesFromEnabledSlots();
+  const responses = collectedPayload.responsesByModel || {};
+  const aggregatedResponses = collectedPayload.aggregatedResponses || [];
+  lastScrapeMeta = collectedPayload.scrapeMeta || [];
+
+  enabledSlots.forEach((slot) => {
+    const serviceId = detectServiceByUrl(getWebviewCurrentUrl(slot)) || slotConfig[slot] || slot;
+    const serviceName = SERVICE_PRESETS[serviceId]?.name || labels[slot]?.textContent || slot;
+    const hasReply = Object.prototype.hasOwnProperty.call(responses, serviceName)
+      || Object.keys(responses).some((key) => key === serviceName || key.startsWith(`${serviceName} (`));
+    setAggregationSlotStatus(slot, hasReply ? collected : error);
+  });
+  renderAggregationSummary(enabledSlots);
+
+  if (Object.keys(responses).length === 0) {
+    setMergeStatus('No responses to merge. Send messages first.', 'error');
+    mergeLog('No responses collected — nothing to merge', 'error');
+    mergeInProgress = false;
+    if (runMergeBtn) runMergeBtn.disabled = false;
+    if (clarificationSendBtn) clarificationSendBtn.disabled = false;
+    clearPendingAggregationState();
+    return;
+  }
+
+  lastScrapedResponses = responses;
+  lastAggregatedResponses = aggregatedResponses;
+  mergeHistory = '';
+  mergeLog(`Collected from: ${Object.keys(responses).join(', ')}`, 'info');
+
+  clearPendingAggregationState();
+  await executeMergeRequest(pending.isClarification, pending.clarificationText, pending.previousSummary, responses, aggregatedResponses);
+}
+
+async function executeMergeRequest(isClarification, clarificationText, previousSummary, responses, aggregatedResponses) {
+  const client = window.mergeApiClient;
+  setMergeStatus(isClarification ? 'Processing follow-up...' : 'Running merge...', 'running');
+
+  let latestPartialText = '';
+  let partialFlushTimer = null;
+  let partialStarted = false;
+  const flushPartial = () => {
+    partialFlushTimer = null;
+    if (!latestPartialText) return;
+    updateMergeResult(latestPartialText);
+  };
+  const onPartial = (partialText) => {
+    if (typeof partialText !== 'string') return;
+    if (!partialText) {
+      latestPartialText = '';
+      return;
+    }
+    latestPartialText = partialText;
+    if (!partialStarted) {
+      partialStarted = true;
+      setMergeStatus(isClarification ? 'Streaming follow-up...' : 'Streaming merge...', 'running');
+    }
+    if (!partialFlushTimer) {
+      partialFlushTimer = setTimeout(flushPartial, 120);
+    }
+  };
+
+  const result = await client.merge(
+    responses,
+    isClarification,
+    clarificationText,
+    previousSummary,
+    onPartial
+  );
+
+  if (partialFlushTimer) {
+    clearTimeout(partialFlushTimer);
+    partialFlushTimer = null;
+  }
+  if (latestPartialText) {
+    updateMergeResult(latestPartialText);
+  }
+
+  mergeInProgress = false;
+  if (runMergeBtn) runMergeBtn.disabled = false;
+  if (clarificationSendBtn) clarificationSendBtn.disabled = false;
+  updateAggregationActionButtons();
+
+  if (result.success) {
+    const cleanResponse = stripMergeMetadataFooter(result.text);
+    if (mergeHistory === '') {
+      mergeHistory = `Assistant: ${cleanResponse}`;
+    } else {
+      mergeHistory += `\n\nAssistant: ${cleanResponse}`;
+    }
+
+    updateMergeResult(result.text);
+    setMergeStatus(isClarification ? 'Follow-up complete' : 'Merge complete', 'idle');
+
+    const sessionId = getStoredAggregatedSessionId();
+    if (Number.isInteger(sessionId) && sessionId > 0) {
+      const promptText = isClarification
+        ? clarificationText
+        : client.lastSourcePrompt;
+      const sendResult = isClarification
+        ? await sendClarification(sessionId, promptText, cleanResponse, lastScrapeMeta)
+        : await sendMerge(sessionId, promptText, cleanResponse, lastScrapeMeta);
+      mergeLog(
+        sendResult?.ok ? (isClarification ? 'Clarification RPC success' : 'Merge RPC success') : (isClarification ? 'Clarification RPC failed' : 'Merge RPC failed'),
+        sendResult?.ok ? 'recv' : 'warn',
+        sendResult
+      );
+    } else if (!isClarification) {
+      mergeLog('Session ID missing; merge note not ingested', 'warn');
+    }
+
+    if (clarificationContainer) {
+      clarificationContainer.classList.add('visible');
+      clarificationInput?.focus();
+    }
+  } else {
+    mergeLog(`API error: ${result.error}`, 'error');
+    setMergeStatus(`Failed: ${result.error}`, 'error');
+  }
+}
+
 // ========== DEBUG LOG ==========
 function mergeLog(message, type = 'info', detail = null) {
   if (!debugLogDiv) return;
@@ -3998,122 +4290,17 @@ async function runMerge(isClarification = false, clarificationText = '', previou
   if (runMergeBtn) runMergeBtn.disabled = true;
   if (isClarification && clarificationSendBtn) clarificationSendBtn.disabled = true;
 
-  let responses;
-  let aggregatedResponses;
-
   if (isClarification) {
-    // Reuse saved responses from first merge for context
-    responses = lastScrapedResponses;
-    aggregatedResponses = lastAggregatedResponses;
-  } else {
-    const collected = await collectLatestRepliesFromEnabledSlots();
-    responses = collected.responsesByModel;
-    aggregatedResponses = collected.aggregatedResponses;
-    lastScrapeMeta = collected.scrapeMeta || [];
-
-    if (Object.keys(responses).length === 0) {
-      mergeLog('No responses collected ΓÇö nothing to merge', 'error');
-      mergeInProgress = false;
-      if (runMergeBtn) runMergeBtn.disabled = false;
-      if (clarificationSendBtn) clarificationSendBtn.disabled = false;
-      setMergeStatus('No responses to merge. Send messages first.', 'error');
-      return;
-    }
-    lastScrapedResponses = responses; // save for clarification context
-    lastAggregatedResponses = aggregatedResponses;
-    mergeHistory = ''; // reset conversation on new merge
-    mergeLog(`Collected from: ${Object.keys(responses).join(', ')}`, 'info');
-
+    await executeMergeRequest(true, clarificationText, previousSummary, lastScrapedResponses, lastAggregatedResponses);
+    return;
   }
-
-  setMergeStatus(isClarification ? 'Processing follow-up...' : 'Running merge...', 'running');
-
-  let latestPartialText = '';
-  let partialFlushTimer = null;
-  let partialStarted = false;
-  const flushPartial = () => {
-    partialFlushTimer = null;
-    if (!latestPartialText) return;
-    updateMergeResult(latestPartialText);
-  };
-  const onPartial = (partialText) => {
-    if (typeof partialText !== 'string') return;
-    if (!partialText) {
-      latestPartialText = '';
-      return;
-    }
-    latestPartialText = partialText;
-    if (!partialStarted) {
-      partialStarted = true;
-      setMergeStatus(isClarification ? 'Streaming follow-up...' : 'Streaming merge...', 'running');
-    }
-    if (!partialFlushTimer) {
-      partialFlushTimer = setTimeout(flushPartial, 120);
-    }
-  };
-
-  const result = await window.mergeApiClient.merge(
-    responses,
-    isClarification,
-    clarificationText,
-    previousSummary,
-    onPartial
-  );
-
-  if (partialFlushTimer) {
-    clearTimeout(partialFlushTimer);
-    partialFlushTimer = null;
-  }
-  if (latestPartialText) {
-    updateMergeResult(latestPartialText);
-  }
-
-  mergeInProgress = false;
-  if (runMergeBtn) runMergeBtn.disabled = false;
-  if (clarificationSendBtn) clarificationSendBtn.disabled = false;
-
-  if (result.success) {
-    const cleanResponse = stripMergeMetadataFooter(result.text);
-    if (mergeHistory === '') {
-      mergeHistory = `Assistant: ${cleanResponse}`;
-    } else {
-      mergeHistory += `\n\nAssistant: ${cleanResponse}`;
-    }
-
-    updateMergeResult(result.text);
-    setMergeStatus(isClarification ? 'Follow-up complete' : 'Merge complete', 'idle');
-
-    const sessionId = getStoredAggregatedSessionId();
-    if (Number.isInteger(sessionId) && sessionId > 0) {
-      const promptText = isClarification
-        ? clarificationText
-        : client.lastSourcePrompt;
-      const rpcResult = isClarification
-        ? await sendClarification(sessionId, promptText, cleanResponse, lastScrapeMeta)
-        : await sendMerge(sessionId, promptText, cleanResponse, lastScrapeMeta);
-
-      mergeLog(
-        rpcResult?.ok
-          ? (isClarification ? 'Clarification RPC success' : 'Merge RPC success')
-          : (isClarification ? 'Clarification RPC failed' : 'Merge RPC failed'),
-        rpcResult?.ok ? 'recv' : 'warn',
-        rpcResult
-      );
-    } else {
-      mergeLog(
-        isClarification
-          ? 'Clarification RPC skipped: session_id is missing (send aggregated first)'
-          : 'Merge RPC skipped: session_id is missing (send aggregated first)',
-        'warn'
-      );
-    }
-
-    if (clarificationContainer) {
-      clarificationContainer.classList.add('visible');
-      clarificationInput?.focus();
-    }
-  } else {
-    setMergeStatus(`Failed: ${result.error}`, 'error');
+  resetAggregationSlotStatuses();
+  renderAggregationSummary();
+  aggregationControl.beginPendingMerge({ isClarification: false, clarificationText: '', previousSummary: '' });
+  updateAggregationActionButtons();
+  const ready = await waitForAggregationReadyOrPause();
+  if (ready) {
+    await collectAndMaybeRunPendingMerge(false);
   }
 }
 

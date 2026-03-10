@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.6] - 2026-03-11
+
+### Added
+- Desktop merge panel now has explicit aggregation controls: `Refresh statuses`, `Pause/Resume aggregation`, and `Collect now`.
+- Slot chips now expose aggregation-stage state independently of prompt-send state, so waiting/paused/scraping/collected phases are visible before merge execution.
+
+### Changed
+- Aggregation slot-state logic is now centralized in a dedicated desktop helper instead of being buried in merge button handlers.
+- Merge no longer scrapes immediately on button press; it first waits for slots to become ready, then auto-collects or hands control back for manual collection.
+
+### Fixed
+- Slow or stuck provider slots no longer force blind merge attempts without visibility into which slot is still loading.
+- Desktop merge flow now supports pausing aggregation while manually fixing a broken slot, then resuming or forcing collection explicitly.
+
 ## [v0.1.5] - 2026-03-10
 
 ### Added

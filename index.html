@@ -87,10 +87,14 @@
     .toggle:hover { background: #3a3a3a; }
     .toggle input { width: 14px; height: 14px; cursor: pointer; accent-color: #0066ff; }
     .toggle label { cursor: pointer; user-select: none; font-size: 11px; font-weight: 500; }
-    .status { margin-left: 2px; font-size: 11px; min-width: 12px; text-align: center; }
-    .status.success { color: #00ff00; }
-    .status.pending { color: #ffaa00; }
-    .status.error { color: #ff0000; }
+    .status { margin-left: 2px; font-size: 11px; min-width: 12px; text-align: center; color: #888; }
+    .status.sent, .status.success { color: #00ff88; }
+    .status.sending, .status.pending, .status.waiting { color: #ffaa00; }
+    .status.ready { color: #61d18c; }
+    .status.paused { color: #d6a7ff; }
+    .status.scraping { color: #64c8ff; animation: pulse 1s infinite; }
+    .status.collected { color: #4ecbff; }
+    .status.error { color: #ff6b6b; }
     .status.shimmer { color: #00aaff; animation: pulse 1s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     .control-btn {
@@ -356,6 +360,30 @@
     .merge-status.running { background: rgba(0, 170, 136, 0.2); color: #00aa88; border: 1px solid #00aa88; }
     .merge-status.error { background: rgba(255, 68, 68, 0.2); color: #ff4444; border: 1px solid #ff4444; }
     .merge-status.idle { background: rgba(136, 136, 136, 0.2); color: #888; border: 1px solid #666; }
+    .merge-status.paused { background: rgba(143, 102, 255, 0.18); color: #d6c2ff; border: 1px solid rgba(173, 139, 255, 0.55); }
+    #aggregation-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 8px;
+      margin-bottom: 8px;
+    }
+    #aggregation-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    #aggregation-status-summary {
+      min-height: 16px;
+      font-size: 11px;
+      color: #8b8b8b;
+      line-height: 1.35;
+    }
+    #pause-aggregation-btn.active {
+      color: #e4d6ff;
+      border-color: rgba(173, 139, 255, 0.65);
+      background: rgba(109, 70, 199, 0.22);
+    }
     #resize-handle { width: 4px; background: #1a1a1a; cursor: col-resize; transition: background 0.2s; flex-shrink: 0; }
     #resize-handle:hover { background: #0066ff; }
     #resize-overlay { display: none; position: fixed; inset: 0; z-index: 9999; cursor: col-resize; }
@@ -653,6 +681,14 @@
             </div>
           </div>
         </div>
+        <div id="aggregation-controls">
+          <div id="aggregation-actions">
+            <button class="control-btn" id="refresh-aggregation-btn">Refresh statuses</button>
+            <button class="control-btn" id="pause-aggregation-btn">Pause aggregation</button>
+            <button class="control-btn" id="collect-now-btn">Collect now</button>
+          </div>
+          <div id="aggregation-status-summary">Slot aggregation idle</div>
+        </div>
         <!-- Run Merge Button -->
         <button id="run-merge-btn">⚡ Run Merge</button>
         <!-- Merge Result -->
@@ -683,6 +719,7 @@
   <!-- Scripts - Order matters! -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
   <script src="merge-api-client.js" defer></script>
+  <script src="aggregation-control.js" defer></script>
   <script src="side-panel-controls.js" defer></script>
   <script src="renderer.js" defer></script>
 </body>
