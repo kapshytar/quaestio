@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.8] - 2026-03-11
+
+### Changed
+- `debug-runs` is now treated as a local forensic workspace instead of tracked repo content; only a short policy README remains versioned.
+
+### Fixed
+- New scrape trace artifacts no longer pollute git status for normal work, while still staying available locally for regression investigation.
+
+### Removed
+- Old one-off scraper handoff/report docs from 2026-02-25 were dropped from the repo.
+- Legacy tracked `debug-runs/trace_*.json` artifacts were removed from version control.
+
 ## [v0.1.7] - 2026-03-11
 
 ### Changed

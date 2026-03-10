@@ -14,6 +14,9 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+debug-runs/**
+!debug-runs/
+!debug-runs/README.md
 
 # IDE
 .vscode/
