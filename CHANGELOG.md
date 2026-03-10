@@ -4,13 +4,27 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.5] - 2026-03-10
+
+### Added
+- Desktop scrape traces now persist raw markdown, cleaned markdown, selected DOM snapshots, parent DOM snapshots, and full-page snapshots for provider replies to make extraction regressions inspectable after the fact.
+
+### Changed
+- Provider reply extraction now uses a more structured DOM-to-markdown pass for inline math, nested lists, tables, inline formatting, and code blocks instead of flattening too much content into plain text.
+
+### Fixed
+- Gemini table cells with KaTeX content such as `E = mc^2` and `±0.01` no longer split across rows during desktop ingest.
+- Nested list items and other structured Gemini content now survive scraping without collapsing into stray `-` markers as often.
+
 ## [v0.1.4] - 2026-03-10
 
 ### Changed
 - Desktop aggregated, merge, and clarification ingest now send `platform_code` so Dream Tracker can stamp each created note with its immutable stage origin (`WIN`/`MAC`/`LNX`).
+- Desktop reply extraction now preserves headings, lists, inline formatting, code fences, and tables through structured DOM-to-markdown scraping instead of flat `innerText` capture.
 
 ### Fixed
 - Cross-device session chains can now be diagnosed per note stage instead of only at session level.
+- Gemini and other providers no longer lose as much structural formatting before ingest into Dream Tracker.
 
 ## [v0.1.3] - 2026-03-07
 

@@ -175,6 +175,7 @@ const INGEST_MIN_REPLY_CHARS = 20;
 let activeIngestTraceId = '';
 let ingestSequenceCounter = 0;
 let ingestSequenceBySourceMessageId = new Map();
+const lastDomScrapeDebugBySlot = new Map();
 let activeSessionFingerprint = '';
 let activeSessionId = null; // in-memory session_id — set immediately when RPC returns
 
@@ -231,6 +232,73 @@ function getIngestTraceContext(sourceMessageId) {
     traceId: activeIngestTraceId,
     sequence
   };
+}
+
+function summarizeDomDiagnostics(diagnostics) {
+  if (!diagnostics || typeof diagnostics !== 'object') return null;
+  const selected = diagnostics.selected && typeof diagnostics.selected === 'object'
+    ? {
+        flat_length: diagnostics.selected.flat_length,
+        html_length: diagnostics.selected.html_length,
+        line_count: diagnostics.selected.metrics?.lineCount ?? diagnostics.selected.line_count ?? null,
+        heading_count: diagnostics.selected.metrics?.headingCount ?? diagnostics.selected.heading_count ?? null,
+        unordered_count: diagnostics.selected.metrics?.unorderedCount ?? diagnostics.selected.unordered_count ?? null,
+        ordered_count: diagnostics.selected.metrics?.orderedCount ?? diagnostics.selected.ordered_count ?? null,
+        table_line_count: diagnostics.selected.metrics?.tableLineCount ?? diagnostics.selected.table_line_count ?? null,
+        fragment_only: diagnostics.selected.fragment_only ?? false,
+        tag: diagnostics.selected.tag || '',
+        selector_hint: diagnostics.selected.selector_hint || '',
+        preview: diagnostics.selected.preview || ''
+      }
+    : null;
+  return {
+    service_id: diagnostics.service_id || '',
+    document_title: diagnostics.document_title || '',
+    candidate_count: diagnostics.candidate_count ?? 0,
+    pruned_count: diagnostics.pruned_count ?? 0,
+    pool_count: diagnostics.pool_count ?? 0,
+    selected
+  };
+}
+
+async function appendTraceScrapeArtifact(traceId, slot, serviceId, serviceName, diagnostics, extraMeta = {}, extraFiles = []) {
+  if (!traceId || !window.electronAPI || typeof window.electronAPI.appendTraceArtifact !== 'function') return;
+  if (!diagnostics || typeof diagnostics !== 'object') return;
+
+  const files = [];
+  if (typeof diagnostics.selected_html === 'string' && diagnostics.selected_html.trim()) {
+    files.push({ name: `${slot}-${serviceId}-selected`, extension: 'html', content: diagnostics.selected_html });
+  }
+  if (typeof diagnostics.parent_html === 'string' && diagnostics.parent_html.trim()) {
+    files.push({ name: `${slot}-${serviceId}-parent`, extension: 'html', content: diagnostics.parent_html });
+  }
+  if (typeof diagnostics.page_html === 'string' && diagnostics.page_html.trim()) {
+    files.push({ name: `${slot}-${serviceId}-page`, extension: 'html', content: diagnostics.page_html });
+  }
+  if (Array.isArray(extraFiles) && extraFiles.length > 0) files.push(...extraFiles);
+
+  const eventPayload = {
+    step: 'scrape_dom_snapshot',
+    slot,
+    service_id: serviceId,
+    service_name: serviceName,
+    page_url: diagnostics.page_url || '',
+    document_title: diagnostics.document_title || '',
+    candidate_count: diagnostics.candidate_count ?? 0,
+    pruned_count: diagnostics.pruned_count ?? 0,
+    pool_count: diagnostics.pool_count ?? 0,
+    fallback_used: diagnostics.fallback_used ?? false,
+    extraction_meta: extraMeta,
+    selected: diagnostics.selected || null,
+    candidates: Array.isArray(diagnostics.candidates) ? diagnostics.candidates : [],
+    no_candidate_reason: diagnostics.no_candidate_reason || ''
+  };
+
+  try {
+    await window.electronAPI.appendTraceArtifact(traceId, eventPayload, files);
+  } catch (error) {
+    console.warn(`[${slot}] Failed to append trace artifact:`, error?.message || error);
+  }
 }
 
 function getWebviewCurrentUrl(slot) {
@@ -813,12 +881,15 @@ function normalizePipeTableMarkdown(text) {
 
     if (looksLikePipeRow(line) && looksLikeTableDivider(next)) {
       if (out.length > 0 && out[out.length - 1].trim() !== '') out.push('');
-      out.push(line);
-      const cells = next
+      const headerCells = line
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
         .split('|')
-        .map((cell) => normalizeTableDividerCell(cell))
-        .join('|');
-      out.push(cells);
+        .map((cell) => cell.trim())
+        .filter((cell) => cell.length > 0);
+      out.push(line);
+      out.push(`| ${headerCells.map(() => '---').join(' | ')} |`);
       i += 1;
       continue;
     }
@@ -826,6 +897,49 @@ function normalizePipeTableMarkdown(text) {
     out.push(line);
   }
   return out.join('\n');
+}
+
+function repairMarkdownArtifacts(text) {
+  const lines = String(text || '').replace(/\r/g, '').split('\n');
+  const out = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    const next = i + 1 < lines.length ? lines[i + 1] : '';
+    const nextTrimmed = next.trim();
+
+    if (/^export to sheets$/i.test(trimmed)) continue;
+
+    if (trimmed === '-' && nextTrimmed && !/^[-*+]\s+/.test(nextTrimmed) && !/^\d+[.)]\s+/.test(nextTrimmed)) {
+      out.push(`- ${nextTrimmed}`);
+      i += 1;
+      continue;
+    }
+
+    if (/^\d+[.)]$/.test(trimmed) && nextTrimmed && !/^[-*+]\s+/.test(nextTrimmed) && !/^\d+[.)]\s+/.test(nextTrimmed)) {
+      out.push(`${trimmed.replace(/\)$/, '.')} ${nextTrimmed}`);
+      i += 1;
+      continue;
+    }
+
+    if (out.length > 0 && /^\s*-\s+/.test(trimmed)) {
+      const prev = out[out.length - 1].trim();
+      if (/^\d+\.\s+/.test(prev)) {
+        out.push(`  ${trimmed}`);
+        continue;
+      }
+    }
+
+    out.push(line);
+  }
+
+  return out
+    .join('\n')
+    .replace(/([A-Za-z)])\n(\d+)\s+\|/g, '$1^$2 |')
+    .replace(/^##\s+Gemini said\b[:\s-]*/gim, '')
+    .replace(/^You said\s*$/gim, '')
+    .trim();
 }
 
 function isUnorderedListLine(line) {
@@ -1128,6 +1242,7 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
   text = text.replace(/^source\s*\n+/i, '');
   text = normalizeListMarkdown(text);
   text = normalizePipeTableMarkdown(text);
+  text = repairMarkdownArtifacts(text);
 
   // Convert CSV tables (Grok/Gemini) and space-aligned tables (DeepSeek) ΓåÆ markdown
   text = convertCsvTablesToMarkdown(text);
@@ -3019,6 +3134,8 @@ async function getLatestAssistantReply(slot) {
 (function() {
   try {
     const serviceId = ${JSON.stringify(serviceId)};
+    const MAX_HTML_SNAPSHOT_CHARS = 1500000;
+    const MAX_NODE_HTML_CHARS = 250000;
 
     function visible(el) {
       if (!el) return false;
@@ -3035,13 +3152,227 @@ async function getLatestAssistantReply(slot) {
         .replace(/\\n{3,}/g, '\\n\\n')
         .trim();
     }
-    function flatText(t) {
-      return normalizeText(t).replace(/\\n+/g, ' ').replace(/\\s+/g, ' ').trim();
+
+    function normalizeInlineText(t) {
+      return String(t || '')
+        .replace(/\\r/g, '')
+        .replace(/\\u00a0/g, ' ')
+        .replace(/[ \\t]+/g, ' ')
+        .trim();
     }
+
+    function truncateHtml(value, limit) {
+      const text = String(value || '');
+      if (text.length <= limit) return text;
+      return text.slice(0, limit) + '\\n<!-- truncated -->';
+    }
+
+    function safeOuterHtml(el, limit = MAX_NODE_HTML_CHARS) {
+      if (!el || typeof el.outerHTML !== 'string') return '';
+      return truncateHtml(el.outerHTML, limit);
+    }
+
+    function normalizeMathText(value) {
+      return String(value || '')
+        .replace(/\\text\{([^}]*)\}/g, '$1')
+        .replace(/\\circ/g, '°')
+        .replace(/\\pm/g, '±')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function shouldSkipElement(el) {
+      if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+      const tag = (el.tagName || '').toUpperCase();
+      if (['BUTTON', 'SVG', 'PATH', 'STYLE', 'SCRIPT', 'NOSCRIPT', 'MAT-ICON'].includes(tag)) return true;
+      if (el.getAttribute('aria-hidden') === 'true') return true;
+      const className = String(el.className || '');
+      return /table-footer|action-button|copy-button|buttons-container|response-container-header|response-container-footer/i.test(className)
+        || !!el.closest('.table-footer, [hide-from-message-actions]');
+    }
+
+    function extractInlineText(node) {
+      if (!node) return '';
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+      if (node.nodeType !== Node.ELEMENT_NODE) return '';
+      const el = node;
+      if (shouldSkipElement(el)) return '';
+      if (el.classList?.contains('math-inline') || el.classList?.contains('katex') || (el.tagName || '').toUpperCase() === 'MATH') {
+        const math = el.getAttribute('data-math')
+          || el.querySelector?.('annotation[encoding="application/x-tex"]')?.textContent
+          || el.querySelector?.('annotation')?.textContent;
+        if (math) return normalizeMathText(math);
+      }
+      const tag = (el.tagName || '').toUpperCase();
+      if (tag === 'BR') return '\\n';
+      if (tag === 'STRONG' || tag === 'B') return '**' + Array.from(el.childNodes || []).map(extractInlineText).join('') + '**';
+      if (tag === 'EM' || tag === 'I') return '*' + Array.from(el.childNodes || []).map(extractInlineText).join('') + '*';
+      if (tag === 'CODE' && !el.closest('pre')) return '\`' + Array.from(el.childNodes || []).map(extractInlineText).join('') + '\`';
+      if (tag === 'P') return Array.from(el.childNodes || []).map(extractInlineText).join('');
+      return Array.from(el.childNodes || []).map(extractInlineText).join('');
+    }
+
+    function tableToMarkdown(tableEl) {
+      const rows = Array.from(tableEl.querySelectorAll('tr'))
+        .map((tr) => Array.from(tr.querySelectorAll('th,td')).map((cell) => normalizeInlineText(extractInlineText(cell))))
+        .filter((row) => row.some((cell) => cell.length > 0));
+      if (rows.length < 2) return '';
+      const colCount = rows.reduce((acc, row) => Math.max(acc, row.length), 0);
+      if (colCount < 2) return '';
+
+      const esc = (value) => String(value || '').replace(/\\|/g, '\\\\|');
+      const pad = (row) => {
+        const out = row.slice(0, colCount);
+        while (out.length < colCount) out.push('');
+        return out;
+      };
+
+      const header = pad(rows[0]);
+      const body = rows.slice(1).map(pad);
+      const sep = Array(colCount).fill('---');
+
+      const lines = [];
+      lines.push('| ' + header.map(esc).join(' | ') + ' |');
+      lines.push('| ' + sep.join(' | ') + ' |');
+      body.forEach((row) => lines.push('| ' + row.map(esc).join(' | ') + ' |'));
+      return lines.join('\\n');
+    }
+
+    function extractStructuredText(rootEl) {
+      if (!rootEl) return '';
+      const parts = [];
+      const blockTags = new Set([
+        'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DIV', 'DL', 'FIELDSET', 'FIGCAPTION', 'FIGURE',
+        'FOOTER', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'LI', 'MAIN', 'NAV',
+        'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'TBODY', 'THEAD', 'TFOOT', 'TR', 'UL'
+      ]);
+
+      function pushNewline() {
+        const last = parts.length > 0 ? parts[parts.length - 1] : '';
+        if (!String(last).endsWith('\\n')) parts.push('\\n');
+      }
+
+      function walk(node) {
+        if (!node) return;
+        if (node.nodeType === Node.TEXT_NODE) {
+          parts.push(node.textContent || '');
+          return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        const el = node;
+        if (shouldSkipElement(el)) return;
+        if (el !== rootEl && !visible(el)) return;
+
+        const tag = (el.tagName || '').toUpperCase();
+        if (tag === 'BR') {
+          parts.push('\\n');
+          return;
+        }
+        if (tag === 'TABLE') {
+          const md = tableToMarkdown(el);
+          if (md) {
+            pushNewline();
+            parts.push(md);
+            parts.push('\\n');
+            return;
+          }
+        }
+        if (tag === 'STRONG' || tag === 'B') {
+          parts.push('**');
+          Array.from(el.childNodes || []).forEach(walk);
+          parts.push('**');
+          return;
+        }
+        if (tag === 'EM' || tag === 'I') {
+          parts.push('*');
+          Array.from(el.childNodes || []).forEach(walk);
+          parts.push('*');
+          return;
+        }
+        if (tag === 'CODE' && !el.closest('pre')) {
+          parts.push('\`');
+          Array.from(el.childNodes || []).forEach(walk);
+          parts.push('\`');
+          return;
+        }
+        if (tag === 'PRE') {
+          pushNewline();
+          const codeEl = el.querySelector('code');
+          const lang = (codeEl?.className || '').match(/language-(\\w+)/)?.[1] || '';
+          parts.push('\`\`\`' + lang + '\\n');
+          Array.from((codeEl || el).childNodes || []).forEach(walk);
+          if (!String(parts[parts.length - 1]).endsWith('\\n')) parts.push('\\n');
+          parts.push('\`\`\`');
+          pushNewline();
+          return;
+        }
+        const headingMatch = tag.match(/^H([1-6])$/);
+        if (headingMatch) {
+          pushNewline();
+          parts.push('#'.repeat(parseInt(headingMatch[1], 10)) + ' ');
+          Array.from(el.childNodes || []).forEach(walk);
+          pushNewline();
+          return;
+        }
+        if (tag === 'LI') {
+          pushNewline();
+          let depth = 0;
+          let parent = el.parentElement;
+          while (parent) {
+            const parentTag = (parent.tagName || '').toUpperCase();
+            if (parentTag === 'UL' || parentTag === 'OL') depth += 1;
+            if (parent === rootEl) break;
+            parent = parent.parentElement;
+          }
+          const indent = '  '.repeat(Math.max(0, depth - 1));
+          const parentTag = (el.parentElement?.tagName || '').toUpperCase();
+          parts.push(indent);
+          if (parentTag === 'OL') {
+            const idx = Array.from(el.parentElement.children).indexOf(el) + 1;
+            parts.push(idx + '. ');
+          } else {
+            parts.push('- ');
+          }
+          const nestedLists = [];
+          const inlineSegments = [];
+          Array.from(el.childNodes || []).forEach((child) => {
+            if (child?.nodeType === Node.ELEMENT_NODE) {
+              const childTag = (child.tagName || '').toUpperCase();
+              if (childTag === 'UL' || childTag === 'OL') {
+                nestedLists.push(child);
+                return;
+              }
+            }
+            const segment = extractInlineText(child);
+            if (segment) inlineSegments.push(segment);
+          });
+          parts.push(inlineSegments.join('').trim());
+          pushNewline();
+          nestedLists.forEach((child) => walk(child));
+          return;
+        }
+
+        const isBlock = blockTags.has(tag);
+        if (isBlock) pushNewline();
+        Array.from(el.childNodes || []).forEach(walk);
+        if (isBlock) pushNewline();
+      }
+
+      walk(rootEl);
+      const structured = normalizeText(parts.join(''));
+      if (structured) return structured;
+      return normalizeText(rootEl.innerText || rootEl.textContent);
+    }
+
+    function flatText(t) {
+      return normalizeInlineText(t).replace(/\\n+/g, ' ').replace(/\\s+/g, ' ').trim();
+    }
+
     function isComposerElement(el) {
       if (!el) return false;
       return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"]');
     }
+
     function isMetadataLikeText(text) {
       const t = (text || '').toLowerCase();
       if (!t) return true;
@@ -3056,54 +3387,142 @@ async function getLatestAssistantReply(slot) {
       );
     }
 
-    const selectors = [
-      '[data-testid*="conversation-turn"]',
-      '[data-testid*="message-content"]',
-      '[data-message-author-role="assistant"]',
-      '[data-testid*="assistant"]',
-      '[class*="assistant"]',
-      '[class*="response"]',
-      '[class*="answer"]',
-      '[class*="message"]'
+    function countMatches(text, regex) {
+      const match = String(text || '').match(regex);
+      return match ? match.length : 0;
+    }
+
+    function computeStructureMetrics(raw) {
+      const text = String(raw || '');
+      const lines = text.split('\\n');
+      return {
+        headingCount: countMatches(text, /^#{1,6}\\s+/gm),
+        unorderedCount: countMatches(text, /^\\s*[-*+]\\s+\\S/gm),
+        orderedCount: countMatches(text, /^\\s*\\d+[.)]\\s+\\S/gm),
+        tableLineCount: countMatches(text, /^\\|.*\\|$/gm),
+        codeFenceCount: countMatches(text, /^\`\`\`/gm),
+        blankLineCount: countMatches(text, /^\\s*$/gm),
+        lineCount: lines.filter((line) => line.trim().length > 0).length
+      };
+    }
+
+    function structureScore(metrics) {
+      return (
+        metrics.headingCount * 30 +
+        metrics.unorderedCount * 12 +
+        metrics.orderedCount * 12 +
+        metrics.tableLineCount * 8 +
+        metrics.codeFenceCount * 16 +
+        metrics.blankLineCount * 2 +
+        metrics.lineCount
+      );
+    }
+
+    function isFragmentOnly(metrics, flatLength) {
+      const hasSingleTable = metrics.tableLineCount >= 2 && metrics.lineCount <= metrics.tableLineCount + 1;
+      const hasSingleList = (metrics.unorderedCount + metrics.orderedCount) > 0 && metrics.lineCount <= (metrics.unorderedCount + metrics.orderedCount) + 1;
+      const hasSingleCode = metrics.codeFenceCount >= 2 && metrics.lineCount <= 4;
+      return flatLength < 1200 && (hasSingleTable || hasSingleList || hasSingleCode);
+    }
+
+    function summarizeCandidate(candidate, selectorHint = '', extra = {}) {
+      return {
+        selector_hint: selectorHint,
+        tag: candidate.el?.tagName || '',
+        class_name: candidate.el?.className || '',
+        top: Math.round(candidate.top || 0),
+        bottom: Math.round(candidate.bottom || 0),
+        flat_length: candidate.flat.length,
+        raw_length: candidate.raw.length,
+        structure: candidate.structure,
+        metrics: candidate.metrics,
+        fragment_only: isFragmentOnly(candidate.metrics, candidate.flat.length),
+        preview: candidate.flat.slice(0, 240),
+        ...extra
+      };
+    }
+
+    const selectorEntries = [
+      ['[data-testid*="conversation-turn"]', '[data-testid*="conversation-turn"]'],
+      ['[data-testid*="message-content"]', '[data-testid*="message-content"]'],
+      ['[data-message-author-role="assistant"]', '[data-message-author-role="assistant"]'],
+      ['[data-testid*="assistant"]', '[data-testid*="assistant"]'],
+      ['[class*="assistant"]', '[class*="assistant"]'],
+      ['[class*="response"]', '[class*="response"]'],
+      ['[class*="answer"]', '[class*="answer"]'],
+      ['[class*="message"]', '[class*="message"]']
     ];
 
-    // Perplexity: prepend prose selector
-    if (serviceId === 'perplexity') { selectors.unshift('div[class*="prose"]'); }
-    // Gemini: target model-response custom element (avoids full-page conversation wrapper)
-    if (serviceId === 'gemini') { selectors.unshift('model-response', 'response-container'); }
-    // Grok: target individual response container by id (avoids mixing user prompt)
-    if (serviceId === 'grok') { selectors.unshift('div[id^="response-"]', '[class*="message-bubble"]'); }
+    if (serviceId === 'perplexity') selectorEntries.unshift(['div[class*="prose"]', 'div[class*="prose"]']);
+    if (serviceId === 'gemini') selectorEntries.unshift(['response-container', 'response-container'], ['model-response', 'model-response']);
+    if (serviceId === 'grok') selectorEntries.unshift(['[class*="message-bubble"]', '[class*="message-bubble"]'], ['div[id^="response-"]', 'div[id^="response-"]']);
 
     const candidates = [];
-    selectors.forEach((sel) => {
+    selectorEntries.forEach(([sel, hint]) => {
       try {
         document.querySelectorAll(sel).forEach((el) => {
           if (!visible(el)) return;
           if (isComposerElement(el)) return;
-          const raw = normalizeText(el.innerText || el.textContent);
+          const raw = extractStructuredText(el);
           const flat = flatText(raw);
           if (flat.length < 20 || isMetadataLikeText(flat)) return;
           const rect = el.getBoundingClientRect();
-          candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top });
+          const metrics = computeStructureMetrics(raw);
+          candidates.push({
+            el,
+            raw,
+            flat,
+            bottom: rect.bottom,
+            top: rect.top,
+            metrics,
+            structure: structureScore(metrics),
+            selectorHint: hint
+          });
         });
       } catch (_) {}
     });
 
-    // Fallback: any visible article/div with enough text
     if (candidates.length === 0) {
       Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
         if (isComposerElement(el)) return;
-        const raw = normalizeText(el.innerText || el.textContent);
+        const raw = extractStructuredText(el);
         const flat = flatText(raw);
         if (flat.length < 20 || isMetadataLikeText(flat)) return;
         const rect = el.getBoundingClientRect();
-        candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top });
+        const metrics = computeStructureMetrics(raw);
+        candidates.push({
+          el,
+          raw,
+          flat,
+          bottom: rect.bottom,
+          top: rect.top,
+          metrics,
+          structure: structureScore(metrics),
+          selectorHint: 'article,div:fallback'
+        });
       });
     }
 
-    if (candidates.length === 0) return null;
+    if (candidates.length === 0) {
+      return {
+        raw: null,
+        diagnostics: {
+          service_id: serviceId,
+          page_url: location.href,
+          document_title: document.title || '',
+          candidate_count: 0,
+          pruned_count: 0,
+          pool_count: 0,
+          no_candidate_reason: 'no-candidates',
+          candidates: [],
+          selected: null,
+          selected_html: '',
+          parent_html: '',
+          page_html: truncateHtml(document.documentElement?.outerHTML || '', MAX_HTML_SNAPSHOT_CHARS)
+        }
+      };
+    }
 
-    // Drop nested short fragments when a parent candidate carries the full reply.
     const pruned = candidates.filter((candidate) => {
       return !candidates.some((other) => {
         if (other === candidate) return false;
@@ -3116,48 +3535,116 @@ async function getLatestAssistantReply(slot) {
 
     const source = pruned.length > 0 ? pruned : candidates;
     const maxBottom = source.reduce((acc, c) => Math.max(acc, c.bottom), -Infinity);
-    const nearBottom = source.filter(c => c.bottom >= maxBottom - 260);
+    const nearBottom = source.filter((c) => c.bottom >= maxBottom - 260);
     const pool = nearBottom.length > 0 ? nearBottom : source;
 
-    const isGeminiOrGrok = serviceId === 'gemini' || serviceId === 'grok';
-    if (isGeminiOrGrok) {
-      // Prefer the newest leaf-like container near bottom, not the longest wrapper.
-      const wrapped = pool.map((candidate) => {
-        const containsPeer = pool.some((other) => {
-          if (other === candidate) return false;
-          if (!candidate.el.contains(other.el)) return false;
-          if (other.flat.length < 40) return false;
-          return Math.abs(other.bottom - candidate.bottom) <= 200;
-        });
-        return { candidate, containsPeer };
+    const ranked = pool.map((candidate) => {
+      const childPeers = pool.filter((other) => {
+        if (other === candidate) return false;
+        if (!candidate.el.contains(other.el)) return false;
+        if (other.flat.length < 40) return false;
+        return Math.abs(other.bottom - candidate.bottom) <= 260;
       });
-
-      wrapped.sort((a, b) => {
-        if (b.candidate.bottom !== a.candidate.bottom) return b.candidate.bottom - a.candidate.bottom;
-        if (b.candidate.top !== a.candidate.top) return b.candidate.top - a.candidate.top;
-        if (a.containsPeer !== b.containsPeer) return a.containsPeer ? 1 : -1;
-        if (a.candidate.flat.length !== b.candidate.flat.length) return a.candidate.flat.length - b.candidate.flat.length;
-        return 0;
+      const containsPeer = childPeers.length > 0;
+      const fragmentOnly = isFragmentOnly(candidate.metrics, candidate.flat.length);
+      const hasRicherChild = childPeers.some((other) => other.structure >= candidate.structure + 20);
+      const richerParent = pool.find((other) => {
+        if (other === candidate) return false;
+        if (!other.el.contains(candidate.el)) return false;
+        if (other.flat.length < candidate.flat.length * 1.35) return false;
+        return other.structure >= candidate.structure;
       });
-
-      return wrapped[0].candidate.raw;
-    }
-
-    pool.sort((a, b) => {
-      if (b.flat.length !== a.flat.length) return b.flat.length - a.flat.length;
-      return b.bottom - a.bottom;
+      return { candidate, containsPeer, fragmentOnly, hasRicherChild, richerParent };
     });
-    return pool[0].raw;
 
-  } catch (e) { return null; }
+    ranked.sort((a, b) => {
+      if (a.fragmentOnly !== b.fragmentOnly) return a.fragmentOnly ? 1 : -1;
+      if (!!a.richerParent !== !!b.richerParent) return a.richerParent ? 1 : -1;
+      if (a.hasRicherChild !== b.hasRicherChild) return a.hasRicherChild ? 1 : -1;
+      if (b.candidate.structure !== a.candidate.structure) return b.candidate.structure - a.candidate.structure;
+      if (b.candidate.flat.length !== a.candidate.flat.length) return b.candidate.flat.length - a.candidate.flat.length;
+      if (b.candidate.bottom !== a.candidate.bottom) return b.candidate.bottom - a.candidate.bottom;
+      if (b.candidate.top !== a.candidate.top) return b.candidate.top - a.candidate.top;
+      if (a.containsPeer !== b.containsPeer) return a.containsPeer ? 1 : -1;
+      return 0;
+    });
+
+    const selectedWrapped = ranked[0];
+    const selected = selectedWrapped.candidate;
+    const candidateDiagnostics = ranked.slice(0, 12).map((entry, index) =>
+      summarizeCandidate(entry.candidate, entry.candidate.selectorHint, {
+        rank: index + 1,
+        contains_peer: entry.containsPeer,
+        has_richer_child: entry.hasRicherChild,
+        richer_parent: !!entry.richerParent
+      })
+    );
+
+    return {
+      raw: selected.raw,
+      diagnostics: {
+        service_id: serviceId,
+        page_url: location.href,
+        document_title: document.title || '',
+        candidate_count: candidates.length,
+        pruned_count: source.length,
+        pool_count: pool.length,
+        fallback_used: pruned.length === 0,
+        selected: summarizeCandidate(selected, selected.selectorHint, {
+          html_length: (selected.el?.outerHTML || '').length,
+          parent_html_length: (selected.el?.parentElement?.outerHTML || '').length
+        }),
+        candidates: candidateDiagnostics,
+        selected_html: safeOuterHtml(selected.el),
+        parent_html: safeOuterHtml(selected.el?.parentElement),
+        page_html: truncateHtml(document.documentElement?.outerHTML || '', MAX_HTML_SNAPSHOT_CHARS)
+      }
+    };
+
+  } catch (e) {
+    return {
+      raw: null,
+      diagnostics: {
+        service_id: ${JSON.stringify(serviceId)},
+        page_url: location.href,
+        document_title: document.title || '',
+        no_candidate_reason: e?.message || String(e || 'unknown-error'),
+        candidates: [],
+        selected: null,
+        selected_html: '',
+        parent_html: '',
+        page_html: ''
+      }
+    };
+  }
 })();
 `;
 
   try {
-    return await webview.executeJavaScript(code);
+    const result = await webview.executeJavaScript(code);
+    const diagnostics = result?.diagnostics && typeof result.diagnostics === 'object'
+      ? result.diagnostics
+      : null;
+    lastDomScrapeDebugBySlot.set(slot, diagnostics);
+    return {
+      raw: typeof result?.raw === 'string' ? result.raw : '',
+      diagnostics
+    };
   } catch (e) {
     console.error(`[${slot}] Failed to scrape reply:`, e);
-    return null;
+    const diagnostics = {
+      service_id: serviceId,
+      page_url: currentUrl,
+      document_title: '',
+      no_candidate_reason: e?.message || String(e || 'executeJavaScript failed'),
+      candidates: [],
+      selected: null,
+      selected_html: '',
+      parent_html: '',
+      page_html: ''
+    };
+    lastDomScrapeDebugBySlot.set(slot, diagnostics);
+    return { raw: '', diagnostics };
   }
 }
 
@@ -3169,6 +3656,7 @@ async function collectLatestRepliesFromEnabledSlots() {
   const aggregatedResponses = [];
   const scrapeMeta = [];
   const sourcePrompt = (window.mergeApiClient?.lastSourcePrompt || '').trim();
+  const traceId = activeIngestTraceId || startIngestTrace();
 
   const reserveModelName = (baseName) => {
     if (!responsesByModel[baseName]) return baseName;
@@ -3187,10 +3675,12 @@ async function collectLatestRepliesFromEnabledSlots() {
     const preferDomFirst = serviceId === 'gemini' || serviceId === 'grok';
     let copied = null;
     let reply = '';
+    let domReply = null;
     let extractionMethod = 'dom';
 
     if (preferDomFirst) {
-      reply = await getLatestAssistantReply(slot);
+      domReply = await getLatestAssistantReply(slot);
+      reply = domReply?.raw || '';
       if (!reply || String(reply).trim().length < 20) {
         copied = await tryCopyLatestAssistantReply(slot, serviceId);
         if (copied?.text) {
@@ -3200,10 +3690,36 @@ async function collectLatestRepliesFromEnabledSlots() {
       }
     } else {
       copied = await tryCopyLatestAssistantReply(slot, serviceId);
-      reply = copied?.text || await getLatestAssistantReply(slot);
-      extractionMethod = copied?.text ? 'copy' : 'dom';
+      if (copied?.text) {
+        reply = copied.text;
+        extractionMethod = 'copy';
+        domReply = await getLatestAssistantReply(slot);
+      } else {
+        domReply = await getLatestAssistantReply(slot);
+        reply = domReply?.raw || '';
+        extractionMethod = 'dom';
+      }
     }
+    const domDiagnostics = domReply?.diagnostics || lastDomScrapeDebugBySlot.get(slot) || null;
     const cleanedReply = sanitizeScrapedReply(serviceId, reply || '', sourcePrompt);
+    await appendTraceScrapeArtifact(traceId, slot, serviceId, serviceName, domDiagnostics, {
+      extraction_method: extractionMethod,
+      raw_chars: String(reply || '').length,
+      clean_chars: cleanedReply.length,
+      source_url: currentUrl || SERVICE_PRESETS[serviceId]?.url || '',
+      copy_diagnostics: copied?.diagnostics || null
+    }, [
+      {
+        name: `${slot}-${serviceId}-raw`,
+        extension: 'md',
+        content: String(reply || '')
+      },
+      {
+        name: `${slot}-${serviceId}-clean`,
+        extension: 'md',
+        content: String(cleanedReply || '')
+      }
+    ]);
     if (cleanedReply && isQualityReply(cleanedReply, sourcePrompt)) {
       const preview = cleanedReply.length > 120 ? `${cleanedReply.slice(0, 120)}...` : cleanedReply;
       const meta = {
@@ -3216,7 +3732,8 @@ async function collectLatestRepliesFromEnabledSlots() {
         clean_chars: cleanedReply.length,
         dropped_chars: Math.max(String(reply || '').length - cleanedReply.length, 0),
         clean_preview: preview,
-        copy_diagnostics: copied?.diagnostics || null
+        copy_diagnostics: copied?.diagnostics || null,
+        dom_diagnostics: summarizeDomDiagnostics(domDiagnostics)
       };
       scrapeMeta.push(meta);
       mergeLog(`${serviceName}: scraped ${cleanedReply.length} chars - "${preview}"`, 'scrape', meta);

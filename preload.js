@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendAggregated: (params) => ipcRenderer.invoke('dream-send-aggregated', params),
   sendMerge: (params) => ipcRenderer.invoke('dream-send-merge', params),
   sendClarification: (params) => ipcRenderer.invoke('dream-send-clarification', params),
+  appendTraceArtifact: (traceId, eventPayload, files = []) =>
+    ipcRenderer.invoke('dream-append-trace-artifact', { traceId, eventPayload, files }),
   readClipboardText: () => ipcRenderer.invoke('clipboard-read-text'),
   writeClipboardText: (text) => ipcRenderer.invoke('clipboard-write-text', text),
   savePage: (pageContent, pageUrl) => ipcRenderer.invoke('save-page', { pageContent, pageUrl }),

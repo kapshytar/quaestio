@@ -473,6 +473,34 @@ async function callSupabaseRpc(rpcName, body) {
   }
 }
 
+function writeTraceArtifactFiles(traceId, files = []) {
+  if (!Array.isArray(files) || files.length === 0) return [];
+  const dir = ensureDebugRunsDir();
+  const safeTraceId = String(traceId || 'unknown').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const written = [];
+
+  for (const file of files) {
+    try {
+      const content = typeof file?.content === 'string' ? file.content : '';
+      if (!content) continue;
+      const extension = String(file?.extension || 'txt').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'txt';
+      const safeName = String(file?.name || 'artifact').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'artifact';
+      const fileName = `${safeTraceId}_${safeName}.${extension}`;
+      const filePath = path.join(dir, fileName);
+      fs.writeFileSync(filePath, content, 'utf8');
+      written.push({
+        name: fileName,
+        path: filePath,
+        bytes: Buffer.byteLength(content, 'utf8')
+      });
+    } catch (error) {
+      console.warn('[IngestDebug] Failed to write trace file:', error?.message || error);
+    }
+  }
+
+  return written;
+}
+
 function buildSupabaseRestUrl(endpointPath) {
   const { supabaseUrl } = getSupabaseConfig();
   const base = String(supabaseUrl || '').replace(/\/+$/, '');
@@ -768,6 +796,18 @@ ipcMain.handle('dream-send-merge', async (_event, params) => {
 
 ipcMain.handle('dream-send-clarification', async (_event, params) => {
   return ingestDreamRpc('clarification', params);
+});
+
+ipcMain.handle('dream-append-trace-artifact', async (_event, params) => {
+  const traceId = params?.traceId || sanitizeTraceId();
+  const eventPayload = params?.eventPayload && typeof params.eventPayload === 'object'
+    ? { ...params.eventPayload }
+    : {};
+  const files = Array.isArray(params?.files) ? params.files : [];
+  const writtenFiles = writeTraceArtifactFiles(traceId, files);
+  if (writtenFiles.length > 0) eventPayload.trace_files = writtenFiles;
+  appendDebugArtifact(traceId, eventPayload);
+  return { ok: true, traceId, fileCount: writtenFiles.length };
 });
 
 ipcMain.handle('dream-save-session', async (_event, params) => {
