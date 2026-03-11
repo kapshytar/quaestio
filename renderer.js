@@ -1,4 +1,4 @@
-﻿// ========== SERVICE PRESETS ==========
+// ========== SERVICE PRESETS ==========
 const SERVICE_PRESETS = {
   chatgpt: {
     name: 'ChatGPT',
@@ -188,7 +188,7 @@ let ingestSequenceCounter = 0;
 let ingestSequenceBySourceMessageId = new Map();
 const lastDomScrapeDebugBySlot = new Map();
 let activeSessionFingerprint = '';
-let activeSessionId = null; // in-memory session_id — set immediately when RPC returns
+let activeSessionId = null; // in-memory session_id � set immediately when RPC returns
 let activeAggregatedNoteId = null; // current question root note for manual Collect now overwrite
 const aggregationControl = window.AggregationControl
   ? new window.AggregationControl.AggregationControlState()
@@ -458,7 +458,7 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
     }
     function isCopyLike(label, el) {
       const l = String(label || '').toLowerCase();
-      if (l && (l.includes('copy') || l.includes('╤ü╨║╨╛╨┐') || l.includes('╨║╨╛╨┐╨╕╤Ç'))) return true;
+      if (l && (l.includes('copy') || l.includes('-�-�-+-+') || l.includes('-�-+-+-+-�'))) return true;
       // Check CSS classes on element + children (DeepSeek uses class-based icons, not aria-labels)
       try {
         const own = (el?.className || '').toString().toLowerCase();
@@ -502,10 +502,10 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
       '[role="button"][aria-label*="Copy" i]',
       '[data-testid*="copy" i]',
       '[data-test-id*="copy" i]',
-      'button[aria-label*="╨Ü╨╛╨┐╨╕╤Ç" i]',
-      '[role="button"][aria-label*="╨Ü╨╛╨┐╨╕╤Ç" i]',
-      'button[aria-label*="╨í╨║╨╛╨┐" i]',
-      'button[title*="╨í╨║╨╛╨┐" i]',
+      'button[aria-label*="-�-+-+-+-�" i]',
+      '[role="button"][aria-label*="-�-+-+-+-�" i]',
+      'button[aria-label*="-�-�-+-+" i]',
+      'button[title*="-�-�-+-+" i]',
       'button[mattooltip*="Copy" i]',
       'copy-button button',
       '.dl-btn:has(.dl-icon-copy)',
@@ -591,7 +591,7 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
         };
       }
     } catch (_) {}
-    // Intercept clipboard.write() (ClipboardItem API) ΓÇö used by Gemini, Grok
+    // Intercept clipboard.write() (ClipboardItem API) G�� used by Gemini, Grok
     try {
       if (navigator.clipboard && navigator.clipboard.write) {
         const origClipWrite = navigator.clipboard.write.bind(navigator.clipboard);
@@ -603,7 +603,7 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
                 window.__gunshiCopyCapture = await blob.text();
                 break;
               }
-              // Also try text/html ΓåÆ strip tags as fallback
+              // Also try text/html G�� strip tags as fallback
               if (item.types && item.types.includes('text/html') && !window.__gunshiCopyCapture) {
                 const blob = await item.getType('text/html');
                 const html = await blob.text();
@@ -989,8 +989,8 @@ function isOrderedListLine(line) {
 function normalizeListLine(line) {
   let out = String(line || '');
   // UI bullets / dashes -> markdown list marker
-  out = out.replace(/^\s*[ΓÇóΓùªΓùÅΓû¬Γû½ΓÇúΓêÖ]\s+/, '- ');
-  out = out.replace(/^\s*[ΓÇôΓÇöΓêÆ]\s+/, '- ');
+  out = out.replace(/^\s*[G��G��G��G��G��G��G��]\s+/, '- ');
+  out = out.replace(/^\s*[G��G��G��]\s+/, '- ');
   // "1) item" -> "1. item"
   out = out.replace(/^(\s*)(\d+)\)\s+/, '$1$2. ');
   return out;
@@ -1032,10 +1032,10 @@ function isQualityReply(text, sourcePrompt = '') {
 
 // ========== TABLE FORMAT CONVERSION ==========
 // LLMs export tables in different formats:
-//   CSV  (Grok, Gemini)    ΓåÆ  col1,col2,col3
-//   Space-aligned (DeepSeek) ΓåÆ  col1  col2  col3   (2+ spaces as separator)
-//   Markdown (Perplexity, ChatGPT, Claude) ΓåÆ | col1 | col2 |  (already fine)
-// We convert CSV and space-aligned ΓåÆ markdown so the frontend renders properly.
+//   CSV  (Grok, Gemini)    G��  col1,col2,col3
+//   Space-aligned (DeepSeek) G��  col1  col2  col3   (2+ spaces as separator)
+//   Markdown (Perplexity, ChatGPT, Claude) G�� | col1 | col2 |  (already fine)
+// We convert CSV and space-aligned G�� markdown so the frontend renders properly.
 
 function parseCsvLine(line) {
   const fields = [];
@@ -1098,7 +1098,7 @@ function convertCsvTablesToMarkdown(text) {
   return text;
 }
 
-// Convert space-aligned tables (DeepSeek format) ΓåÆ markdown tables.
+// Convert space-aligned tables (DeepSeek format) G�� markdown tables.
 // DeepSeek uses 2+ spaces as column separator; single spaces appear inside values.
 // Works on mixed content: text lines and table rows can be adjacent (no blank line needed).
 function convertSpaceAlignedTables(text) {
@@ -1118,7 +1118,7 @@ function convertSpaceAlignedTables(text) {
 
   function flushTable() {
     if (tableBuf.length < 2) {
-      // Single line or empty ΓÇö not a real table, output raw
+      // Single line or empty G�� not a real table, output raw
       tableBuf.forEach((_, i) => {
         // Reconstruct original-ish line
         output.push(tableBuf[i].join('  '));
@@ -1136,14 +1136,14 @@ function convertSpaceAlignedTables(text) {
   for (const rawLine of inputLines) {
     const line = rawLine.trim();
 
-    // Empty line ΓåÆ flush any pending table, pass through blank
+    // Empty line G�� flush any pending table, pass through blank
     if (!line) {
       flushTable();
       output.push('');
       continue;
     }
 
-    // Already a markdown element ΓåÆ flush and pass through
+    // Already a markdown element G�� flush and pass through
     if (/^[|#>\-*`]/.test(line)) {
       flushTable();
       output.push(rawLine);
@@ -1169,10 +1169,10 @@ function convertSpaceAlignedTables(text) {
       colCount = parts.length;
       tableBuf.push(parts);
     } else if (parts.length >= 2 && parts.length <= colCount) {
-      // Same or fewer cols (e.g. summary row like "╨ÿ╤é╨╛╨│╨╛  6 150 Γé╜") ΓåÆ keep in table
+      // Same or fewer cols (e.g. summary row like "-�-�-+-�-+  6 150 G�+") G�� keep in table
       tableBuf.push(parts);
     } else if (parts.length > colCount) {
-      // More columns than current header ΓåÆ end table, start new one
+      // More columns than current header G�� end table, start new one
       flushTable();
       colCount = parts.length;
       tableBuf.push(parts);
@@ -1196,9 +1196,9 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
   if (normalizedPrompt) {
     const escapedPrompt = escapeRegExp(normalizedPrompt);
     text = text
-      .replace(new RegExp(`^\\s*${escapedPrompt}[\\s:ΓÇö\\-]*\\n+`, 'i'), '')
-      .replace(new RegExp(`^(?:you said|╨▓╤ï ╤ü╨║╨░╨╖╨░╨╗╨╕)\\s+${escapedPrompt}[\\s:ΓÇö\\-]*`, 'i'), '')
-      .replace(new RegExp(`\\b(?:you said|╨▓╤ï ╤ü╨║╨░╨╖╨░╨╗╨╕)\\s+${escapedPrompt}\\b`, 'ig'), '')
+      .replace(new RegExp(`^\\s*${escapedPrompt}[\\s:G��\\-]*\\n+`, 'i'), '')
+      .replace(new RegExp(`^(?:you said|-�-� -�-�-�-+-�-+-+)\\s+${escapedPrompt}[\\s:G��\\-]*`, 'i'), '')
+      .replace(new RegExp(`\\b(?:you said|-�-� -�-�-�-+-�-+-+)\\s+${escapedPrompt}\\b`, 'ig'), '')
       .trim();
   }
 
@@ -1220,8 +1220,8 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
     }
     // Strip trailing timing / suggestion-chip lines
     text = text
-      .replace(/\n\d[\d,.]*\s*[╤üs]\s*$/im, '')   // e.g. "\n1,1╤ü"
-      .replace(/\n╨▒╤ï╤ü╤é╤Ç╨╛\s*$/im, '')
+      .replace(/\n\d[\d,.]*\s*[-�s]\s*$/im, '')   // e.g. "\n1,1-�"
+      .replace(/\n-�-�-�-�-�-+\s*$/im, '')
       .trim();
   }
 
@@ -1232,16 +1232,16 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
     if (lineLower === 'open sidebar' || lineLower === 'reply...' || lineLower === 'temporary chat' || lineLower === 'incognito chat') return true;
     if (lineLower === 'tools' || lineLower === 'fast') return true;
     if (lineLower.startsWith('model:') || lineLower.includes('window.__')) return true;
-    if (lineLower.includes('╨┐╨╡╤Ç╨╡╨║╨╗╤Ä╤ç╨╕╤é╤î ╨▒╨╛╨║╨╛╨▓╤â╤Ä ╨┐╨░╨╜╨╡╨╗╤î')) return true;
+    if (lineLower.includes('-+-�-�-�-�-+-�-�-+-�-� -�-+-�-+-�-�-� -+-�-+-�-+-�')) return true;
     if (lineLower.includes('can make mistakes') || lineLower.includes('please double-check responses')) return true;
     if (lineLower.includes('check important info') || lineLower.includes('see cookie preferences')) return true;
     // Gemini image result artifacts
     if (lineLower === 'opens in a new window' || lineLower === 'open') return true;
     if (/^www\.[^\s]+$/.test(lineLower)) return true;  // bare domain lines (e.g. www.ozon.ru)
     // Grok UI artifacts: timing lines, suggestion chips
-    if (/^\d[\d,.]*\s*[╤üs]$/.test(lineLower)) return true;  // "1,1╤ü" / "1.1s"
-    if (lineLower === '╨▒╤ï╤ü╤é╤Ç╨╛' || lineLower === '╨┐╨╛╨┤╤Ç╨╛╨▒╨╜╨╡╨╡') return true;
-    if (lineLower.startsWith('╤Ç╨░╤ü╤ü╨║╨░╨╢╨╕ ╨▒╨╛╨╗╤î╤ê╨╡')) return true;
+    if (/^\d[\d,.]*\s*[-�s]$/.test(lineLower)) return true;  // "1,1-�" / "1.1s"
+    if (lineLower === '-�-�-�-�-�-+' || lineLower === '-+-+-�-�-+-�-+-�-�') return true;
+    if (lineLower.startsWith('-�-�-�-�-�-�-�-+ -�-+-+-�-�-�')) return true;
     return false;
   };
 
@@ -1280,7 +1280,7 @@ function sanitizeScrapedReply(serviceId, rawReply, sourcePrompt = '') {
   text = normalizePipeTableMarkdown(text);
   text = repairMarkdownArtifacts(text);
 
-  // Convert CSV tables (Grok/Gemini) and space-aligned tables (DeepSeek) ΓåÆ markdown
+  // Convert CSV tables (Grok/Gemini) and space-aligned tables (DeepSeek) G�� markdown
   text = convertCsvTablesToMarkdown(text);
   text = convertSpaceAlignedTables(text);
 
@@ -1507,7 +1507,7 @@ function safeReload(slot) {
   const webview = webviews[slot];
   if (!webview) return;
 
-  // Try reload() first regardless of ready state ΓÇö it works once webview is attached
+  // Try reload() first regardless of ready state G�� it works once webview is attached
   try {
     webview.reload();
     return;
@@ -1733,7 +1733,7 @@ function renderProjectPanel(nodes = projectTreeNodes) {
   const noProjectRow = document.createElement('div');
   noProjectRow.className = `project-tree-row${!activeProjectId ? ' selected' : ''}`;
   noProjectRow.style.paddingLeft = '6px';
-  noProjectRow.innerHTML = '<button type="button" class="project-tree-chevron placeholder">▸</button><span class="project-tree-name">No Project</span>';
+  noProjectRow.innerHTML = '<button type="button" class="project-tree-chevron placeholder">?</button><span class="project-tree-name">No Project</span>';
   noProjectRow.addEventListener('click', async () => {
     await setActiveProject(null);
     hideProjectPanel();
@@ -2333,7 +2333,7 @@ function setIngestSessionIndicator(sessionId) {
   }
 }
 
-// Apply mobile UA on startup (just set attribute, no reload needed ΓÇö webviews load with it)
+// Apply mobile UA on startup (just set attribute, no reload needed G�� webviews load with it)
 if (mobileUaEnabled) {
   SLOTS.forEach(slot => {
     const wv = webviews[slot];
@@ -2361,7 +2361,7 @@ mobileUaToggle?.addEventListener('click', () => {
     }
   });
 
-  console.log(`[MobileUA] ${mobileUaEnabled ? 'Mobile' : 'Desktop'} UA ΓÇö all ${SLOTS.length} webviews reloading`);
+  console.log(`[MobileUA] ${mobileUaEnabled ? 'Mobile' : 'Desktop'} UA G�� all ${SLOTS.length} webviews reloading`);
 });
 
 incognitoModeBtn?.addEventListener('click', () => {
@@ -3256,7 +3256,7 @@ function initMergePanel() {
   // Only wire up if panel elements exist
   if (!runMergeBtn) return;
 
-  // Hook client log ΓåÆ debug panel
+  // Hook client log G�� debug panel
   if (window.mergeApiClient) {
     window.mergeApiClient.onLog = (msg, type, detail) => mergeLog(msg, type, detail);
   }
@@ -3382,7 +3382,7 @@ function initMergePanel() {
   // ---- Config Tabs ----
   const tabsBody = document.getElementById('config-tabs-body');
   const tabsCollapseBtn = document.getElementById('config-tabs-collapse');
-  // Always start collapsed ΓÇö user can expand manually during session
+  // Always start collapsed G�� user can expand manually during session
   let tabsCollapsed = true;
 
   function applyTabsCollapsed() {
@@ -3499,8 +3499,8 @@ async function getLatestAssistantReply(slot) {
     function normalizeMathText(value) {
       return String(value || '')
         .replace(/\\text\{([^}]*)\}/g, '$1')
-        .replace(/\\circ/g, '°')
-        .replace(/\\pm/g, '±')
+        .replace(/\\circ/g, '�')
+        .replace(/\\pm/g, '�')
         .replace(/\s+/g, ' ')
         .trim();
     }
@@ -4147,7 +4147,7 @@ async function getScrapeDiagnostics(slot, serviceIdHint = '') {
 async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestContext = {}, runId = '') {
   mergeLog(`Ingest polling started (expected slots: ${expectedSlotCount})`, 'info');
 
-  // Phase 1: Initial delay ΓÇö no LLM responds in under 5 seconds
+  // Phase 1: Initial delay G�� no LLM responds in under 5 seconds
   mergeLog(`Waiting ${INGEST_INITIAL_DELAY_MS}ms before first scrape attempt`, 'info');
   await sleep(INGEST_INITIAL_DELAY_MS);
   if (!isSamePendingAggregation(runId)) return;
@@ -4401,7 +4401,7 @@ async function collectAndMaybeRunPendingMerge(manual = false) {
 
   if (Object.keys(responses).length === 0) {
     setMergeStatus('No responses to merge. Send messages first.', 'error');
-    mergeLog('No responses collected — nothing to merge', 'error');
+    mergeLog('No responses collected � nothing to merge', 'error');
     mergeInProgress = false;
     if (runMergeBtn) runMergeBtn.disabled = false;
     if (clarificationSendBtn) clarificationSendBtn.disabled = false;
@@ -4559,7 +4559,7 @@ async function runMerge(isClarification = false, clarificationText = '', previou
     return;
   }
 
-  // Sync UI ΓåÆ client before checking config state and calling API.
+  // Sync UI G�� client before checking config state and calling API.
   saveMergeConfig();
 
   if (!isClarification && !window.mergeApiClient.hasAnyConfiguredApiKey()) {
@@ -4598,7 +4598,7 @@ async function runMerge(isClarification = false, clarificationText = '', previou
 
 // ========== SESSION MANAGEMENT ==========
 const SESSIONS_KEY = 'chat-aggregator-sessions';
-const MAX_SESSIONS = 20;
+const MAX_SESSIONS = 1000;
 let sessionsNotice = { text: '', kind: 'info' };
 
 function setSessionsNotice(text, kind = 'info') {
@@ -4790,7 +4790,7 @@ async function loadSession(sessionId) {
     clearIngestSessionIndicator();
   }
 
-  console.log('Session loaded:', sessionId, '→ activeSessionId =', activeSessionId);
+  console.log('Session loaded:', sessionId, '? activeSessionId =', activeSessionId);
   setSessionsNotice(`Session loaded: ${session.name || sessionId}`, 'ok');
   await updateSessionsUI();
 }
@@ -4894,8 +4894,8 @@ async function initSessionsTab() {
   if (saveSessionBtn) {
     saveSessionBtn.addEventListener('click', async () => {
       await saveSessionSnapshot();
-      saveSessionBtn.textContent = '✓ Saved!';
-      setTimeout(() => { saveSessionBtn.textContent = '💾 Save Current'; }, 2000);
+      saveSessionBtn.textContent = '? Saved!';
+      setTimeout(() => { saveSessionBtn.textContent = '?? Save Current'; }, 2000);
     });
   }
 

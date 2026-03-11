@@ -820,7 +820,7 @@ ipcMain.handle('dream-save-session', async (_event, params) => {
       p_slot_config: params?.slotConfig || {},
       p_slot_urls: params?.slotUrls || {},
       p_slot_enabled: params?.slotEnabled || {},
-      p_limit: 20
+      p_limit: 1000
     });
     const result = raw?.data ?? null;
     logSessionRpc('save_aggregator_session result', { id: result?.id, name: result?.name });
@@ -842,7 +842,7 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       p_slot_config: null,
       p_slot_urls: null,
       p_slot_enabled: null,
-      p_limit: 20
+      p_limit: 1000
     });
     const rows = Array.isArray(data?.data) ? data.data : [];
     // Map snake_case DB fields → camelCase for renderer
