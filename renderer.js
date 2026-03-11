@@ -114,6 +114,8 @@ const zoomLevels = {};
 const statusTimeouts = {};
 const webviewReady = {};
 const pendingNavigation = {};
+const incognitoEnsureTimers = {};
+const incognitoEnsureState = {};
 
 SLOTS.forEach(slot => {
   webviews[slot] = document.getElementById(`webview-${slot}`);
@@ -123,11 +125,19 @@ SLOTS.forEach(slot => {
   zoomLevels[slot] = DEFAULT_ZOOM_FACTOR;
   webviewReady[slot] = false;
   pendingNavigation[slot] = null;
+  incognitoEnsureTimers[slot] = null;
+  incognitoEnsureState[slot] = {
+    inFlight: false,
+    inFlightKey: '',
+    lastSuccessKey: '',
+    lastSuccessAt: 0
+  };
 });
 
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 const importCookiesBtn = document.getElementById('import-cookies-btn');
+const incognitoModeBtn = document.getElementById('incognito-mode-btn');
 const toggleAddressBarBtn = document.getElementById('toggle-address-bar-btn');
 const collapseBtn = document.getElementById('collapse-toolbar');
 const togglesContainer = document.getElementById('toggles');
@@ -1389,8 +1399,12 @@ function safeLoadURL(slot, url) {
   const webview = webviews[slot];
   if (!webview || !url) return;
 
-  const normalizedUrl = String(url).trim();
-  if (!normalizedUrl) return;
+  const rawUrl = String(url).trim();
+  if (!rawUrl) return;
+  const serviceId = detectServiceByUrl(rawUrl) || slotConfig[slot] || null;
+  const normalizedUrl = window.IncognitoPolicy?.normalizeUrl
+    ? window.IncognitoPolicy.normalizeUrl(serviceId, rawUrl, incognitoModeEnabled)
+    : rawUrl;
 
   if (webviewReady[slot]) {
     try {
@@ -1404,6 +1418,89 @@ function safeLoadURL(slot, url) {
 
   pendingNavigation[slot] = normalizedUrl;
   webview.src = normalizedUrl;
+}
+
+async function ensureNativeIncognitoForSlot(slot, reason = 'load') {
+  if (!incognitoModeEnabled) return;
+  const webview = webviews[slot];
+  if (!webview || !webviewReady[slot]) return;
+
+  let currentUrl = '';
+  try {
+    currentUrl = webview.getURL() || '';
+  } catch (_) {
+    currentUrl = '';
+  }
+
+  const serviceId = detectServiceByUrl(currentUrl) || slotConfig[slot] || null;
+  if (!serviceId || !window.IncognitoPolicy?.needsNativeActivation?.(serviceId, true)) return;
+
+  const ensureKey = `${serviceId}|${String(currentUrl || '').trim()}`;
+  const ensureState = incognitoEnsureState[slot];
+  const now = Date.now();
+  if (ensureState?.inFlight && ensureState.inFlightKey === ensureKey) {
+    console.info(`[Incognito][${slot}] ${reason} skipped-inflight ${ensureKey}`);
+    return;
+  }
+  if (
+    ensureState?.lastSuccessKey === ensureKey &&
+    now - Number(ensureState.lastSuccessAt || 0) < 4000
+  ) {
+    console.info(`[Incognito][${slot}] ${reason} skipped-recent-success ${ensureKey}`);
+    return;
+  }
+  if (ensureState) {
+    ensureState.inFlight = true;
+    ensureState.inFlightKey = ensureKey;
+  }
+
+  try {
+    if (serviceId === 'gemini' && window.IncognitoPolicy?.buildProbeScript) {
+      try {
+        const beforeProbe = await webview.executeJavaScript(window.IncognitoPolicy.buildProbeScript(serviceId), true);
+        console.info(`[IncognitoProbe][${slot}] ${reason}:before ${safeStringifyForLog(beforeProbe)}`);
+      } catch (probeErr) {
+        console.warn(`[IncognitoProbe][${slot}] before probe failed during ${reason}:`, probeErr?.message || probeErr);
+      }
+    }
+    const result = await webview.executeJavaScript(window.IncognitoPolicy.buildEnsureScript(serviceId), true);
+    console.info(`[Incognito][${slot}] ${reason} ${safeStringifyForLog(result)}`);
+    if (result?.ok && ensureState) {
+      ensureState.lastSuccessKey = ensureKey;
+      ensureState.lastSuccessAt = Date.now();
+    }
+    if (serviceId === 'gemini' && window.IncognitoPolicy?.buildProbeScript) {
+      try {
+        const afterProbe = await webview.executeJavaScript(window.IncognitoPolicy.buildProbeScript(serviceId), true);
+        console.info(`[IncognitoProbe][${slot}] ${reason}:after ${safeStringifyForLog(afterProbe)}`);
+      } catch (probeErr) {
+        console.warn(`[IncognitoProbe][${slot}] after probe failed during ${reason}:`, probeErr?.message || probeErr);
+      }
+    }
+  } catch (err) {
+    console.warn(`[Incognito][${slot}] ensure failed during ${reason}:`, err?.message || err);
+  } finally {
+    if (ensureState) {
+      ensureState.inFlight = false;
+      ensureState.inFlightKey = '';
+    }
+  }
+}
+
+function scheduleNativeIncognitoEnsure(slot, reason = 'load') {
+  if (incognitoEnsureTimers[slot]) clearTimeout(incognitoEnsureTimers[slot]);
+  incognitoEnsureTimers[slot] = setTimeout(() => {
+    incognitoEnsureTimers[slot] = null;
+    ensureNativeIncognitoForSlot(slot, reason);
+  }, 900);
+}
+
+function safeStringifyForLog(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return String(value);
+  }
 }
 
 function safeReload(slot) {
@@ -2136,10 +2233,14 @@ document.querySelectorAll('.webview-header').forEach(header => {
     }
 
     updateNavButtons();
+    scheduleNativeIncognitoEnsure(slot, 'dom-ready');
   });
 
   // Update nav buttons on load
-  webview.addEventListener('did-stop-loading', updateNavButtons);
+  webview.addEventListener('did-stop-loading', () => {
+    updateNavButtons();
+    scheduleNativeIncognitoEnsure(slot, 'did-stop-loading');
+  });
 
 });
 
@@ -2193,6 +2294,8 @@ importCookiesBtn.addEventListener('click', () => {
 const mobileUaToggle = document.getElementById('mobile-ua-toggle');
 const ingestSessionIndicator = document.getElementById('ingest-session-indicator');
 const ingestSessionLabel = document.getElementById('ingest-session-label');
+try { localStorage.removeItem('incognito-mode'); } catch (_) {}
+let incognitoModeEnabled = false;
 let mobileUaEnabled = localStorage.getItem('mobile-ua') === 'true';
 const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
 
@@ -2204,7 +2307,16 @@ function applyMobileUaState() {
   }
 }
 
+function applyIncognitoModeState() {
+  if (incognitoModeEnabled) incognitoModeBtn?.classList.add('active');
+  else incognitoModeBtn?.classList.remove('active');
+  if (incognitoModeBtn) {
+    incognitoModeBtn.textContent = incognitoModeEnabled ? 'Temp ON' : 'Temp mode';
+  }
+}
+
 applyMobileUaState();
+applyIncognitoModeState();
 
 function clearIngestSessionIndicator() {
   ingestSessionIndicator?.classList.remove('active');
@@ -2250,6 +2362,36 @@ mobileUaToggle?.addEventListener('click', () => {
   });
 
   console.log(`[MobileUA] ${mobileUaEnabled ? 'Mobile' : 'Desktop'} UA ΓÇö all ${SLOTS.length} webviews reloading`);
+});
+
+incognitoModeBtn?.addEventListener('click', () => {
+  incognitoModeEnabled = !incognitoModeEnabled;
+  applyIncognitoModeState();
+
+  if (!incognitoModeEnabled) {
+    SLOTS.forEach((slot) => {
+      if (!incognitoEnsureState[slot]) return;
+      incognitoEnsureState[slot].lastSuccessKey = '';
+      incognitoEnsureState[slot].lastSuccessAt = 0;
+    });
+  }
+
+  SLOTS.forEach((slot) => {
+    const webview = webviews[slot];
+    if (!webview) return;
+    let currentUrl = pendingNavigation[slot] || '';
+    if (!currentUrl) {
+      try {
+        currentUrl = webview.getURL() || webview.getAttribute('src') || '';
+      } catch (_) {
+        currentUrl = webview.getAttribute('src') || '';
+      }
+    }
+    if (currentUrl) safeLoadURL(slot, currentUrl);
+    if (incognitoModeEnabled) scheduleNativeIncognitoEnsure(slot, 'toggle');
+  });
+
+  console.info(`[Incognito] ${incognitoModeEnabled ? 'enabled' : 'disabled'} for new loads`);
 });
 
 // ========== SCOPED FIND (CMD/CTRL+F) ==========

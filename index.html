@@ -441,6 +441,9 @@
       background: #1f3a18; border-color: #44aa44; color: #8fe88f;
     }
     #ingest-session-indicator.active .session-dot { background: #8fe88f; }
+    #incognito-mode-btn.active {
+      background: #2a2138; border-color: #8b6fd6; color: #e4d8ff;
+    }
   </style>
 </head>
 <body>
@@ -565,6 +568,7 @@
         <button class="control-btn" id="project-selector-btn" title="Projects">☰</button>
         <button class="control-btn" id="toggle-address-bar-btn">Hide Address Bar</button>
         <button class="control-btn" id="import-cookies-btn">Import 📥</button>
+        <button class="control-btn" id="incognito-mode-btn" title="Use provider-native temporary chat where available">Temp mode</button>
         <div id="mobile-ua-toggle" title="Switch to mobile user-agent (loads lighter mobile pages)">
           <span class="ua-dot"></span>
           <span id="mobile-ua-label">📱 Mobile</span>
@@ -720,8 +724,13 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
   <script src="merge-api-client.js" defer></script>
   <script src="aggregation-control.js" defer></script>
+  <script src="incognito-policy.js" defer></script>
   <script src="side-panel-controls.js" defer></script>
   <script src="renderer.js" defer></script>
 </body>
 </html>
+
+
+
+
 
