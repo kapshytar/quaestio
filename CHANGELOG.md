@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.9] - 2026-03-13
+
+### Changed
+- Desktop session snapshots now carry the current aggregated root note UUID so multi-question sessions can keep one row per question instead of collapsing everything into a single latest snapshot.
+
+### Fixed
+- Session history no longer treats every note inside the same `session_id` as the same logical row when loading from local cache or the database.
+
 ## [v0.1.8] - 2026-03-11
 
 ### Changed

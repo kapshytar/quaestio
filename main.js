@@ -816,6 +816,7 @@ ipcMain.handle('dream-save-session', async (_event, params) => {
       p_action: 'save',
       p_record_id: null,
       p_session_id: params?.sessionId ?? null,
+      p_question_note_id: params?.questionNoteId ?? null,
       p_name: String(params?.name || '').trim(),
       p_slot_config: params?.slotConfig || {},
       p_slot_urls: params?.slotUrls || {},
@@ -851,6 +852,9 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       sessionId: Number.isInteger(row.session_id)
         ? row.session_id
         : (Number.isInteger(row.sessionId) ? row.sessionId : null),
+      questionNoteId: typeof row.question_note_id === 'string'
+        ? row.question_note_id
+        : (typeof row.questionNoteId === 'string' ? row.questionNoteId : null),
       name: row.name,
       slotConfig: row.slot_config || row.slotConfig || {},
       slotUrls: row.slot_urls || row.slotUrls || {},
