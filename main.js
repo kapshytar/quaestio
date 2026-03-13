@@ -816,7 +816,7 @@ ipcMain.handle('dream-save-session', async (_event, params) => {
       p_action: 'save',
       p_record_id: null,
       p_session_id: params?.sessionId ?? null,
-      p_question_note_id: params?.questionNoteId ?? null,
+      p_note_id: params?.noteId ?? null,
       p_name: String(params?.name || '').trim(),
       p_slot_config: params?.slotConfig || {},
       p_slot_urls: params?.slotUrls || {},
@@ -850,9 +850,13 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       sessionId: Number.isInteger(row.session_id)
         ? row.session_id
         : (Number.isInteger(row.sessionId) ? row.sessionId : null),
-      questionNoteId: typeof row.question_note_id === 'string'
-        ? row.question_note_id
-        : (typeof row.questionNoteId === 'string' ? row.questionNoteId : null),
+      noteId: typeof row.note_id === 'string'
+        ? row.note_id
+        : (typeof row.noteId === 'string'
+            ? row.noteId
+            : (typeof row.question_note_id === 'string'
+                ? row.question_note_id
+                : (typeof row.questionNoteId === 'string' ? row.questionNoteId : null))),
       name: row.name,
       slotConfig: row.slot_config || row.slotConfig || {},
       slotUrls: row.slot_urls || row.slotUrls || {},
@@ -873,10 +877,10 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
     }
     const noteRows = await callSupabaseRestGet(`notes?${noteQuery.join('&')}`);
 
-    const snapshotByQuestionNote = new Map();
+    const snapshotByNote = new Map();
     const latestSnapshotBySession = new Map();
     for (const snapshot of snapshots) {
-      if (snapshot.questionNoteId) snapshotByQuestionNote.set(snapshot.questionNoteId, snapshot);
+      if (snapshot.noteId) snapshotByNote.set(snapshot.noteId, snapshot);
       if (snapshot.sessionId == null) continue;
       const existing = latestSnapshotBySession.get(snapshot.sessionId);
       const existingTs = Date.parse(existing?.updatedAt || '') || 0;
@@ -889,13 +893,13 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
     const noteBackedRows = (Array.isArray(noteRows) ? noteRows : []).map((note) => {
       const noteId = typeof note.id === 'string' ? note.id : null;
       const rowSessionId = Number.isInteger(note.note_session_id) ? note.note_session_id : null;
-      const matchingSnapshot = (noteId ? snapshotByQuestionNote.get(noteId) : null)
+      const matchingSnapshot = (noteId ? snapshotByNote.get(noteId) : null)
         || (rowSessionId != null ? latestSnapshotBySession.get(rowSessionId) : null)
         || null;
       return {
         id: matchingSnapshot?.id || (noteId ? `note:${noteId}` : `session:${rowSessionId ?? 'unknown'}`),
         sessionId: rowSessionId,
-        questionNoteId: noteId,
+        noteId,
         name: String(note.title || '').trim()
           || matchingSnapshot?.name
           || (rowSessionId != null ? `Session #${rowSessionId}` : 'Session'),

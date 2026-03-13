@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.10] - 2026-03-14
+
+### Changed
+- Desktop session snapshots now send and read `note_id` as the per-question key instead of the more verbose `question_note_id`.
+
+### Fixed
+- Desktop session loading remains compatible with older rows while the database and clients roll forward to the shorter field name.
+
 ## [v0.1.9] - 2026-03-13
 
 ### Changed

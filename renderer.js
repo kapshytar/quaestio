@@ -4603,8 +4603,8 @@ let sessionsNotice = { text: '', kind: 'info' };
 
 function sessionSnapshotKey(session) {
   const sessionPart = session?.sessionId != null ? String(session.sessionId) : 'id:' + String(session?.id ?? '');
-  const questionPart = String(session?.questionNoteId || session?.question_note_id || '').trim() || ('row:' + String(session?.id ?? ''));
-  return `${sessionPart}|${questionPart}`;
+  const notePart = String(session?.noteId || session?.note_id || '').trim() || ('row:' + String(session?.id ?? ''));
+  return `${sessionPart}|${notePart}`;
 }
 
 function sessionSnapshotFreshness(session) {
@@ -4640,10 +4640,10 @@ function errorToText(error) {
   return String(error.message || error);
 }
 
-async function saveSessionSnapshot(customName, ingestSessionId, questionNoteId = null) {
+async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
   const sessionData = {
     sessionId: ingestSessionId ?? getCurrentSessionId() ?? activeSessionId,
-    questionNoteId: String(questionNoteId || activeAggregatedNoteId || '').trim() || null,
+    noteId: String(noteId || activeAggregatedNoteId || '').trim() || null,
     name: customName ||
       `Session ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`,
     slotConfig: { ...slotConfig },
