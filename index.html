@@ -98,8 +98,10 @@
     .status.shimmer { color: #00aaff; animation: pulse 1s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     .control-btn {
-      padding: 3px 10px; background: #333; border: 1px solid #555;
-      border-radius: 4px; color: #ccc; cursor: pointer; font-size: 11px; transition: background 0.2s;
+      display: inline-flex; align-items: center; justify-content: center;
+      min-height: 30px; padding: 0 12px; background: #333; border: 1px solid #555;
+      border-radius: 4px; color: #ccc; cursor: pointer; font-size: 11px; line-height: 1.2;
+      box-sizing: border-box; white-space: nowrap; transition: background 0.2s, color 0.2s, border-color 0.2s;
     }
     .control-btn:hover { background: #444; color: #fff; }
     #project-selector-btn {
@@ -369,9 +371,14 @@
       margin-bottom: 8px;
     }
     #aggregation-actions {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      align-items: stretch;
+    }
+    #aggregation-actions .control-btn {
+      width: 100%;
+      min-width: 0;
     }
     #aggregation-status-summary {
       min-height: 16px;
