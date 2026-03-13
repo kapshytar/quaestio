@@ -845,9 +845,7 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       p_slot_enabled: null,
       p_limit: 1000
     });
-    const rows = Array.isArray(data?.data) ? data.data : [];
-    // Map snake_case DB fields → camelCase for renderer
-    return rows.map(row => ({
+    const snapshots = (Array.isArray(data?.data) ? data.data : []).map(row => ({
       id: row.id,
       sessionId: Number.isInteger(row.session_id)
         ? row.session_id
@@ -861,6 +859,54 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       slotEnabled: row.slot_enabled || row.slotEnabled || {},
       updatedAt: row.updated_at || row.updatedAt || null
     }));
+
+    const noteQuery = [
+      'select=id,note_session_id,title,updated_at',
+      'note_type=eq.1',
+      'order=updated_at.desc',
+      'limit=1000'
+    ];
+    if (Number.isInteger(parsedSessionId) && parsedSessionId > 0) {
+      noteQuery.push(`note_session_id=eq.${parsedSessionId}`);
+    } else {
+      noteQuery.push('note_session_id=not.is.null');
+    }
+    const noteRows = await callSupabaseRestGet(`notes?${noteQuery.join('&')}`);
+
+    const snapshotByQuestionNote = new Map();
+    const latestSnapshotBySession = new Map();
+    for (const snapshot of snapshots) {
+      if (snapshot.questionNoteId) snapshotByQuestionNote.set(snapshot.questionNoteId, snapshot);
+      if (snapshot.sessionId == null) continue;
+      const existing = latestSnapshotBySession.get(snapshot.sessionId);
+      const existingTs = Date.parse(existing?.updatedAt || '') || 0;
+      const currentTs = Date.parse(snapshot.updatedAt || '') || 0;
+      if (!existing || currentTs >= existingTs) {
+        latestSnapshotBySession.set(snapshot.sessionId, snapshot);
+      }
+    }
+
+    const noteBackedRows = (Array.isArray(noteRows) ? noteRows : []).map((note) => {
+      const noteId = typeof note.id === 'string' ? note.id : null;
+      const rowSessionId = Number.isInteger(note.note_session_id) ? note.note_session_id : null;
+      const matchingSnapshot = (noteId ? snapshotByQuestionNote.get(noteId) : null)
+        || (rowSessionId != null ? latestSnapshotBySession.get(rowSessionId) : null)
+        || null;
+      return {
+        id: matchingSnapshot?.id || (noteId ? `note:${noteId}` : `session:${rowSessionId ?? 'unknown'}`),
+        sessionId: rowSessionId,
+        questionNoteId: noteId,
+        name: String(note.title || '').trim()
+          || matchingSnapshot?.name
+          || (rowSessionId != null ? `Session #${rowSessionId}` : 'Session'),
+        slotConfig: matchingSnapshot?.slotConfig || {},
+        slotUrls: matchingSnapshot?.slotUrls || {},
+        slotEnabled: matchingSnapshot?.slotEnabled || {},
+        updatedAt: note.updated_at || matchingSnapshot?.updatedAt || null
+      };
+    });
+
+    return noteBackedRows.length > 0 ? noteBackedRows : snapshots;
   } catch (error) {
     console.error('[dream-load-sessions] failed:', error);
     throw error;
@@ -1409,3 +1455,5 @@ if (!gotSingleInstanceLock) {
     }
   });
 }
+
+
