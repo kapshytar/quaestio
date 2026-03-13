@@ -3,6 +3,10 @@
 ## Stable
 
 - Desktop session CRUD uses the bridge RPC path.
+- Desktop session list is note-backed, matching web:
+  - question rows come from `notes.note_type = 1`
+  - one `session_id` can contain many visible questions
+  - session snapshots are only used for slot state recovery
 - Desktop aggregation state tracks:
   - `session_id`
   - `activeAggregatedNoteId`

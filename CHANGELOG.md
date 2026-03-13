@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.11] - 2026-03-14
+
+### Changed
+- Desktop session list now uses note-backed rows as the primary source, matching web session/history behavior.
+- Session snapshots are now treated as slot-state metadata instead of the canonical visible list of questions.
+
+### Fixed
+- Desktop sessions now show all questions inside the same `session_id` instead of collapsing to whichever snapshot happened to be latest.
+
 ## [v0.1.10] - 2026-03-14
 
 ### Changed
