@@ -190,6 +190,7 @@ const lastDomScrapeDebugBySlot = new Map();
 let activeSessionFingerprint = '';
 let activeSessionId = null; // in-memory session_id � set immediately when RPC returns
 let activeAggregatedNoteId = null; // current question root note for manual Collect now overwrite
+let activeSessionPrompt = '';
 const aggregationControl = window.AggregationControl
   ? new window.AggregationControl.AggregationControlState()
   : {
@@ -748,6 +749,7 @@ function persistSessionContext(sessionId, fingerprint) {
 function clearStoredSessionContext() {
   activeSessionId = null;
   activeAggregatedNoteId = null;
+  activeSessionPrompt = '';
   localStorage.removeItem(AGGREGATED_SESSION_CONTEXT_KEY);
   localStorage.removeItem(AGGREGATED_SESSION_ID_KEY);
 }
@@ -2746,8 +2748,12 @@ function updateAggregationActionButtons() {
     pauseAggregationBtn.classList.toggle('active', aggregationControl.paused);
   }
   if (collectNowBtn) {
-    const hasPrompt = !!String(window.mergeApiClient?.lastSourcePrompt || '').trim();
+    const hasPrompt = !!String(window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim();
+    const hasLoadedQuestionContext = Number.isInteger(activeSessionId) && activeSessionId > 0 && !!activeAggregatedNoteId;
     collectNowBtn.disabled = !hasPending && !hasPrompt;
+    if (!hasPrompt && hasLoadedQuestionContext) {
+      collectNowBtn.disabled = false;
+    }
   }
 }
 
@@ -3303,11 +3309,24 @@ function initMergePanel() {
     setMergeStatus('Aggregation paused. Fix slots and press Resume or Collect now.', 'paused');
   });
   collectNowBtn?.addEventListener('click', async () => {
-    if (aggregationControl.hasPendingAggregation() || String(window.mergeApiClient?.lastSourcePrompt || '').trim()) {
+    activateConfigTab('debug');
+    mergeLog('Collect now button clicked', 'info', {
+      hasPendingAggregation: aggregationControl.hasPendingAggregation(),
+      hasPendingMerge: aggregationControl.hasPendingMerge(),
+      activeSessionId: activeSessionId || null,
+      activeAggregatedNoteId: activeAggregatedNoteId || null,
+      lastSourcePrompt: String(window.mergeApiClient?.lastSourcePrompt || '').trim() || null,
+      activeSessionPrompt: activeSessionPrompt || null
+    });
+    if (aggregationControl.hasPendingAggregation() || String(window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim() || (activeSessionId && activeAggregatedNoteId)) {
       await collectNowAggregation(true);
       return;
     }
-    if (!aggregationControl.hasPendingMerge()) return;
+    if (!aggregationControl.hasPendingMerge()) {
+      mergeLog('Collect now ignored: no pending aggregation, no loaded session context, and no pending merge', 'warn');
+      setMergeStatus('Nothing to collect. Load a question session or send a new prompt first.', 'warn');
+      return;
+    }
     await collectAndMaybeRunPendingMerge(true);
   });
   refreshAggregationBtn?.addEventListener('click', async () => {
@@ -3402,26 +3421,25 @@ function initMergePanel() {
     applyTabsCollapsed();
   });
 
+  function activateConfigTab(tab) {
+    document.querySelectorAll('.cfg-tab').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.cfg-tab[data-tab="${tab}"]`)?.classList.add('active');
+    document.querySelectorAll('.cfg-tab-pane').forEach(p => p.classList.remove('active'));
+    document.getElementById(`cfg-pane-${tab}`)?.classList.add('active');
+    if (tabsCollapsed) {
+      tabsCollapsed = false;
+      localStorage.setItem('cfg-tabs-collapsed', 'false');
+      applyTabsCollapsed();
+    }
+    localStorage.setItem('cfg-tabs-active', tab);
+    if (tab === 'sessions') {
+      updateSessionsUI().catch(err => console.warn('[sessions] refresh failed:', err));
+    }
+  }
+
   document.querySelectorAll('.cfg-tab').forEach(btn => {
     btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      // Activate tab button
-      document.querySelectorAll('.cfg-tab').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      // Show pane
-      document.querySelectorAll('.cfg-tab-pane').forEach(p => p.classList.remove('active'));
-      document.getElementById(`cfg-pane-${tab}`)?.classList.add('active');
-      // Auto-expand if collapsed
-      if (tabsCollapsed) {
-        tabsCollapsed = false;
-        localStorage.setItem('cfg-tabs-collapsed', 'false');
-        applyTabsCollapsed();
-      }
-      localStorage.setItem('cfg-tabs-active', tab);
-      // Refresh sessions list whenever the sessions tab is opened
-      if (tab === 'sessions') {
-        updateSessionsUI().catch(err => console.warn('[sessions] refresh failed:', err));
-      }
+      activateConfigTab(btn.dataset.tab);
     });
   });
 
@@ -4255,7 +4273,7 @@ async function finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContex
 
 async function collectNowAggregation(manual = true) {
   const pending = aggregationControl.pendingAggregation;
-  const sourcePrompt = String(pending?.sourcePrompt || window.mergeApiClient?.lastSourcePrompt || '').trim();
+  const sourcePrompt = String(pending?.sourcePrompt || window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim();
   const ingestContext = pending?.ingestContext || {
     sessionFingerprint: activeSessionFingerprint,
     sessionIdHint: getStoredAggregatedSessionId() || activeSessionId || null
@@ -4754,6 +4772,7 @@ async function loadSession(sessionId) {
   const sessionSlotConfig = session.slotConfig || session.slot_config || {};
   const sessionSlotUrls = session.slotUrls || session.slot_urls || {};
   const sessionSlotEnabled = session.slotEnabled || session.slot_enabled || {};
+  const sessionPrompt = String(session.name || session.title || '').trim();
 
   // Restore slot configuration
   Object.assign(slotConfig, sessionSlotConfig);
@@ -4811,6 +4830,10 @@ async function loadSession(sessionId) {
   if (Number.isInteger(numericId) && numericId > 0) {
     activeSessionId = numericId;
     activeAggregatedNoteId = restoredAggregatedNoteId;
+    activeSessionPrompt = sessionPrompt;
+    if (window.mergeApiClient && sessionPrompt) {
+      window.mergeApiClient.lastSourcePrompt = sessionPrompt;
+    }
     const enabledSlots = SLOTS.filter(slot => slotEnabled[slot]);
     const fingerprint = buildSessionFingerprint(enabledSlots);
     activeSessionFingerprint = fingerprint;
@@ -4823,6 +4846,7 @@ async function loadSession(sessionId) {
 
   console.log('Session loaded:', sessionId, '? activeSessionId =', activeSessionId);
   setSessionsNotice(`Session loaded: ${session.name || sessionId}`, 'ok');
+  updateAggregationActionButtons();
   await updateSessionsUI();
 }
 
