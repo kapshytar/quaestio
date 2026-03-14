@@ -17,7 +17,9 @@
   - `prompt_text`
   - `platform_code`
   - `project_tag_id` when a project is selected
-- `debug-runs/` is now a local forensic workspace. Trace artifacts stay local and are not tracked by git.
+- debug-runs/ is now a local forensic workspace. Trace artifacts stay local and are not tracked by git.
+- Merge panel labels use plain ASCII text to avoid codepage-dependent UI garbage on Windows.
+- Desktop is currently the scrape reference implementation; do not reintroduce shared scraper experiments here without proving parity first.
 
 ## Stable Scrape Behavior
 
@@ -52,7 +54,7 @@
 ## Current Contracts
 
 - Aggregated overwrite must be exact-note overwrite via `aggregated_note_id`.
-- `session_id` must not be used as a proxy for “current question”.
+- `session_id` must not be used as a proxy for "current question".
 - Desktop owns only thin client state; canonical note semantics live in Dream Tracker backend.
 
 ## Next Steps

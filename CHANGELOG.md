@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.12] - 2026-03-14
+
+### Changed
+- Merge panel labels now use plain ASCII text so Windows codepage issues do not render broken glyphs in the desktop UI.
+
+### Fixed
+- Desktop merge/session controls no longer show broken non-ASCII symbols in panel headers and buttons.
+
 ## [v0.1.11] - 2026-03-14
 
 ### Changed
@@ -74,7 +82,7 @@ Versioning: `vMAJOR.MINOR.PATCH`.
 - Provider reply extraction now uses a more structured DOM-to-markdown pass for inline math, nested lists, tables, inline formatting, and code blocks instead of flattening too much content into plain text.
 
 ### Fixed
-- Gemini table cells with KaTeX content such as `E = mc^2` and `±0.01` no longer split across rows during desktop ingest.
+- Gemini table cells with KaTeX content such as `E = mc^2` and `Â±0.01` no longer split across rows during desktop ingest.
 - Nested list items and other structured Gemini content now survive scraping without collapsing into stray `-` markers as often.
 
 ## [v0.1.4] - 2026-03-10
