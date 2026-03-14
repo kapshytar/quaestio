@@ -4807,9 +4807,10 @@ async function loadSession(sessionId) {
 
   // Restore session context so subsequent messages continue in THIS session
   const numericId = Number(session.sessionId ?? session.session_id ?? sessionId);
+  const restoredAggregatedNoteId = String(session.noteId ?? session.note_id ?? '').trim() || null;
   if (Number.isInteger(numericId) && numericId > 0) {
     activeSessionId = numericId;
-    activeAggregatedNoteId = null;
+    activeAggregatedNoteId = restoredAggregatedNoteId;
     const enabledSlots = SLOTS.filter(slot => slotEnabled[slot]);
     const fingerprint = buildSessionFingerprint(enabledSlots);
     activeSessionFingerprint = fingerprint;
