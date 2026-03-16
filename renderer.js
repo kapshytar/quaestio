@@ -1335,7 +1335,7 @@ async function sendAggregated(sessionId, title, responses, scrapeMeta = [], proj
   return ingestAggregatedPayload(payload, 'aggregated', sourceMessageId, traceContext);
 }
 
-async function sendMerge(sessionId, promptText, markdown, scrapeMeta = []) {
+async function sendMerge(sessionId, promptText, markdown, scrapeMeta = [], aggregatedNoteId = null) {
   if (!Number.isInteger(sessionId) || sessionId <= 0) {
     return { ok: false, error: 'session_id is required for merge.' };
   }
@@ -1346,6 +1346,7 @@ async function sendMerge(sessionId, promptText, markdown, scrapeMeta = []) {
   const payload = {
     schema: 'merge_ingest_v1',
     session_id: sessionId,
+    aggregated_note_id: String(aggregatedNoteId || activeAggregatedNoteId || '').trim() || null,
     platform_code: getOriginPlatformCode(),
     prompt_text: String(promptText || '').trim(),
     markdown: pickMarkdown(markdown)
@@ -4503,7 +4504,7 @@ async function executeMergeRequest(isClarification, clarificationText, previousS
         : client.lastSourcePrompt;
       const sendResult = isClarification
         ? await sendClarification(sessionId, promptText, cleanResponse, lastScrapeMeta)
-        : await sendMerge(sessionId, promptText, cleanResponse, lastScrapeMeta);
+        : await sendMerge(sessionId, promptText, cleanResponse, lastScrapeMeta, activeAggregatedNoteId);
       mergeLog(
         sendResult?.ok ? (isClarification ? 'Clarification RPC success' : 'Merge RPC success') : (isClarification ? 'Clarification RPC failed' : 'Merge RPC failed'),
         sendResult?.ok ? 'recv' : 'warn',
