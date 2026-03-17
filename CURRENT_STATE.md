@@ -17,6 +17,7 @@
   - `prompt_text`
   - `platform_code`
   - `project_tag_id` when a project is selected
+  - exact `aggregated_note_id` for merge ingest, so merge notes attach to the current question root instead of whichever type-1 note was latest by session timestamp
 - debug-runs/ is now a local forensic workspace. Trace artifacts stay local and are not tracked by git.
 - Merge panel labels use plain ASCII text to avoid codepage-dependent UI garbage on Windows.
 - Desktop is currently the scrape reference implementation; do not reintroduce shared scraper experiments here without proving parity first.
@@ -54,6 +55,7 @@
 ## Current Contracts
 
 - Aggregated overwrite must be exact-note overwrite via `aggregated_note_id`.
+- Merge ingest should also pass exact `aggregated_note_id`; `session_id` alone is not enough to identify the current question root in a multi-question session.
 - `session_id` must not be used as a proxy for "current question".
 - Desktop owns only thin client state; canonical note semantics live in Dream Tracker backend.
 

@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.13] - 2026-03-17
+
+### Changed
+- Desktop merge ingest now sends exact `aggregated_note_id` instead of relying on backend fallback by latest `session_id` note.
+
+### Fixed
+- Merge notes created after `Collect now` now attach to the current aggregated question root instead of an older type-1 note in the same session.
+
 ## [v0.1.12] - 2026-03-14
 
 ### Changed
