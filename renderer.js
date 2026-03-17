@@ -830,6 +830,13 @@ function getStoredAggregatedSessionId() {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function getCurrentQuestionSessionId() {
+  const activeRootId = String(activeAggregatedNoteId || '').trim();
+  if (!activeRootId) return null;
+  if (Number.isInteger(activeSessionId) && activeSessionId > 0) return activeSessionId;
+  return getStoredAggregatedSessionId();
+}
+
 function buildAggregatedPayload(params) {
   const sourcePrompt = (params.sourcePrompt || '').trim();
   const title = sourcePrompt || `Gunshi merge ${new Date().toISOString()}`;
@@ -3998,7 +4005,7 @@ async function collectLatestRepliesFromEnabledSlots() {
   const responsesByModel = {};
   const aggregatedResponses = [];
   const scrapeMeta = [];
-  const sourcePrompt = (window.mergeApiClient?.lastSourcePrompt || '').trim();
+  const sourcePrompt = String(window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim();
   const traceId = activeIngestTraceId || startIngestTrace();
 
   const reserveModelName = (baseName) => {
@@ -4277,7 +4284,7 @@ async function collectNowAggregation(manual = true) {
   const sourcePrompt = String(pending?.sourcePrompt || window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim();
   const ingestContext = pending?.ingestContext || {
     sessionFingerprint: activeSessionFingerprint,
-    sessionIdHint: getStoredAggregatedSessionId() || activeSessionId || null
+    sessionIdHint: getCurrentQuestionSessionId()
   };
   const existingAggregatedNoteId = String(pending?.aggregatedNoteId || activeAggregatedNoteId || '').trim() || null;
   const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
@@ -4497,11 +4504,42 @@ async function executeMergeRequest(isClarification, clarificationText, previousS
     updateMergeResult(result.text);
     setMergeStatus(isClarification ? 'Follow-up complete' : 'Merge complete', 'idle');
 
-    const sessionId = getStoredAggregatedSessionId();
+    let sessionId = getCurrentQuestionSessionId();
+    if ((!Number.isInteger(sessionId) || sessionId <= 0) && !isClarification && Array.isArray(aggregatedResponses) && aggregatedResponses.length > 0) {
+      const bootstrapPrompt = String(client.lastSourcePrompt || activeSessionPrompt || '').trim();
+      mergeLog('No active session for merge ingest; bootstrapping aggregated note first', 'info', {
+        sourcePrompt: bootstrapPrompt || null,
+        aggregatedResponses: aggregatedResponses.length
+      });
+      const bootstrapIngest = await sendAggregated(
+        null,
+        bootstrapPrompt || `Collected ${new Date().toISOString()}`,
+        aggregatedResponses,
+        lastScrapeMeta,
+        activeProjectId,
+        false,
+        null
+      );
+      const finalized = await finalizeAggregatedIngest(
+        bootstrapIngest,
+        bootstrapPrompt,
+        {
+          sessionFingerprint: activeSessionFingerprint,
+          sessionIdHint: null
+        }
+      );
+      sessionId = finalized?.sessionId ?? getCurrentQuestionSessionId();
+      mergeLog(
+        bootstrapIngest?.ok ? 'Bootstrap aggregated ingest success' : 'Bootstrap aggregated ingest failed',
+        bootstrapIngest?.ok ? 'recv' : 'warn',
+        bootstrapIngest
+      );
+    }
+
     if (Number.isInteger(sessionId) && sessionId > 0) {
       const promptText = isClarification
         ? clarificationText
-        : client.lastSourcePrompt;
+        : String(client.lastSourcePrompt || activeSessionPrompt || '').trim();
       const sendResult = isClarification
         ? await sendClarification(sessionId, promptText, cleanResponse, lastScrapeMeta)
         : await sendMerge(sessionId, promptText, cleanResponse, lastScrapeMeta, activeAggregatedNoteId);
