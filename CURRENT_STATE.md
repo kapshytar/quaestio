@@ -10,6 +10,7 @@
 - Desktop aggregation state tracks:
   - `session_id`
   - `activeAggregatedNoteId`
+  - question fingerprint-backed local resume context
 - `Collect now` is for aggregation, not merge.
 - New questions always clear the active aggregated root before the first collect.
 - Restored sessions can continue with new questions without overwriting older aggregated roots.
@@ -57,6 +58,7 @@
 - Aggregated overwrite must be exact-note overwrite via `aggregated_note_id`.
 - Merge ingest should also pass exact `aggregated_note_id`; `session_id` alone is not enough to identify the current question root in a multi-question session.
 - `session_id` must not be used as a proxy for "current question".
+- Continuing the same question after restart/device handoff is allowed again, but only when the current slot URLs match the stored question fingerprint.
 - Desktop owns only thin client state; canonical note semantics live in Dream Tracker backend.
 
 ## Next Steps

@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.14] - 2026-03-21
+
+### Changed
+- Desktop session context now persists both `session_id` and the active aggregated root note UUID in the local question-context cache.
+- Desktop send, `Collect now`, and `Merge` flows now attempt to restore the current question by matching the active slot conversation fingerprint before creating a new session/root.
+
+### Fixed
+- Reopening the same LLM conversations after a restart or device handoff no longer creates a fresh note-backed session row when the question should continue in the existing chain.
+- Multi-question session resume on desktop now preserves exact-note targeting instead of falling back to stale runtime-only state.
+
 ## [v0.1.13] - 2026-03-17
 
 ### Changed
