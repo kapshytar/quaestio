@@ -725,21 +725,32 @@ function readSessionContext() {
     const sessionId = Number(parsed?.session_id);
     const fingerprint = String(parsed?.fingerprint || '').trim();
     if (!Number.isInteger(sessionId) || sessionId <= 0 || !fingerprint) return null;
+    const aggregatedNoteId = String(
+      parsed?.aggregated_note_id
+      || parsed?.note_id
+      || ''
+    ).trim() || null;
     return {
       session_id: sessionId,
-      fingerprint
+      fingerprint,
+      aggregated_note_id: aggregatedNoteId
     };
   } catch (_) {
     return null;
   }
 }
 
-function persistSessionContext(sessionId, fingerprint) {
+function persistSessionContext(sessionId, fingerprint, aggregatedNoteId = null) {
   if (!Number.isInteger(sessionId) || sessionId <= 0 || !fingerprint) return;
   activeSessionId = sessionId; // always keep in-memory copy
+  const normalizedAggregatedNoteId = String(aggregatedNoteId || '').trim() || null;
+  if (normalizedAggregatedNoteId) {
+    activeAggregatedNoteId = normalizedAggregatedNoteId;
+  }
   const context = {
     session_id: sessionId,
     fingerprint,
+    aggregated_note_id: normalizedAggregatedNoteId,
     updated_at: new Date().toISOString()
   };
   localStorage.setItem(AGGREGATED_SESSION_CONTEXT_KEY, JSON.stringify(context));
@@ -760,6 +771,25 @@ function getStoredSessionIdForFingerprint(fingerprint) {
   const context = readSessionContext();
   if (!context) return null;
   return context.fingerprint === normalizedFingerprint ? context.session_id : null;
+}
+
+function getStoredSessionContextForFingerprint(fingerprint) {
+  const normalizedFingerprint = String(fingerprint || '').trim();
+  if (!normalizedFingerprint) return null;
+  const context = readSessionContext();
+  if (!context || context.fingerprint !== normalizedFingerprint) return null;
+  return context;
+}
+
+function restoreStoredQuestionContextForFingerprint(fingerprint) {
+  const context = getStoredSessionContextForFingerprint(fingerprint);
+  if (!context?.session_id) return null;
+  activeSessionId = context.session_id;
+  activeAggregatedNoteId = String(context.aggregated_note_id || '').trim() || null;
+  activeSessionFingerprint = fingerprint;
+  persistSessionContext(context.session_id, fingerprint, activeAggregatedNoteId);
+  setIngestSessionIndicator(context.session_id);
+  return context;
 }
 
 function extractConversationKey(serviceId, rawUrl) {
@@ -3074,17 +3104,18 @@ async function sendToAll() {
   const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
   const sessionFingerprint = buildSessionFingerprint(enabledSlots);
   activeSessionFingerprint = sessionFingerprint;
-  // Reuse session_id only from current runtime (or explicit session load).
-  // Do not auto-resume old localStorage session on cold start.
+  const storedContext = restoreStoredQuestionContextForFingerprint(sessionFingerprint);
   const sessionIdHint = Number.isInteger(activeSessionId) && activeSessionId > 0
     ? activeSessionId
-    : null;
+    : (storedContext?.session_id || null);
 
   if (Number.isInteger(sessionIdHint) && sessionIdHint > 0) {
+    const restoredNoteId = String(activeAggregatedNoteId || storedContext?.aggregated_note_id || '').trim() || null;
     if (sessionFingerprint) {
-      persistSessionContext(sessionIdHint, sessionFingerprint);
+      persistSessionContext(sessionIdHint, sessionFingerprint, restoredNoteId);
     } else {
       activeSessionId = sessionIdHint;
+      activeAggregatedNoteId = restoredNoteId;
       localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionIdHint));
     }
     setIngestSessionIndicator(sessionIdHint);
@@ -4258,7 +4289,7 @@ async function finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContex
     if (noteId) activeAggregatedNoteId = noteId;
     const fingerprint = String(ingestContext.sessionFingerprint || activeSessionFingerprint || '').trim();
     if (fingerprint) {
-      persistSessionContext(sessionId, fingerprint);
+      persistSessionContext(sessionId, fingerprint, noteId || activeAggregatedNoteId);
     } else {
       localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionId));
     }
@@ -4281,13 +4312,17 @@ async function finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContex
 
 async function collectNowAggregation(manual = true) {
   const pending = aggregationControl.pendingAggregation;
+  const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
+  const runtimeFingerprint = buildSessionFingerprint(enabledSlots);
+  if (runtimeFingerprint) {
+    restoreStoredQuestionContextForFingerprint(runtimeFingerprint);
+  }
   const sourcePrompt = String(pending?.sourcePrompt || window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim();
   const ingestContext = pending?.ingestContext || {
-    sessionFingerprint: activeSessionFingerprint,
+    sessionFingerprint: runtimeFingerprint || activeSessionFingerprint,
     sessionIdHint: getCurrentQuestionSessionId()
   };
   const existingAggregatedNoteId = String(pending?.aggregatedNoteId || activeAggregatedNoteId || '').trim() || null;
-  const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
   const scraping = window.AggregationControl?.SLOT_STATUS?.SCRAPING || 'scraping';
   const collected = window.AggregationControl?.SLOT_STATUS?.COLLECTED || 'collected';
   const error = window.AggregationControl?.SLOT_STATUS?.ERROR || 'error';
@@ -4504,6 +4539,11 @@ async function executeMergeRequest(isClarification, clarificationText, previousS
     updateMergeResult(result.text);
     setMergeStatus(isClarification ? 'Follow-up complete' : 'Merge complete', 'idle');
 
+    const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
+    const runtimeFingerprint = buildSessionFingerprint(enabledSlots);
+    if (runtimeFingerprint) {
+      restoreStoredQuestionContextForFingerprint(runtimeFingerprint);
+    }
     let sessionId = getCurrentQuestionSessionId();
     if ((!Number.isInteger(sessionId) || sessionId <= 0) && !isClarification && Array.isArray(aggregatedResponses) && aggregatedResponses.length > 0) {
       const bootstrapPrompt = String(client.lastSourcePrompt || activeSessionPrompt || '').trim();
@@ -4524,7 +4564,7 @@ async function executeMergeRequest(isClarification, clarificationText, previousS
         bootstrapIngest,
         bootstrapPrompt,
         {
-          sessionFingerprint: activeSessionFingerprint,
+          sessionFingerprint: runtimeFingerprint || activeSessionFingerprint,
           sessionIdHint: null
         }
       );
@@ -4876,7 +4916,7 @@ async function loadSession(sessionId) {
     const enabledSlots = SLOTS.filter(slot => slotEnabled[slot]);
     const fingerprint = buildSessionFingerprint(enabledSlots);
     activeSessionFingerprint = fingerprint;
-    persistSessionContext(numericId, fingerprint);
+    persistSessionContext(numericId, fingerprint, restoredAggregatedNoteId);
     setIngestSessionIndicator(numericId);
   } else {
     clearStoredSessionContext();
