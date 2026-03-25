@@ -17,12 +17,12 @@ function toggleSidePanel() {
     sidePanel.classList.add('collapsed');
     mainContent.classList.add('full-width');
     mainContent.classList.remove('with-panel');
-    if (toggleMergePanelBtn) toggleMergePanelBtn.textContent = 'Merge ▸';
+    if (toggleMergePanelBtn) toggleMergePanelBtn.textContent = 'Merge >';
   } else {
     sidePanel.classList.remove('collapsed');
     mainContent.classList.add('with-panel');
     mainContent.classList.remove('full-width');
-    if (toggleMergePanelBtn) toggleMergePanelBtn.textContent = 'Merge ◂';
+    if (toggleMergePanelBtn) toggleMergePanelBtn.textContent = 'Merge <';
   }
   
   localStorage.setItem('merge-panel-collapsed', isPanelCollapsed.toString());
@@ -120,7 +120,7 @@ if (savedCollapsed === 'true') {
   isPanelCollapsed = true;
   sidePanel?.classList.add('collapsed');
   mainContent?.classList.add('full-width');
-  if (toggleMergePanelBtn) toggleMergePanelBtn.textContent = 'Merge ▸';
+  if (toggleMergePanelBtn) toggleMergePanelBtn.textContent = 'Merge >';
 } else {
   mainContent?.classList.add('with-panel');
   mainContent.style.flex = '1 1 0';
