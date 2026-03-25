@@ -2786,12 +2786,8 @@ function updateAggregationActionButtons() {
     pauseAggregationBtn.classList.toggle('active', aggregationControl.paused);
   }
   if (collectNowBtn) {
-    const hasPrompt = !!String(window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim();
-    const hasLoadedQuestionContext = Number.isInteger(activeSessionId) && activeSessionId > 0 && !!activeAggregatedNoteId;
-    collectNowBtn.disabled = !hasPending && !hasPrompt;
-    if (!hasPrompt && hasLoadedQuestionContext) {
-      collectNowBtn.disabled = false;
-    }
+    const hasEnabledSlots = SLOTS.some((slot) => toggles[slot]?.checked);
+    collectNowBtn.disabled = !hasEnabledSlots;
   }
 }
 
@@ -3349,23 +3345,34 @@ function initMergePanel() {
   });
   collectNowBtn?.addEventListener('click', async () => {
     activateConfigTab('debug');
+    const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
     mergeLog('Collect now button clicked', 'info', {
       hasPendingAggregation: aggregationControl.hasPendingAggregation(),
       hasPendingMerge: aggregationControl.hasPendingMerge(),
+      enabledSlots,
       activeSessionId: activeSessionId || null,
       activeAggregatedNoteId: activeAggregatedNoteId || null,
       lastSourcePrompt: String(window.mergeApiClient?.lastSourcePrompt || '').trim() || null,
       activeSessionPrompt: activeSessionPrompt || null
     });
+
+    if (enabledSlots.length === 0) {
+      mergeLog('Collect now ignored: no enabled slots', 'warn');
+      setMergeStatus('Nothing to collect. Enable at least one slot first.', 'warn');
+      return;
+    }
+
     if (aggregationControl.hasPendingAggregation() || String(window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim() || (activeSessionId && activeAggregatedNoteId)) {
       await collectNowAggregation(true);
       return;
     }
+
     if (!aggregationControl.hasPendingMerge()) {
-      mergeLog('Collect now ignored: no pending aggregation, no loaded session context, and no pending merge', 'warn');
-      setMergeStatus('Nothing to collect. Load a question session or send a new prompt first.', 'warn');
+      mergeLog('Collect now proceeding without prior session context; will create a session directly from open chats', 'info');
+      await collectNowAggregation(true);
       return;
     }
+
     await collectAndMaybeRunPendingMerge(true);
   });
   refreshAggregationBtn?.addEventListener('click', async () => {
@@ -3823,6 +3830,56 @@ async function getLatestAssistantReply(slot) {
       };
     }
 
+    function findNearestPromptCandidate(selectedCandidate) {
+      if (!selectedCandidate?.el) return null;
+      const userSelectors = [
+        '[data-message-author-role="user"]',
+        '[data-testid*="user"]',
+        '[class*="user"][class*="message"]',
+        '[class*="query"]',
+        '[class*="request"]',
+        'user-query'
+      ];
+
+      const candidates = [];
+      const seen = new Set();
+      userSelectors.forEach((sel) => {
+        try {
+          document.querySelectorAll(sel).forEach((el) => {
+            if (seen.has(el)) return;
+            seen.add(el);
+            if (!visible(el)) return;
+            if (isComposerElement(el)) return;
+            const relation = el.compareDocumentPosition(selectedCandidate.el);
+            if (!(relation & Node.DOCUMENT_POSITION_FOLLOWING)) return;
+            const raw = extractStructuredText(el);
+            const flat = flatText(raw);
+            if (flat.length < 6 || isMetadataLikeText(flat)) return;
+            const rect = el.getBoundingClientRect();
+            candidates.push({
+              el,
+              raw,
+              flat,
+              top: rect.top,
+              bottom: rect.bottom
+            });
+          });
+        } catch (_) {}
+      });
+
+      if (candidates.length === 0) return null;
+
+      candidates.sort((a, b) => {
+        const aDistance = Math.abs((selectedCandidate.top || 0) - a.bottom);
+        const bDistance = Math.abs((selectedCandidate.top || 0) - b.bottom);
+        if (aDistance !== bDistance) return aDistance - bDistance;
+        if (b.bottom !== a.bottom) return b.bottom - a.bottom;
+        return b.flat.length - a.flat.length;
+      });
+
+      return candidates[0];
+    }
+
     const selectorEntries = [
       ['[data-testid*="conversation-turn"]', '[data-testid*="conversation-turn"]'],
       ['[data-testid*="message-content"]', '[data-testid*="message-content"]'],
@@ -3952,6 +4009,7 @@ async function getLatestAssistantReply(slot) {
 
     const selectedWrapped = ranked[0];
     const selected = selectedWrapped.candidate;
+    const promptCandidate = findNearestPromptCandidate(selected);
     const candidateDiagnostics = ranked.slice(0, 12).map((entry, index) =>
       summarizeCandidate(entry.candidate, entry.candidate.selectorHint, {
         rank: index + 1,
@@ -3975,6 +4033,12 @@ async function getLatestAssistantReply(slot) {
           html_length: (selected.el?.outerHTML || '').length,
           parent_html_length: (selected.el?.parentElement?.outerHTML || '').length
         }),
+        prompt_candidate: promptCandidate ? {
+          text: promptCandidate.flat,
+          top: Math.round(promptCandidate.top || 0),
+          bottom: Math.round(promptCandidate.bottom || 0),
+          html_length: (promptCandidate.el?.outerHTML || '').length
+        } : null,
         candidates: candidateDiagnostics,
         selected_html: safeOuterHtml(selected.el),
         parent_html: safeOuterHtml(selected.el?.parentElement),
@@ -4027,6 +4091,43 @@ async function getLatestAssistantReply(slot) {
     lastDomScrapeDebugBySlot.set(slot, diagnostics);
     return { raw: '', diagnostics };
   }
+}
+
+function resolveSourcePromptFromCollectedScrape(scrapeMeta = []) {
+  const direct = String(window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim();
+  if (direct) return direct;
+
+  const prompts = (Array.isArray(scrapeMeta) ? scrapeMeta : [])
+    .map((item) => String(item?.dom_diagnostics?.prompt_candidate?.text || '').trim())
+    .filter(Boolean);
+
+  const prompt = prompts.sort((a, b) => b.length - a.length)[0] || '';
+  if (prompt) {
+    activeSessionPrompt = prompt;
+    if (window.mergeApiClient) {
+      window.mergeApiClient.lastSourcePrompt = prompt;
+    }
+    return prompt;
+  }
+
+  const titles = (Array.isArray(scrapeMeta) ? scrapeMeta : [])
+    .map((item) => String(item?.dom_diagnostics?.document_title || '').trim())
+    .filter(Boolean)
+    .map((title) => title
+      .replace(/\s*[-|]\s*(ChatGPT|Gemini|Claude|Grok|Perplexity).*$/i, '')
+      .replace(/\s*[·•]\s*(ChatGPT|Gemini|Claude|Grok|Perplexity).*$/i, '')
+      .trim()
+    )
+    .filter((title) => title.length >= 6);
+
+  const fallbackTitle = titles.sort((a, b) => b.length - a.length)[0] || '';
+  if (fallbackTitle) {
+    activeSessionPrompt = fallbackTitle;
+    if (window.mergeApiClient) {
+      window.mergeApiClient.lastSourcePrompt = fallbackTitle;
+    }
+  }
+  return fallbackTitle;
 }
 
 // ========== COLLECT REPLIES FROM ALL SLOTS ==========
@@ -4317,12 +4418,16 @@ async function collectNowAggregation(manual = true) {
   if (runtimeFingerprint) {
     restoreStoredQuestionContextForFingerprint(runtimeFingerprint);
   }
-  const sourcePrompt = String(pending?.sourcePrompt || window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim();
+  const existingAggregatedNoteId = String(pending?.aggregatedNoteId || activeAggregatedNoteId || '').trim() || null;
   const ingestContext = pending?.ingestContext || {
     sessionFingerprint: runtimeFingerprint || activeSessionFingerprint,
     sessionIdHint: getCurrentQuestionSessionId()
   };
-  const existingAggregatedNoteId = String(pending?.aggregatedNoteId || activeAggregatedNoteId || '').trim() || null;
+  const hasLoadedQuestionContext = Number.isInteger(ingestContext.sessionIdHint) && ingestContext.sessionIdHint > 0 && !!existingAggregatedNoteId;
+  const pendingPrompt = String(pending?.sourcePrompt || '').trim();
+  let sourcePrompt = pendingPrompt || (hasLoadedQuestionContext
+    ? String(window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim()
+    : '');
   const scraping = window.AggregationControl?.SLOT_STATUS?.SCRAPING || 'scraping';
   const collected = window.AggregationControl?.SLOT_STATUS?.COLLECTED || 'collected';
   const error = window.AggregationControl?.SLOT_STATUS?.ERROR || 'error';
@@ -4346,6 +4451,9 @@ async function collectNowAggregation(manual = true) {
   const collectedPayload = await collectLatestRepliesFromEnabledSlots();
   const aggregatedResponses = collectedPayload.aggregatedResponses || [];
   lastScrapeMeta = collectedPayload.scrapeMeta || [];
+  if (!sourcePrompt || !hasLoadedQuestionContext) {
+    sourcePrompt = resolveSourcePromptFromCollectedScrape(lastScrapeMeta);
+  }
 
   enabledSlots.forEach((slot) => {
     const serviceId = detectServiceByUrl(getWebviewCurrentUrl(slot)) || slotConfig[slot] || slot;
@@ -4727,6 +4835,13 @@ function dedupeLatestSessionSnapshots(sessions) {
     .slice(0, MAX_SESSIONS);
 }
 
+function mergeSessionSnapshots(primary, secondary) {
+  return dedupeLatestSessionSnapshots([
+    ...(Array.isArray(primary) ? primary : []),
+    ...(Array.isArray(secondary) ? secondary : [])
+  ]);
+}
+
 function setSessionsNotice(text, kind = 'info') {
   sessionsNotice = { text: String(text || '').trim(), kind };
 }
@@ -4738,6 +4853,11 @@ function errorToText(error) {
 }
 
 async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
+  console.log('[saveSessionSnapshot] invoked', {
+    customName: customName || null,
+    ingestSessionId: ingestSessionId ?? null,
+    noteId: noteId ?? activeAggregatedNoteId ?? null
+  });
   const sessionData = {
     sessionId: ingestSessionId ?? getCurrentSessionId() ?? activeSessionId,
     noteId: String(noteId || activeAggregatedNoteId || '').trim() || null,
@@ -4765,11 +4885,8 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
       console.log('[saveSessionSnapshot] Saved to DB:', result);
       setSessionsNotice('Saved to database.', 'ok');
       // Also update local cache
-      let sessions = await loadSessionsList();
-      sessions.unshift(result);
-      if (sessions.length > MAX_SESSIONS) {
-        sessions = sessions.slice(0, MAX_SESSIONS);
-      }
+      const cachedSessions = await loadSessionsList({ preferCache: true });
+      const sessions = mergeSessionSnapshots([result], cachedSessions);
       localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
       await updateSessionsUI();
       return result;
@@ -4787,11 +4904,8 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
     ...sessionData
   };
 
-  let sessions = await loadSessionsList();
-  sessions.unshift(snapshot);
-  if (sessions.length > MAX_SESSIONS) {
-    sessions = sessions.slice(0, MAX_SESSIONS);
-  }
+  const cachedSessions = await loadSessionsList({ preferCache: true });
+  const sessions = mergeSessionSnapshots([snapshot], cachedSessions);
 
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
   setSessionsNotice('Saved to local cache only.', 'warn');
@@ -4799,17 +4913,32 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
   return snapshot;
 }
 
-async function loadSessionsList() {
+async function loadSessionsList(options = {}) {
+  const preferCache = options?.preferCache === true;
+  let cachedSessions = [];
+
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY);
+    cachedSessions = raw ? JSON.parse(raw) : [];
+  } catch (_) {
+    cachedSessions = [];
+  }
+
+  if (preferCache) {
+    return Array.isArray(cachedSessions) ? cachedSessions : [];
+  }
+
   // Try to load from database first
   if (window.electronAPI?.loadSessions) {
     try {
       // Sessions tab should show global history, not only current ingest session.
       const dbSessions = await window.electronAPI.loadSessions(null);
       if (Array.isArray(dbSessions) && dbSessions.length > 0) {
+        const mergedSessions = mergeSessionSnapshots(dbSessions, cachedSessions);
         // Cache in localStorage
-        localStorage.setItem(SESSIONS_KEY, JSON.stringify(dbSessions));
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(mergedSessions));
         setSessionsNotice('Loaded from database.', 'ok');
-        return dbSessions;
+        return mergedSessions;
       }
       if (Array.isArray(dbSessions) && dbSessions.length === 0) {
         setSessionsNotice('Database returned 0 sessions.', 'info');
@@ -4822,12 +4951,7 @@ async function loadSessionsList() {
   }
 
   // Fallback to localStorage
-  try {
-    const raw = localStorage.getItem(SESSIONS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (_) {
-    return [];
-  }
+  return Array.isArray(cachedSessions) ? cachedSessions : [];
 }
 
 function getCurrentSessionId() {
@@ -5027,9 +5151,21 @@ async function initSessionsTab() {
   const saveSessionBtn = document.getElementById('save-session-btn');
   if (saveSessionBtn) {
     saveSessionBtn.addEventListener('click', async () => {
-      await saveSessionSnapshot();
-      saveSessionBtn.textContent = '? Saved!';
-      setTimeout(() => { saveSessionBtn.textContent = '?? Save Current'; }, 2000);
+      const originalText = 'Save Current';
+      saveSessionBtn.disabled = true;
+      saveSessionBtn.textContent = 'Saving...';
+      try {
+        const saved = await saveSessionSnapshot();
+        saveSessionBtn.textContent = saved?.id ? 'Saved!' : 'Saved locally';
+      } catch (error) {
+        console.error('[saveSessionBtn] save failed:', error);
+        saveSessionBtn.textContent = 'Save failed';
+      } finally {
+        setTimeout(() => {
+          saveSessionBtn.disabled = false;
+          saveSessionBtn.textContent = originalText;
+        }, 1500);
+      }
     });
   }
 

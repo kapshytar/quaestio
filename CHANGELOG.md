@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.15] - 2026-03-25
+
+### Changed
+- Desktop `Collect now` is now enabled whenever at least one slot is enabled, even if there is no pending merge or locally remembered prompt.
+- Sessionless manual collect now tries to create/update the current aggregated root directly from already open chats instead of insisting on a prior merge/send cycle.
+- Session snapshot fallback now merges local cache with DB-backed rows instead of hiding locally saved entries after a reload.
+
+### Fixed
+- `Collect now` on desktop no longer stays inert before the first merge just because no prompt was sent through the app input.
+- Stuck resize overlays are force-cleared on desktop window blur/visibility changes so merge-panel buttons do not silently lose clicks.
+- Desktop session snapshot save uses the currently deployed bridge signature again (`p_note_id`), avoiding `404` bridge errors while saving slot-state rows.
+
+### Known Limitations
+- Best-effort source prompt recovery for sessionless `Collect now` now uses the existing DOM scrape pass, but it can still fall back to the conversation title instead of the exact last user question on some providers.
+
 ## [v0.1.14] - 2026-03-21
 
 ### Changed

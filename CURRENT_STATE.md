@@ -12,6 +12,7 @@
   - `activeAggregatedNoteId`
   - question fingerprint-backed local resume context
 - `Collect now` is for aggregation, not merge.
+- Desktop `Collect now` is available even before merge, as long as at least one slot is enabled.
 - New questions always clear the active aggregated root before the first collect.
 - Restored sessions can continue with new questions without overwriting older aggregated roots.
 - Desktop ingest sends:
@@ -46,11 +47,15 @@
   - `Resume aggregation`
   - `Refresh statuses`
   - `Collect now`
+- Sessionless title recovery for `Collect now` is best-effort:
+  - current pass reuses the existing reply DOM scrape to look for the preceding user turn
+  - some providers may still fall back to the conversation title instead of the exact user message
 
 ## Known Issues
 
 - `debug-runs/session-rpc.log` is local debug output and should remain out of product commits unless explicitly needed.
 - Desktop scrape quality is much better than before, but provider-specific DOM changes can still regress extraction. Use `debug-runs` first before changing renderers.
+- Deleting a visible session row does not necessarily destroy the underlying note-backed question context; the same chat fingerprint can still reattach to the existing question root on the next collect.
 - Current local repo should stay clean except for fresh debug artifacts if you run new traces.
 
 ## Current Contracts

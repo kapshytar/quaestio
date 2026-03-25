@@ -36,6 +36,11 @@ toggleMergePanelBtn?.addEventListener('click', toggleSidePanel);
 // Transparent overlay that blocks webview mouse capture during resize
 const resizeOverlay = document.getElementById('resize-overlay');
 
+function forceHideResizeOverlay() {
+  if (!resizeOverlay) return;
+  resizeOverlay.style.display = 'none';
+}
+
 function startResize() {
   isResizing = true;
   document.body.style.cursor = 'col-resize';
@@ -51,7 +56,7 @@ function stopResize() {
   document.body.style.cursor = '';
   document.body.style.userSelect = '';
   if (sidePanel) sidePanel.style.transition = '';
-  if (resizeOverlay) resizeOverlay.style.display = 'none';
+  forceHideResizeOverlay();
   if (sidePanel) {
     localStorage.setItem('merge-panel-width', sidePanel.style.width);
   }
@@ -88,6 +93,13 @@ resizeOverlay?.addEventListener('mousemove', (e) => {
 
 resizeOverlay?.addEventListener('mouseup', stopResize);
 resizeOverlay?.addEventListener('mouseleave', stopResize);
+resizeOverlay?.addEventListener('mousedown', (e) => {
+  if (!isResizing) {
+    forceHideResizeOverlay();
+    return;
+  }
+  e.preventDefault();
+});
 
 window.addEventListener('mousemove', (e) => {
   if (!isResizing) return;
@@ -95,6 +107,12 @@ window.addEventListener('mousemove', (e) => {
 });
 
 window.addEventListener('mouseup', stopResize);
+window.addEventListener('blur', stopResize);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopResize();
+});
+
+forceHideResizeOverlay();
 
 // Restore panel state from localStorage
 const savedCollapsed = localStorage.getItem('merge-panel-collapsed');
