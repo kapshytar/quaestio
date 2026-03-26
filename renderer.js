@@ -3479,7 +3479,7 @@ function initMergePanel() {
     }
     localStorage.setItem('cfg-tabs-active', tab);
     if (tab === 'sessions') {
-      updateSessionsUI().catch(err => console.warn('[sessions] refresh failed:', err));
+      updateSessionsUI({ forceRefresh: true }).catch(err => console.warn('[sessions] refresh failed:', err));
     }
   }
 
@@ -4795,6 +4795,12 @@ async function runMerge(isClarification = false, clarificationText = '', previou
   renderAggregationSummary();
   aggregationControl.beginPendingMerge({ isClarification: false, clarificationText: '', previousSummary: '' });
   updateAggregationActionButtons();
+  if (aggregationControl.paused) {
+    mergeLog('Aggregation is paused, running merge from currently available replies', 'info');
+    setMergeStatus('Aggregation paused. Running merge from current replies...', 'running');
+    await collectAndMaybeRunPendingMerge(true);
+    return;
+  }
   const ready = await waitForAggregationReadyOrPause();
   if (ready) {
     await collectAndMaybeRunPendingMerge(false);
@@ -4803,8 +4809,12 @@ async function runMerge(isClarification = false, clarificationText = '', previou
 
 // ========== SESSION MANAGEMENT ==========
 const SESSIONS_KEY = 'chat-aggregator-sessions';
+const DISMISSED_SESSION_IDS_KEY = 'chat-aggregator-dismissed-session-ids';
 const MAX_SESSIONS = 1000;
 let sessionsNotice = { text: '', kind: 'info' };
+let sessionsSearchQuery = '';
+const expandedSessionTitleIds = new Set();
+let sessionsListMemoryCache = null;
 
 function sessionSnapshotKey(session) {
   const sessionPart = session?.sessionId != null ? String(session.sessionId) : 'id:' + String(session?.id ?? '');
@@ -4836,10 +4846,71 @@ function dedupeLatestSessionSnapshots(sessions) {
 }
 
 function mergeSessionSnapshots(primary, secondary) {
+  const primaryList = Array.isArray(primary) ? primary : [];
+  const secondaryList = Array.isArray(secondary) ? secondary : [];
+
+  const normalizeName = (value) => String(value || '').trim().toLowerCase();
+  const sameSessionEntry = (left, right) => {
+    const leftNoteId = String(left?.noteId || left?.note_id || '').trim();
+    const rightNoteId = String(right?.noteId || right?.note_id || '').trim();
+    if (leftNoteId && rightNoteId) return leftNoteId === rightNoteId;
+
+    const leftSessionId = Number(left?.sessionId ?? left?.session_id ?? null);
+    const rightSessionId = Number(right?.sessionId ?? right?.session_id ?? null);
+    if (!Number.isInteger(leftSessionId) || !Number.isInteger(rightSessionId) || leftSessionId !== rightSessionId) {
+      return false;
+    }
+
+    const leftName = normalizeName(left?.name || left?.title);
+    const rightName = normalizeName(right?.name || right?.title);
+    return Boolean(leftName) && leftName === rightName;
+  };
+
+  const filteredSecondary = secondaryList.filter((candidate) => !primaryList.some((existing) => sameSessionEntry(existing, candidate)));
   return dedupeLatestSessionSnapshots([
-    ...(Array.isArray(primary) ? primary : []),
-    ...(Array.isArray(secondary) ? secondary : [])
+    ...primaryList,
+    ...filteredSecondary
   ]);
+}
+
+function getDismissedSessionIds() {
+  try {
+    const raw = localStorage.getItem(DISMISSED_SESSION_IDS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(
+      (Array.isArray(parsed) ? parsed : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    );
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function setDismissedSessionIds(ids) {
+  localStorage.setItem(DISMISSED_SESSION_IDS_KEY, JSON.stringify([...ids]));
+}
+
+function dismissSessionId(sessionId) {
+  if (!Number.isInteger(sessionId) || sessionId <= 0) return;
+  const dismissed = getDismissedSessionIds();
+  dismissed.add(sessionId);
+  setDismissedSessionIds(dismissed);
+}
+
+function clearDismissedSessionId(sessionId) {
+  if (!Number.isInteger(sessionId) || sessionId <= 0) return;
+  const dismissed = getDismissedSessionIds();
+  if (!dismissed.delete(sessionId)) return;
+  setDismissedSessionIds(dismissed);
+}
+
+function filterDismissedSessions(sessions) {
+  const dismissed = getDismissedSessionIds();
+  return (Array.isArray(sessions) ? sessions : []).filter((session) => {
+    const sessionId = Number(session?.sessionId ?? session?.session_id ?? null);
+    return !dismissed.has(sessionId);
+  });
 }
 
 function setSessionsNotice(text, kind = 'info') {
@@ -4884,10 +4955,12 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
       }
       console.log('[saveSessionSnapshot] Saved to DB:', result);
       setSessionsNotice('Saved to database.', 'ok');
+      clearDismissedSessionId(sessionData.sessionId);
       // Also update local cache
       const cachedSessions = await loadSessionsList({ preferCache: true });
       const sessions = mergeSessionSnapshots([result], cachedSessions);
       localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+      sessionsListMemoryCache = sessions;
       await updateSessionsUI();
       return result;
     } catch (error) {
@@ -4904,10 +4977,12 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
     ...sessionData
   };
 
+  clearDismissedSessionId(sessionData.sessionId);
   const cachedSessions = await loadSessionsList({ preferCache: true });
   const sessions = mergeSessionSnapshots([snapshot], cachedSessions);
 
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  sessionsListMemoryCache = sessions;
   setSessionsNotice('Saved to local cache only.', 'warn');
   await updateSessionsUI();
   return snapshot;
@@ -4915,6 +4990,10 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
 
 async function loadSessionsList(options = {}) {
   const preferCache = options?.preferCache === true;
+  const forceRefresh = options?.forceRefresh === true;
+  if (!forceRefresh && Array.isArray(sessionsListMemoryCache)) {
+    return filterDismissedSessions(sessionsListMemoryCache);
+  }
   let cachedSessions = [];
 
   try {
@@ -4925,7 +5004,8 @@ async function loadSessionsList(options = {}) {
   }
 
   if (preferCache) {
-    return Array.isArray(cachedSessions) ? cachedSessions : [];
+    sessionsListMemoryCache = Array.isArray(cachedSessions) ? cachedSessions : [];
+    return filterDismissedSessions(cachedSessions);
   }
 
   // Try to load from database first
@@ -4937,8 +5017,9 @@ async function loadSessionsList(options = {}) {
         const mergedSessions = mergeSessionSnapshots(dbSessions, cachedSessions);
         // Cache in localStorage
         localStorage.setItem(SESSIONS_KEY, JSON.stringify(mergedSessions));
+        sessionsListMemoryCache = mergedSessions;
         setSessionsNotice('Loaded from database.', 'ok');
-        return mergedSessions;
+        return filterDismissedSessions(mergedSessions);
       }
       if (Array.isArray(dbSessions) && dbSessions.length === 0) {
         setSessionsNotice('Database returned 0 sessions.', 'info');
@@ -4951,7 +5032,8 @@ async function loadSessionsList(options = {}) {
   }
 
   // Fallback to localStorage
-  return Array.isArray(cachedSessions) ? cachedSessions : [];
+  sessionsListMemoryCache = Array.isArray(cachedSessions) ? cachedSessions : [];
+  return filterDismissedSessions(cachedSessions);
 }
 
 function getCurrentSessionId() {
@@ -5050,10 +5132,14 @@ async function loadSession(sessionId) {
   console.log('Session loaded:', sessionId, '? activeSessionId =', activeSessionId);
   setSessionsNotice(`Session loaded: ${session.name || sessionId}`, 'ok');
   updateAggregationActionButtons();
-  await updateSessionsUI();
+  await updateSessionsUI({ forceRefresh: true });
 }
 
 async function deleteSession(sessionId) {
+  const sessions = await loadSessionsList();
+  const targetSession = sessions.find((s) => s.id === sessionId);
+  const targetSessionId = Number(targetSession?.sessionId ?? targetSession?.session_id ?? null);
+
   // Delete from database first
   if (window.electronAPI?.deleteSession) {
     try {
@@ -5066,10 +5152,19 @@ async function deleteSession(sessionId) {
     }
   }
 
+  dismissSessionId(targetSessionId);
+
   // Update local cache
-  const sessions = await loadSessionsList();
-  const filtered = sessions.filter(s => s.id !== sessionId);
+  const filtered = sessions.filter((s) => {
+    if (s.id === sessionId) return false;
+    const rowSessionId = Number(s?.sessionId ?? s?.session_id ?? null);
+    if (Number.isInteger(targetSessionId) && targetSessionId > 0 && rowSessionId === targetSessionId) {
+      return false;
+    }
+    return true;
+  });
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(filtered));
+  sessionsListMemoryCache = filtered;
   await updateSessionsUI();
 }
 
@@ -5093,11 +5188,19 @@ async function openSessionInNewWindow(sessionId) {
   }
 }
 
-async function updateSessionsUI() {
+async function updateSessionsUI(options = {}) {
   const container = document.getElementById('sessions-list');
   if (!container) return;
 
-  const sessions = await loadSessionsList();
+  const allSessions = await loadSessionsList(options);
+  const query = String(sessionsSearchQuery || '').trim().toLowerCase();
+  const sessions = query
+    ? allSessions.filter((session) => {
+        const sessionId = String(session.sessionId ?? session.session_id ?? '').trim().toLowerCase();
+        const name = String(session.name || session.title || '').trim().toLowerCase();
+        return sessionId.includes(query) || name.includes(query);
+      })
+    : allSessions;
   container.innerHTML = '';
 
   if (sessionsNotice.text) {
@@ -5126,11 +5229,16 @@ async function updateSessionsUI() {
       const service = slotConfigMap[s] || 'unknown';
       return service.replace(/_api$/, '').toUpperCase();
     }).join(', ');
+    const sessionTitle = String(session.name || activeSlots || '(no slots)');
+    const expanded = expandedSessionTitleIds.has(session.id);
 
     item.innerHTML = `
-      <div style="font-weight:600;color:#fff;">
-        <span style="color:#9ad89a;font-size:10px;font-weight:400;margin-right:4px;">#${displaySessionId}</span>
-        ${session.name || activeSlots || '(no slots)'}
+      <div class="session-item-header">
+        <div class="session-item-title-line">
+          <span class="session-item-id">#${displaySessionId}</span>
+          <span class="session-item-title ${expanded ? 'expanded' : ''}">${sessionTitle}</span>
+        </div>
+        <button class="session-item-chevron" data-session-toggle="${session.id}" style="display:none;"></button>
       </div>
       <div class="session-item-time">${timeStr}</div>
       <div class="session-item-actions">
@@ -5142,6 +5250,42 @@ async function updateSessionsUI() {
 
     container.appendChild(item);
   });
+
+  container.querySelectorAll('.session-item').forEach((item) => {
+    const titleEl = item.querySelector('.session-item-title');
+    const button = item.querySelector('[data-session-toggle]');
+    const sessionId = String(button?.getAttribute('data-session-toggle') || '');
+    if (!titleEl || !button || !sessionId) return;
+
+    const wasExpanded = titleEl.classList.contains('expanded');
+    if (wasExpanded) titleEl.classList.remove('expanded');
+    const shouldShowChevron = titleEl.scrollHeight > titleEl.clientHeight + 1;
+    if (wasExpanded) titleEl.classList.add('expanded');
+
+    if (!shouldShowChevron) {
+      expandedSessionTitleIds.delete(sessionId);
+      button.remove();
+      return;
+    }
+
+    button.style.display = '';
+    button.textContent = expandedSessionTitleIds.has(sessionId) ? '\u25B4 Hide' : '\u25BE More';
+  });
+
+  container.querySelectorAll('[data-session-toggle]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const sessionId = String(button.getAttribute('data-session-toggle') || '');
+      if (!sessionId) return;
+      if (expandedSessionTitleIds.has(sessionId)) {
+        expandedSessionTitleIds.delete(sessionId);
+      } else {
+        expandedSessionTitleIds.add(sessionId);
+      }
+      updateSessionsUI().catch(err => console.warn('[sessions-toggle] refresh failed:', err));
+    });
+  });
 }
 
 // Initialize sessions UI and save button
@@ -5149,6 +5293,14 @@ async function initSessionsTab() {
   await updateSessionsUI();
 
   const saveSessionBtn = document.getElementById('save-session-btn');
+  const sessionsSearchInput = document.getElementById('sessions-search-input');
+  if (sessionsSearchInput) {
+    sessionsSearchInput.value = sessionsSearchQuery;
+    sessionsSearchInput.addEventListener('input', (event) => {
+      sessionsSearchQuery = String(event?.target?.value || '');
+      updateSessionsUI().catch(err => console.warn('[sessions-search] refresh failed:', err));
+    });
+  }
   if (saveSessionBtn) {
     saveSessionBtn.addEventListener('click', async () => {
       const originalText = 'Save Current';

@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.16] - 2026-03-26
+
+### Added
+- Desktop `Sessions` tab now has inline search by session number or title.
+- Long desktop session titles can now be expanded/collapsed with a `More` / `Hide` toggle.
+
+### Changed
+- Session-list interactions now reuse an in-memory list cache so simple UI actions do not repeatedly wait on a fresh DB-backed session reload.
+
+### Fixed
+- Desktop session rows no longer show duplicate local/remote entries when the same note-backed question is present in both sources.
+- Manual merge still works when aggregation is paused.
+- Session list rendering no longer regresses because of the long-title toggle UI.
+
 ## [v0.1.15] - 2026-03-25
 
 ### Changed

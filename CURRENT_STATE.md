@@ -15,6 +15,11 @@
 - Desktop `Collect now` is available even before merge, as long as at least one slot is enabled.
 - New questions always clear the active aggregated root before the first collect.
 - Restored sessions can continue with new questions without overwriting older aggregated roots.
+- Desktop `Sessions` UI now supports:
+  - search by `session_id`
+  - search by title
+  - expand/collapse for long session titles
+- Desktop session list interaction is cached in-memory after refresh so the sessions dialog feels immediate during local filtering/toggling.
 - Desktop ingest sends:
   - `prompt_text`
   - `platform_code`

@@ -319,11 +319,42 @@
     /* ---- Sessions Styles ---- */
     #sessions-list { border: 1px solid #333; border-radius: 6px; background: #2a2a2a; padding: 4px; }
     #sessions-list:empty::before { content: 'No sessions saved yet'; color: #555; padding: 8px; display: block; font-style: italic; font-size: 11px; }
+    .sessions-search {
+      width: 100%; box-sizing: border-box; border: 1px solid #444; border-radius: 6px;
+      background: #232323; color: #ddd; padding: 7px 10px; font-size: 11px;
+    }
+    .sessions-search::placeholder { color: #777; }
     .session-item {
       padding: 8px 10px; background: #333; border-radius: 4px; cursor: pointer;
       transition: all 0.2s; border-left: 3px solid transparent; font-size: 11px;
     }
     .session-item:hover { background: #3a3a3a; border-left-color: #0066ff; }
+    .session-item-header { display: flex; flex-direction: column; gap: 4px; }
+    .session-item-title-line { color: #fff; font-weight: 500; }
+    .session-item-id { color: #9ad89a; font-size: 10px; font-weight: 400; margin-right: 4px; }
+    .session-item-title {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      overflow: hidden;
+      white-space: normal;
+      word-break: break-word;
+    }
+    .session-item-title.expanded {
+      display: block;
+      -webkit-line-clamp: unset;
+      overflow: visible;
+    }
+    .session-item-chevron {
+      align-self: flex-start;
+      border: none;
+      background: transparent;
+      color: #8aa4d6;
+      padding: 0;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .session-item-chevron:hover { color: #c6d7ff; }
     .session-item-time { color: #888; font-size: 10px; }
     .session-item-slots { color: #aaa; margin-top: 3px; }
     .session-item-slot { display: inline-block; padding: 2px 6px; background: #2a2a2a; border-radius: 3px; margin-right: 4px; font-size: 9px; }
@@ -687,6 +718,9 @@
             <div class="cfg-tab-pane" id="cfg-pane-sessions">
               <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
                 <button class="control-btn" id="save-session-btn" style="flex:1;">Save Current</button>
+              </div>
+              <div style="margin-bottom:8px;">
+                <input id="sessions-search-input" class="sessions-search" type="text" placeholder="Search by session id or title...">
               </div>
               <div id="sessions-list" style="display:flex;flex-direction:column;gap:4px;flex:1;overflow-y:auto;"></div>
             </div>
