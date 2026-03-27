@@ -2,6 +2,9 @@
 
 ## Stable
 
+- Desktop runtime/app debug version now comes from `package.json` and is reported as:
+  - packaged build: exact semver like `0.1.18`
+  - unpackaged/dev run: same semver plus `-dev`, e.g. `0.1.18-dev`
 - Desktop session CRUD uses the bridge RPC path.
 - Desktop session list is note-backed, matching web:
   - question rows come from `notes.note_type = 1`
@@ -15,11 +18,16 @@
 - Desktop `Collect now` is available even before merge, as long as at least one slot is enabled.
 - New questions always clear the active aggregated root before the first collect.
 - Restored sessions can continue with new questions without overwriting older aggregated roots.
+- Manual desktop `Collect now` now resolves question identity/title in this order:
+  - explicit pending prompt from a fresh send
+  - fresh DOM-derived `prompt_candidate` from the open chats
+  - loaded-session stored prompt only as a fallback
 - Desktop `Sessions` UI now supports:
   - search by `session_id`
   - search by title
   - expand/collapse for long session titles
 - Desktop session list interaction is cached in-memory after refresh so the sessions dialog feels immediate during local filtering/toggling.
+- Desktop no longer keeps a separate `dismissed session ids` filter in local storage; local session deletion now removes only the selected row instead of hiding the whole numeric `session_id`.
 - Desktop ingest sends:
   - `prompt_text`
   - `platform_code`
@@ -54,7 +62,7 @@
   - `Collect now`
 - Sessionless title recovery for `Collect now` is best-effort:
   - current pass reuses the existing reply DOM scrape to look for the preceding user turn
-  - some providers may still fall back to the conversation title instead of the exact user message
+  - some providers may still fall back to the conversation title instead of the exact user message if no usable `prompt_candidate` is found in the page
 
 ## Known Issues
 

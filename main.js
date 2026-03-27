@@ -38,6 +38,11 @@ const DESKTOP_USER_AGENT = IS_MAC
   ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`
   : `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
 
+function getRuntimeAppVersion() {
+  const baseVersion = String(app.getVersion() || '').trim() || '0.0.0';
+  return app.isPackaged ? baseVersion : `${baseVersion}-dev`;
+}
+
 // Throttle all webviews when app is minimized/hidden to save CPU
 function setAllWebviewsBackgrounded(backgrounded) {
   try {
@@ -375,7 +380,7 @@ function appendDebugArtifact(traceId, eventPayload) {
         trace_id: traceId,
         platform: INGEST_DEBUG_PLATFORM,
         app_name: INGEST_DEBUG_APP_NAME,
-        app_version: app.getVersion(),
+          app_version: getRuntimeAppVersion(),
         created_at: nowIso,
         updated_at: nowIso,
         events: []
@@ -400,7 +405,7 @@ async function emitIngestDebugEvent({ supabaseUrl, serviceRoleKey, eventPayload 
     trace_id: eventPayload?.trace_id || sanitizeTraceId(),
     platform: INGEST_DEBUG_PLATFORM,
     app_name: INGEST_DEBUG_APP_NAME,
-    app_version: app.getVersion(),
+      app_version: getRuntimeAppVersion(),
     session_id: Number.isInteger(eventPayload?.session_id) ? eventPayload.session_id : null,
     step: eventPayload?.step || 'error',
     rpc_name: eventPayload?.rpc_name || '',

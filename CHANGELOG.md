@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 
 Versioning: `vMAJOR.MINOR.PATCH`.
 
+## [v0.1.18] - 2026-03-27
+
+### Changed
+- Desktop runtime version reporting now uses the repo semver from `package.json` instead of the long-stale `0.1.0`.
+- Unpackaged desktop runs now label themselves as `-dev` in ingest debug logs so local testing is distinguishable from packaged builds.
+- Desktop sessions no longer use a local `dismissed session ids` overlay; deleting from the Sessions dialog now removes only the selected row, matching Android behavior more closely.
+
+## [v0.1.17] - 2026-03-27
+
+### Changed
+- Manual desktop `Collect now` now prefers a freshly scraped question prompt from the open chats before falling back to the loaded-session stored prompt.
+- DOM scrape summaries now retain `prompt_candidate` metadata so post-scrape prompt recovery can actually use the nearest user turn instead of only the conversation title.
+
+### Fixed
+- `Collect now` on a loaded desktop session no longer reuses a stale session title/prompt so aggressively that a newer question in the same chats can overwrite the previous root note.
+
 ## [v0.1.16] - 2026-03-26
 
 ### Added

@@ -283,12 +283,21 @@ function summarizeDomDiagnostics(diagnostics) {
         preview: diagnostics.selected.preview || ''
       }
     : null;
+  const promptCandidate = diagnostics.prompt_candidate && typeof diagnostics.prompt_candidate === 'object'
+    ? {
+        text: String(diagnostics.prompt_candidate.text || '').trim(),
+        top: diagnostics.prompt_candidate.top ?? null,
+        bottom: diagnostics.prompt_candidate.bottom ?? null,
+        html_length: diagnostics.prompt_candidate.html_length ?? null
+      }
+    : null;
   return {
     service_id: diagnostics.service_id || '',
     document_title: diagnostics.document_title || '',
     candidate_count: diagnostics.candidate_count ?? 0,
     pruned_count: diagnostics.pruned_count ?? 0,
     pool_count: diagnostics.pool_count ?? 0,
+    prompt_candidate: promptCandidate,
     selected
   };
 }
@@ -730,27 +739,34 @@ function readSessionContext() {
       || parsed?.note_id
       || ''
     ).trim() || null;
+    const sourcePrompt = String(parsed?.source_prompt || '').trim() || null;
     return {
       session_id: sessionId,
       fingerprint,
-      aggregated_note_id: aggregatedNoteId
+      aggregated_note_id: aggregatedNoteId,
+      source_prompt: sourcePrompt
     };
   } catch (_) {
     return null;
   }
 }
 
-function persistSessionContext(sessionId, fingerprint, aggregatedNoteId = null) {
+function persistSessionContext(sessionId, fingerprint, aggregatedNoteId = null, sourcePrompt = null) {
   if (!Number.isInteger(sessionId) || sessionId <= 0 || !fingerprint) return;
   activeSessionId = sessionId; // always keep in-memory copy
   const normalizedAggregatedNoteId = String(aggregatedNoteId || '').trim() || null;
+  const normalizedSourcePrompt = String(sourcePrompt ?? activeSessionPrompt ?? '').trim() || null;
   if (normalizedAggregatedNoteId) {
     activeAggregatedNoteId = normalizedAggregatedNoteId;
+  }
+  if (normalizedSourcePrompt) {
+    activeSessionPrompt = normalizedSourcePrompt;
   }
   const context = {
     session_id: sessionId,
     fingerprint,
     aggregated_note_id: normalizedAggregatedNoteId,
+    source_prompt: normalizedSourcePrompt,
     updated_at: new Date().toISOString()
   };
   localStorage.setItem(AGGREGATED_SESSION_CONTEXT_KEY, JSON.stringify(context));
@@ -786,10 +802,25 @@ function restoreStoredQuestionContextForFingerprint(fingerprint) {
   if (!context?.session_id) return null;
   activeSessionId = context.session_id;
   activeAggregatedNoteId = String(context.aggregated_note_id || '').trim() || null;
+  activeSessionPrompt = String(context.source_prompt || '').trim() || activeSessionPrompt;
   activeSessionFingerprint = fingerprint;
-  persistSessionContext(context.session_id, fingerprint, activeAggregatedNoteId);
+  persistSessionContext(context.session_id, fingerprint, activeAggregatedNoteId, context.source_prompt || null);
   setIngestSessionIndicator(context.session_id);
   return context;
+}
+
+function normalizePromptForComparison(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function promptsReferToSameQuestion(currentPrompt, storedPrompt) {
+  const current = normalizePromptForComparison(currentPrompt);
+  const stored = normalizePromptForComparison(storedPrompt);
+  if (!current || !stored) return false;
+  return current === stored;
 }
 
 function extractConversationKey(serviceId, rawUrl) {
@@ -3092,6 +3123,7 @@ async function sendToAll() {
   if (window.mergeApiClient) {
     window.mergeApiClient.lastSourcePrompt = text;
   }
+  activeSessionPrompt = text;
 
   const traceId = startIngestTrace();
   mergeLog(`Ingest trace started: ${traceId}`, 'info');
@@ -3108,7 +3140,7 @@ async function sendToAll() {
   if (Number.isInteger(sessionIdHint) && sessionIdHint > 0) {
     const restoredNoteId = String(activeAggregatedNoteId || storedContext?.aggregated_note_id || '').trim() || null;
     if (sessionFingerprint) {
-      persistSessionContext(sessionIdHint, sessionFingerprint, restoredNoteId);
+      persistSessionContext(sessionIdHint, sessionFingerprint, restoredNoteId, storedContext?.source_prompt || activeSessionPrompt || null);
     } else {
       activeSessionId = sessionIdHint;
       activeAggregatedNoteId = restoredNoteId;
@@ -3133,6 +3165,7 @@ async function sendToAll() {
     sourcePrompt: text,
     expectedSlotCount: enabledSlots.length,
     waiting: true,
+    forceNewRoot: true,
     ingestContext: {
       sessionFingerprint,
       sessionIdHint
@@ -4093,21 +4126,100 @@ async function getLatestAssistantReply(slot) {
   }
 }
 
-function resolveSourcePromptFromCollectedScrape(scrapeMeta = []) {
-  const direct = String(window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim();
+function rememberResolvedSourcePrompt(prompt) {
+  const normalized = String(prompt || '').trim();
+  if (!normalized) return '';
+  activeSessionPrompt = normalized;
+  if (window.mergeApiClient) {
+    window.mergeApiClient.lastSourcePrompt = normalized;
+  }
+  return normalized;
+}
+
+function normalizeCollectedPromptCandidate(value) {
+  return String(value || '')
+    .replace(/^\s*(?:you said|you asked|user(?: asked| said)?|вы сказали|ты спросил[аи]?)\s*[:\-]?\s*/i, '')
+    .replace(/\s*##\s*(?:chatgpt|gemini|claude|grok|perplexity)\s+said\b[\s\S]*$/i, '')
+    .replace(/\s*(?:chatgpt|gemini|claude|grok|perplexity)\s+said\b[\s\S]*$/i, '')
+    .replace(/^[#>*\s"'`]+/, '')
+    .replace(/[\s"'`]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveSourcePromptFromCollectedScrape(scrapeMeta = [], options = {}) {
+  const allowDirectFallback = options?.allowDirectFallback !== false;
+  const persist = options?.persist !== false;
+  const direct = allowDirectFallback
+    ? String(window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim()
+    : '';
   if (direct) return direct;
 
-  const prompts = (Array.isArray(scrapeMeta) ? scrapeMeta : [])
-    .map((item) => String(item?.dom_diagnostics?.prompt_candidate?.text || '').trim())
+  const promptEntries = (Array.isArray(scrapeMeta) ? scrapeMeta : [])
+    .map((item) => {
+      const rawPrompt = String(item?.dom_diagnostics?.prompt_candidate?.text || '').trim();
+      const prompt = normalizeCollectedPromptCandidate(rawPrompt);
+      if (!prompt) return null;
+      const preview = String(item?.dom_diagnostics?.selected?.preview || '').trim();
+      const normalizedPreview = String(preview || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const normalizedPrompt = prompt.toLowerCase();
+      let score = 0;
+      if (prompt) score += 100;
+      if (normalizedPreview && normalizedPrompt && normalizedPreview.includes(normalizedPrompt)) score += 80;
+      if (/^\s*(?:you said|you asked|вы сказали)/i.test(rawPrompt)) score += 30;
+      if (prompt.length >= 20) score += 20;
+      if (prompt.length <= 8) score -= 40;
+      score += Math.min(prompt.length, 120) / 10;
+      const promptBottom = Number(item?.dom_diagnostics?.prompt_candidate?.bottom);
+      return {
+        prompt,
+        score,
+        bottom: Number.isFinite(promptBottom) ? promptBottom : Number.NEGATIVE_INFINITY
+      };
+    })
     .filter(Boolean);
 
-  const prompt = prompts.sort((a, b) => b.length - a.length)[0] || '';
-  if (prompt) {
-    activeSessionPrompt = prompt;
-    if (window.mergeApiClient) {
-      window.mergeApiClient.lastSourcePrompt = prompt;
+  const aggregatedPromptEntries = Array.from(
+    promptEntries.reduce((map, entry) => {
+      const key = String(entry.prompt || '').toLowerCase();
+      if (!key) return map;
+      const current = map.get(key);
+      if (!current) {
+        map.set(key, {
+          prompt: entry.prompt,
+          score: entry.score,
+          count: 1,
+          maxBottom: entry.bottom
+        });
+      } else {
+        current.score += entry.score;
+        current.count += 1;
+        current.maxBottom = Math.max(current.maxBottom, entry.bottom);
+      }
+      return map;
+    }, new Map()).values()
+  );
+
+  const latestBottom = aggregatedPromptEntries.reduce(
+    (best, entry) => Math.max(best, Number.isFinite(entry.maxBottom) ? entry.maxBottom : Number.NEGATIVE_INFINITY),
+    Number.NEGATIVE_INFINITY
+  );
+  const recentPromptEntries = Number.isFinite(latestBottom)
+    ? aggregatedPromptEntries.filter((entry) => (entry.maxBottom ?? Number.NEGATIVE_INFINITY) >= latestBottom - 320)
+    : aggregatedPromptEntries;
+
+  recentPromptEntries.sort((a, b) => {
+    if ((b.maxBottom ?? Number.NEGATIVE_INFINITY) !== (a.maxBottom ?? Number.NEGATIVE_INFINITY)) {
+      return (b.maxBottom ?? Number.NEGATIVE_INFINITY) - (a.maxBottom ?? Number.NEGATIVE_INFINITY);
     }
-    return prompt;
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.count !== a.count) return b.count - a.count;
+    return b.prompt.length - a.prompt.length;
+  });
+
+  const prompt = recentPromptEntries[0]?.prompt || '';
+  if (prompt) {
+    return persist ? rememberResolvedSourcePrompt(prompt) : prompt;
   }
 
   const titles = (Array.isArray(scrapeMeta) ? scrapeMeta : [])
@@ -4122,12 +4234,9 @@ function resolveSourcePromptFromCollectedScrape(scrapeMeta = []) {
 
   const fallbackTitle = titles.sort((a, b) => b.length - a.length)[0] || '';
   if (fallbackTitle) {
-    activeSessionPrompt = fallbackTitle;
-    if (window.mergeApiClient) {
-      window.mergeApiClient.lastSourcePrompt = fallbackTitle;
-    }
+    return persist ? rememberResolvedSourcePrompt(fallbackTitle) : fallbackTitle;
   }
-  return fallbackTitle;
+  return '';
 }
 
 // ========== COLLECT REPLIES FROM ALL SLOTS ==========
@@ -4388,9 +4497,12 @@ async function finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContex
   if (ingestResult?.ok && sessionId) {
     activeSessionId = sessionId;
     if (noteId) activeAggregatedNoteId = noteId;
+    if (String(sourcePrompt || '').trim()) {
+      activeSessionPrompt = String(sourcePrompt || '').trim();
+    }
     const fingerprint = String(ingestContext.sessionFingerprint || activeSessionFingerprint || '').trim();
     if (fingerprint) {
-      persistSessionContext(sessionId, fingerprint, noteId || activeAggregatedNoteId);
+      persistSessionContext(sessionId, fingerprint, noteId || activeAggregatedNoteId, sourcePrompt);
     } else {
       localStorage.setItem(AGGREGATED_SESSION_ID_KEY, String(sessionId));
     }
@@ -4415,9 +4527,9 @@ async function collectNowAggregation(manual = true) {
   const pending = aggregationControl.pendingAggregation;
   const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
   const runtimeFingerprint = buildSessionFingerprint(enabledSlots);
-  if (runtimeFingerprint) {
-    restoreStoredQuestionContextForFingerprint(runtimeFingerprint);
-  }
+  const restoredContext = runtimeFingerprint
+    ? restoreStoredQuestionContextForFingerprint(runtimeFingerprint)
+    : null;
   const existingAggregatedNoteId = String(pending?.aggregatedNoteId || activeAggregatedNoteId || '').trim() || null;
   const ingestContext = pending?.ingestContext || {
     sessionFingerprint: runtimeFingerprint || activeSessionFingerprint,
@@ -4425,9 +4537,10 @@ async function collectNowAggregation(manual = true) {
   };
   const hasLoadedQuestionContext = Number.isInteger(ingestContext.sessionIdHint) && ingestContext.sessionIdHint > 0 && !!existingAggregatedNoteId;
   const pendingPrompt = String(pending?.sourcePrompt || '').trim();
-  let sourcePrompt = pendingPrompt || (hasLoadedQuestionContext
-    ? String(window.mergeApiClient?.lastSourcePrompt || activeSessionPrompt || '').trim()
-    : '');
+  const loadedQuestionPrompt = hasLoadedQuestionContext
+    ? String(restoredContext?.source_prompt || activeSessionPrompt || '').trim()
+    : '';
+  let sourcePrompt = pendingPrompt;
   const scraping = window.AggregationControl?.SLOT_STATUS?.SCRAPING || 'scraping';
   const collected = window.AggregationControl?.SLOT_STATUS?.COLLECTED || 'collected';
   const error = window.AggregationControl?.SLOT_STATUS?.ERROR || 'error';
@@ -4451,9 +4564,18 @@ async function collectNowAggregation(manual = true) {
   const collectedPayload = await collectLatestRepliesFromEnabledSlots();
   const aggregatedResponses = collectedPayload.aggregatedResponses || [];
   lastScrapeMeta = collectedPayload.scrapeMeta || [];
-  if (!sourcePrompt || !hasLoadedQuestionContext) {
-    sourcePrompt = resolveSourcePromptFromCollectedScrape(lastScrapeMeta);
+  const scrapedPrompt = resolveSourcePromptFromCollectedScrape(lastScrapeMeta, {
+    allowDirectFallback: false,
+    persist: false
+  });
+  if (!sourcePrompt) {
+    sourcePrompt = scrapedPrompt || loadedQuestionPrompt;
   }
+  if (sourcePrompt) {
+    rememberResolvedSourcePrompt(sourcePrompt);
+  }
+  const storedPrompt = loadedQuestionPrompt;
+  const forceNewRoot = !!pending?.forceNewRoot;
 
   enabledSlots.forEach((slot) => {
     const serviceId = detectServiceByUrl(getWebviewCurrentUrl(slot)) || slotConfig[slot] || slot;
@@ -4468,13 +4590,44 @@ async function collectNowAggregation(manual = true) {
     return null;
   }
 
-  const replaceExisting = manual && Number.isInteger(ingestContext.sessionIdHint) && ingestContext.sessionIdHint > 0 && !!existingAggregatedNoteId;
+  const sameQuestionAsCurrentRoot = hasLoadedQuestionContext
+    ? promptsReferToSameQuestion(sourcePrompt, storedPrompt)
+    : false;
+  const replaceExisting = !forceNewRoot
+    && manual
+    && Number.isInteger(ingestContext.sessionIdHint)
+    && ingestContext.sessionIdHint > 0
+    && !!existingAggregatedNoteId
+    && sameQuestionAsCurrentRoot;
+  const targetAggregatedNoteId = replaceExisting ? existingAggregatedNoteId : null;
+  if (forceNewRoot && existingAggregatedNoteId) {
+    mergeLog('Collect now is running for a freshly sent prompt; forcing creation of a new aggregated root instead of overwriting the previous one', 'info', {
+      sessionIdHint: ingestContext.sessionIdHint || null,
+      previousAggregatedNoteId: existingAggregatedNoteId,
+      sourcePrompt
+    });
+  }
+  if (
+    manual
+    && hasLoadedQuestionContext
+    && existingAggregatedNoteId
+    && sourcePrompt
+    && storedPrompt
+    && !sameQuestionAsCurrentRoot
+  ) {
+    mergeLog('Collect now detected a new question in the same chats; creating a new note instead of overwriting the current root', 'info', {
+      current_root_prompt: storedPrompt,
+      collected_prompt: sourcePrompt,
+      sessionIdHint: ingestContext.sessionIdHint || null,
+      previousAggregatedNoteId: existingAggregatedNoteId
+    });
+  }
   const payloadBuild = buildAggregatedPayload({
     sourcePrompt,
     responses: aggregatedResponses,
     sessionId: ingestContext.sessionIdHint,
     projectTagId: activeProjectId,
-    aggregatedNoteId: existingAggregatedNoteId,
+    aggregatedNoteId: targetAggregatedNoteId,
     replaceExisting
   });
 
@@ -4808,13 +4961,12 @@ async function runMerge(isClarification = false, clarificationText = '', previou
 }
 
 // ========== SESSION MANAGEMENT ==========
-const SESSIONS_KEY = 'chat-aggregator-sessions';
-const DISMISSED_SESSION_IDS_KEY = 'chat-aggregator-dismissed-session-ids';
-const MAX_SESSIONS = 1000;
-let sessionsNotice = { text: '', kind: 'info' };
-let sessionsSearchQuery = '';
-const expandedSessionTitleIds = new Set();
-let sessionsListMemoryCache = null;
+  const SESSIONS_KEY = 'chat-aggregator-sessions';
+  const MAX_SESSIONS = 1000;
+  let sessionsNotice = { text: '', kind: 'info' };
+  let sessionsSearchQuery = '';
+  const expandedSessionTitleIds = new Set();
+  let sessionsListMemoryCache = null;
 
 function sessionSnapshotKey(session) {
   const sessionPart = session?.sessionId != null ? String(session.sessionId) : 'id:' + String(session?.id ?? '');
@@ -4873,45 +5025,13 @@ function mergeSessionSnapshots(primary, secondary) {
   ]);
 }
 
-function getDismissedSessionIds() {
-  try {
-    const raw = localStorage.getItem(DISMISSED_SESSION_IDS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return new Set(
-      (Array.isArray(parsed) ? parsed : [])
-        .map((value) => Number(value))
-        .filter((value) => Number.isInteger(value) && value > 0)
-    );
-  } catch (_) {
-    return new Set();
+  function clearLegacyDismissedSessionsStorage() {
+    try {
+      localStorage.removeItem('chat-aggregator-dismissed-session-ids');
+    } catch (_) {}
   }
-}
 
-function setDismissedSessionIds(ids) {
-  localStorage.setItem(DISMISSED_SESSION_IDS_KEY, JSON.stringify([...ids]));
-}
-
-function dismissSessionId(sessionId) {
-  if (!Number.isInteger(sessionId) || sessionId <= 0) return;
-  const dismissed = getDismissedSessionIds();
-  dismissed.add(sessionId);
-  setDismissedSessionIds(dismissed);
-}
-
-function clearDismissedSessionId(sessionId) {
-  if (!Number.isInteger(sessionId) || sessionId <= 0) return;
-  const dismissed = getDismissedSessionIds();
-  if (!dismissed.delete(sessionId)) return;
-  setDismissedSessionIds(dismissed);
-}
-
-function filterDismissedSessions(sessions) {
-  const dismissed = getDismissedSessionIds();
-  return (Array.isArray(sessions) ? sessions : []).filter((session) => {
-    const sessionId = Number(session?.sessionId ?? session?.session_id ?? null);
-    return !dismissed.has(sessionId);
-  });
-}
+  clearLegacyDismissedSessionsStorage();
 
 function setSessionsNotice(text, kind = 'info') {
   sessionsNotice = { text: String(text || '').trim(), kind };
@@ -4955,12 +5075,11 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
       }
       console.log('[saveSessionSnapshot] Saved to DB:', result);
       setSessionsNotice('Saved to database.', 'ok');
-      clearDismissedSessionId(sessionData.sessionId);
-      // Also update local cache
-      const cachedSessions = await loadSessionsList({ preferCache: true });
-      const sessions = mergeSessionSnapshots([result], cachedSessions);
-      localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-      sessionsListMemoryCache = sessions;
+        // Also update local cache
+        const cachedSessions = await loadSessionsList({ preferCache: true });
+        const sessions = mergeSessionSnapshots([result], cachedSessions);
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+        sessionsListMemoryCache = sessions;
       await updateSessionsUI();
       return result;
     } catch (error) {
@@ -4977,7 +5096,6 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
     ...sessionData
   };
 
-  clearDismissedSessionId(sessionData.sessionId);
   const cachedSessions = await loadSessionsList({ preferCache: true });
   const sessions = mergeSessionSnapshots([snapshot], cachedSessions);
 
@@ -4988,12 +5106,13 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
   return snapshot;
 }
 
-async function loadSessionsList(options = {}) {
-  const preferCache = options?.preferCache === true;
-  const forceRefresh = options?.forceRefresh === true;
-  if (!forceRefresh && Array.isArray(sessionsListMemoryCache)) {
-    return filterDismissedSessions(sessionsListMemoryCache);
-  }
+  async function loadSessionsList(options = {}) {
+    const preferCache = options?.preferCache === true;
+    const forceRefresh = options?.forceRefresh === true;
+    clearLegacyDismissedSessionsStorage();
+    if (!forceRefresh && Array.isArray(sessionsListMemoryCache)) {
+      return sessionsListMemoryCache;
+    }
   let cachedSessions = [];
 
   try {
@@ -5003,10 +5122,10 @@ async function loadSessionsList(options = {}) {
     cachedSessions = [];
   }
 
-  if (preferCache) {
-    sessionsListMemoryCache = Array.isArray(cachedSessions) ? cachedSessions : [];
-    return filterDismissedSessions(cachedSessions);
-  }
+    if (preferCache) {
+      sessionsListMemoryCache = Array.isArray(cachedSessions) ? cachedSessions : [];
+      return sessionsListMemoryCache;
+    }
 
   // Try to load from database first
   if (window.electronAPI?.loadSessions) {
@@ -5016,11 +5135,11 @@ async function loadSessionsList(options = {}) {
       if (Array.isArray(dbSessions) && dbSessions.length > 0) {
         const mergedSessions = mergeSessionSnapshots(dbSessions, cachedSessions);
         // Cache in localStorage
-        localStorage.setItem(SESSIONS_KEY, JSON.stringify(mergedSessions));
-        sessionsListMemoryCache = mergedSessions;
-        setSessionsNotice('Loaded from database.', 'ok');
-        return filterDismissedSessions(mergedSessions);
-      }
+          localStorage.setItem(SESSIONS_KEY, JSON.stringify(mergedSessions));
+          sessionsListMemoryCache = mergedSessions;
+          setSessionsNotice('Loaded from database.', 'ok');
+          return mergedSessions;
+        }
       if (Array.isArray(dbSessions) && dbSessions.length === 0) {
         setSessionsNotice('Database returned 0 sessions.', 'info');
       }
@@ -5031,10 +5150,10 @@ async function loadSessionsList(options = {}) {
     }
   }
 
-  // Fallback to localStorage
-  sessionsListMemoryCache = Array.isArray(cachedSessions) ? cachedSessions : [];
-  return filterDismissedSessions(cachedSessions);
-}
+    // Fallback to localStorage
+    sessionsListMemoryCache = Array.isArray(cachedSessions) ? cachedSessions : [];
+    return sessionsListMemoryCache;
+  }
 
 function getCurrentSessionId() {
   try {
@@ -5135,38 +5254,27 @@ async function loadSession(sessionId) {
   await updateSessionsUI({ forceRefresh: true });
 }
 
-async function deleteSession(sessionId) {
-  const sessions = await loadSessionsList();
-  const targetSession = sessions.find((s) => s.id === sessionId);
-  const targetSessionId = Number(targetSession?.sessionId ?? targetSession?.session_id ?? null);
+  async function deleteSession(sessionId) {
+    const sessions = await loadSessionsList();
 
-  // Delete from database first
-  if (window.electronAPI?.deleteSession) {
-    try {
-      await window.electronAPI.deleteSession(sessionId);
+    // Delete from database first
+    if (window.electronAPI?.deleteSession) {
+      try {
+        await window.electronAPI.deleteSession(sessionId);
       console.log('[deleteSession] Deleted from DB:', sessionId);
       setSessionsNotice(`Deleted from database: ${sessionId}`, 'ok');
     } catch (error) {
       console.error('[deleteSession] DB delete failed:', error);
-      setSessionsNotice(`DB delete failed, cleaning local cache only: ${errorToText(error)}`, 'warn');
+        setSessionsNotice(`DB delete failed, cleaning local cache only: ${errorToText(error)}`, 'warn');
+      }
     }
+
+    // Update local cache
+    const filtered = sessions.filter((s) => s.id !== sessionId);
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(filtered));
+    sessionsListMemoryCache = filtered;
+    await updateSessionsUI();
   }
-
-  dismissSessionId(targetSessionId);
-
-  // Update local cache
-  const filtered = sessions.filter((s) => {
-    if (s.id === sessionId) return false;
-    const rowSessionId = Number(s?.sessionId ?? s?.session_id ?? null);
-    if (Number.isInteger(targetSessionId) && targetSessionId > 0 && rowSessionId === targetSessionId) {
-      return false;
-    }
-    return true;
-  });
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(filtered));
-  sessionsListMemoryCache = filtered;
-  await updateSessionsUI();
-}
 
 async function openSessionInNewWindow(sessionId) {
   const sessions = await loadSessionsList();
