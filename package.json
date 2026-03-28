@@ -1,6 +1,6 @@
 {
   "name": "gunshi",
-  "version": "0.1.18",
+  "version": "1.102.0",
   "description": "Gunshi — multi-AI chat aggregator",
   "main": "main.js",
   "scripts": {

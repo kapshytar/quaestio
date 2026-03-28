@@ -140,12 +140,21 @@ const importCookiesBtn = document.getElementById('import-cookies-btn');
 const incognitoModeBtn = document.getElementById('incognito-mode-btn');
 const toggleAddressBarBtn = document.getElementById('toggle-address-bar-btn');
 const collapseBtn = document.getElementById('collapse-toolbar');
+const aboutBtn = document.getElementById('about-btn');
 const togglesContainer = document.getElementById('toggles');
 const projectSelectorBtn = document.getElementById('project-selector-btn');
 const projectPanelEl = document.getElementById('project-panel');
 const projectPanelScrimEl = document.getElementById('project-panel-scrim');
 const projectPanelCloseBtn = document.getElementById('project-panel-close');
 const projectTreeEl = document.getElementById('project-tree');
+const aboutModalEl = document.getElementById('about-modal');
+const aboutCloseBtn = document.getElementById('about-close-btn');
+const aboutAppNameEl = document.getElementById('about-app-name');
+const aboutVersionEl = document.getElementById('about-version');
+const aboutBaseVersionEl = document.getElementById('about-base-version');
+const aboutGitMetaEl = document.getElementById('about-git-meta');
+const aboutChangelogListEl = document.getElementById('about-changelog-list');
+const aboutChangelogEmptyEl = document.getElementById('about-changelog-empty');
 
 // Merge panel elements (populated after DOM ready)
 let mergeProviderSelect, mergeApiKeyInput, mergeEndpointInput, mergeModelInput;
@@ -174,6 +183,7 @@ let isProjectPanelVisible = false;
 let isProjectTreeLoaded = false;
 const expandedProjectNodeIds = new Set();
 let projectSlotUrlLoadGeneration = 0;
+let desktopAboutInfoCache = null;
 const AGGREGATED_SESSION_ID_KEY = 'aggregated-ingest-session-id';
 const AGGREGATED_SESSION_CONTEXT_KEY = 'aggregated-ingest-session-context';
 const SLOT_ENABLED_STATE_KEY = 'slot-enabled-state';
@@ -300,6 +310,97 @@ function summarizeDomDiagnostics(diagnostics) {
     prompt_candidate: promptCandidate,
     selected
   };
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderAboutDialog(info) {
+  if (!aboutAppNameEl || !aboutVersionEl || !aboutBaseVersionEl || !aboutGitMetaEl || !aboutChangelogListEl || !aboutChangelogEmptyEl) {
+    return;
+  }
+
+  const gitBits = [];
+  if (info?.gitCommitCount) gitBits.push(`#${info.gitCommitCount}`);
+  if (info?.gitShortSha) gitBits.push(info.gitShortSha);
+
+  aboutAppNameEl.textContent = String(info?.appName || 'Gunshi');
+  aboutVersionEl.textContent = String(info?.version || '-');
+  aboutBaseVersionEl.textContent = String(info?.baseVersion || '-');
+  aboutGitMetaEl.textContent = gitBits.length > 0 ? gitBits.join(' · ') : 'Not available';
+
+  const entries = Array.isArray(info?.changelogEntries) ? info.changelogEntries : [];
+  if (entries.length === 0) {
+    aboutChangelogListEl.innerHTML = '';
+    aboutChangelogEmptyEl.style.display = '';
+    return;
+  }
+
+  aboutChangelogEmptyEl.style.display = 'none';
+  aboutChangelogListEl.innerHTML = entries.map((entry) => {
+    const version = escapeHtml(entry?.version || 'Unversioned');
+    const section = escapeHtml(entry?.section || 'Changes');
+    const text = escapeHtml(entry?.text || '');
+    return `
+      <div class="about-changelog-item">
+        <div class="about-changelog-meta">
+          <span class="about-changelog-version">${version}</span>
+          <span class="about-changelog-section">${section}</span>
+        </div>
+        <div class="about-changelog-text">${text}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateAboutButtonLabel(info) {
+  if (!aboutBtn) return;
+  const version = String(info?.baseVersion || info?.version || '').trim();
+  aboutBtn.textContent = version ? `About ${version}` : 'About';
+}
+
+function showAboutModal() {
+  if (!aboutModalEl) return;
+  aboutModalEl.classList.add('visible');
+  aboutModalEl.setAttribute('aria-hidden', 'false');
+}
+
+function hideAboutModal() {
+  if (!aboutModalEl) return;
+  aboutModalEl.classList.remove('visible');
+  aboutModalEl.setAttribute('aria-hidden', 'true');
+}
+
+async function openAboutDialog() {
+  if (!window.electronAPI?.getAboutInfo) return;
+  try {
+    if (!desktopAboutInfoCache) {
+      const info = await window.electronAPI.getAboutInfo();
+      if (!info?.ok) throw new Error(info?.error || 'Failed to load about info');
+      desktopAboutInfoCache = info;
+    }
+    updateAboutButtonLabel(desktopAboutInfoCache);
+    renderAboutDialog(desktopAboutInfoCache);
+    showAboutModal();
+  } catch (error) {
+    console.error('[about] Failed to open dialog:', error);
+  }
+}
+
+async function initAboutButton() {
+  if (!window.electronAPI?.getAboutInfo || !aboutBtn) return;
+  try {
+    const info = await window.electronAPI.getAboutInfo();
+    if (!info?.ok) return;
+    desktopAboutInfoCache = info;
+    updateAboutButtonLabel(info);
+  } catch (_) {}
 }
 
 async function appendTraceScrapeArtifact(traceId, slot, serviceId, serviceName, diagnostics, extraMeta = {}, extraFiles = []) {
@@ -2037,6 +2138,24 @@ if (projectPanelCloseBtn) {
 if (projectPanelScrimEl) {
   projectPanelScrimEl.addEventListener('click', hideProjectPanel);
 }
+if (aboutBtn) {
+  aboutBtn.addEventListener('click', openAboutDialog);
+}
+if (aboutCloseBtn) {
+  aboutCloseBtn.addEventListener('click', hideAboutModal);
+}
+if (aboutModalEl) {
+  aboutModalEl.addEventListener('click', (event) => {
+    if (event.target === aboutModalEl) {
+      hideAboutModal();
+    }
+  });
+}
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && aboutModalEl?.classList.contains('visible')) {
+    hideAboutModal();
+  }
+});
 
 // ========== COLLAPSE TOOLBAR TOGGLE ==========
 let collapsed = localStorage.getItem('top-collapsed');
@@ -5448,8 +5567,10 @@ async function initSessionsTab() {
 // Call initialization after DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initSessionsTab);
+  document.addEventListener('DOMContentLoaded', initAboutButton);
 } else {
   initSessionsTab();
+  initAboutButton();
 }
 
 console.log('Renderer initialized');

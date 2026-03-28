@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, session, clipboard } = requir
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 
 const APP_DATA_PATH = app.getPath('appData');
 const FIXED_USER_DATA_PATH = path.join(APP_DATA_PATH, 'chat-aggregator');
@@ -40,7 +41,74 @@ const DESKTOP_USER_AGENT = IS_MAC
 
 function getRuntimeAppVersion() {
   const baseVersion = String(app.getVersion() || '').trim() || '0.0.0';
-  return app.isPackaged ? baseVersion : `${baseVersion}-dev`;
+  const gitMeta = getGitBuildMeta();
+  const suffix = gitMeta ? `+${gitMeta.commitCount}.${gitMeta.shortSha}` : '';
+  return app.isPackaged ? `${baseVersion}${suffix}` : `${baseVersion}${suffix}-dev`;
+}
+
+function getGitBuildMeta() {
+  try {
+    const shortSha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: __dirname,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+    const commitCount = execFileSync('git', ['rev-list', '--count', 'HEAD'], {
+      cwd: __dirname,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+    if (!shortSha || !commitCount) return null;
+    return { shortSha, commitCount };
+  } catch (_) {
+    return null;
+  }
+}
+
+function extractRecentChangelogEntries(markdown, limit = 30) {
+  const lines = String(markdown || '').split(/\r?\n/);
+  const entries = [];
+  let version = '';
+  let section = '';
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const versionMatch = line.match(/^##\s+\[([^\]]+)\]/);
+    if (versionMatch) {
+      version = versionMatch[1].trim();
+      section = '';
+      continue;
+    }
+    const sectionMatch = line.match(/^###\s+(.+)/);
+    if (sectionMatch) {
+      section = sectionMatch[1].trim();
+      continue;
+    }
+    const bulletMatch = line.match(/^-\s+(.+)/);
+    if (!bulletMatch) continue;
+    entries.push({
+      version,
+      section,
+      text: bulletMatch[1].trim()
+    });
+    if (entries.length >= limit) break;
+  }
+  return entries;
+}
+
+function getDesktopAboutInfo() {
+  const changelogPath = path.join(__dirname, 'CHANGELOG.md');
+  const changelogMarkdown = fs.existsSync(changelogPath)
+    ? fs.readFileSync(changelogPath, 'utf8')
+    : '';
+  const gitMeta = getGitBuildMeta();
+  return {
+    appName: app.getName(),
+    version: getRuntimeAppVersion(),
+    baseVersion: String(app.getVersion() || '').trim() || '0.0.0',
+    gitShortSha: gitMeta?.shortSha || '',
+    gitCommitCount: gitMeta?.commitCount || '',
+    changelogEntries: extractRecentChangelogEntries(changelogMarkdown, 30)
+  };
 }
 
 // Throttle all webviews when app is minimized/hidden to save CPU
@@ -1022,6 +1090,14 @@ ipcMain.handle('clipboard-write-text', async (_event, text) => {
     return true;
   } catch (_) {
     return false;
+  }
+});
+
+ipcMain.handle('app-get-about-info', async () => {
+  try {
+    return { ok: true, ...getDesktopAboutInfo() };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
   }
 });
 

@@ -482,6 +482,143 @@
     #incognito-mode-btn.active {
       background: #2a2138; border-color: #8b6fd6; color: #e4d8ff;
     }
+    #about-btn {
+      min-width: 84px;
+    }
+    #about-modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.68);
+      z-index: 30000;
+      padding: 24px;
+    }
+    #about-modal.visible { display: flex; }
+    #about-dialog {
+      width: min(820px, calc(100vw - 48px));
+      max-height: calc(100vh - 48px);
+      display: flex;
+      flex-direction: column;
+      background: #222;
+      border: 1px solid #3f3f3f;
+      border-radius: 12px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+      overflow: hidden;
+    }
+    #about-dialog-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid #353535;
+      background: #1b1b1b;
+    }
+    #about-dialog-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+    #about-dialog-subtitle {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #a6adb8;
+      line-height: 1.45;
+    }
+    #about-close-btn {
+      padding: 8px 12px;
+      background: #2e2e2e;
+      border: 1px solid #4b4b4b;
+      border-radius: 8px;
+      color: #ddd;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    #about-close-btn:hover { background: #393939; color: #fff; }
+    #about-dialog-body {
+      padding: 18px 20px 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .about-section {
+      background: #272727;
+      border: 1px solid #373737;
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .about-section h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #8fa1bf;
+      margin-bottom: 10px;
+    }
+    .about-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 16px;
+    }
+    .about-meta-item { min-width: 0; }
+    .about-meta-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #8d8d8d;
+      margin-bottom: 4px;
+    }
+    .about-meta-value {
+      font-size: 13px;
+      color: #f0f0f0;
+      word-break: break-word;
+    }
+    #about-changelog-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .about-changelog-item {
+      border: 1px solid #383838;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #202020;
+    }
+    .about-changelog-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 5px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .about-changelog-version {
+      color: #7fb3ff;
+      font-weight: 700;
+    }
+    .about-changelog-section {
+      color: #93d2a5;
+      font-weight: 600;
+    }
+    .about-changelog-text {
+      font-size: 13px;
+      line-height: 1.45;
+      color: #e5e5e5;
+      word-break: break-word;
+    }
+    #about-changelog-empty {
+      font-size: 12px;
+      color: #9a9a9a;
+      font-style: italic;
+    }
+    @media (max-width: 720px) {
+      .about-meta-grid {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -607,6 +744,7 @@
         <button class="control-btn" id="toggle-address-bar-btn">Hide Address Bar</button>
         <button class="control-btn" id="import-cookies-btn">Import Cookies</button>
         <button class="control-btn" id="incognito-mode-btn" title="Use provider-native temporary chat where available">Temp mode</button>
+        <button class="control-btn" id="about-btn" title="About and changelog">About</button>
         <div id="mobile-ua-toggle" title="Switch to mobile user-agent (loads lighter mobile pages)">
           <span class="ua-dot"></span>
           <span id="mobile-ua-label">Mobile</span>
@@ -753,6 +891,45 @@
 
   <!-- Resize overlay â€” blocks webview mouse capture during panel resize -->
   <div id="resize-overlay"></div>
+  <div id="about-modal" aria-hidden="true">
+    <div id="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-dialog-title">
+      <div id="about-dialog-header">
+        <div>
+          <div id="about-dialog-title">About</div>
+          <div id="about-dialog-subtitle">Version and latest client changelog</div>
+        </div>
+        <button id="about-close-btn" type="button">Close</button>
+      </div>
+      <div id="about-dialog-body">
+        <section class="about-section">
+          <h3>Build</h3>
+          <div class="about-meta-grid">
+            <div class="about-meta-item">
+              <div class="about-meta-label">App</div>
+              <div class="about-meta-value" id="about-app-name">Gunshi</div>
+            </div>
+            <div class="about-meta-item">
+              <div class="about-meta-label">Version</div>
+              <div class="about-meta-value" id="about-version">-</div>
+            </div>
+            <div class="about-meta-item">
+              <div class="about-meta-label">Base Version</div>
+              <div class="about-meta-value" id="about-base-version">-</div>
+            </div>
+            <div class="about-meta-item">
+              <div class="about-meta-label">Git Build</div>
+              <div class="about-meta-value" id="about-git-meta">-</div>
+            </div>
+          </div>
+        </section>
+        <section class="about-section">
+          <h3>Latest 30 Changes</h3>
+          <div id="about-changelog-list"></div>
+          <div id="about-changelog-empty" style="display:none;">No changelog entries found.</div>
+        </section>
+      </div>
+    </div>
+  </div>
   <div id="search-overlay" aria-hidden="true">
     <input id="search-input" type="text" placeholder="Find..." autocomplete="off">
     <button id="search-prev-btn" class="search-btn" title="Previous match">&#8593;</button>

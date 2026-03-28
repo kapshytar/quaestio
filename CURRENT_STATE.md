@@ -2,9 +2,14 @@
 
 ## Stable
 
-- Desktop runtime/app debug version now comes from `package.json` and is reported as:
-  - packaged build: exact semver like `0.1.18`
-  - unpackaged/dev run: same semver plus `-dev`, e.g. `0.1.18-dev`
+- Desktop runtime/app debug version now comes from `package.json` plus git metadata and is reported as:
+  - packaged build: `1.x.y+<gitCount>.<gitSha>`
+  - unpackaged/dev run: same build string plus `-dev`
+- Desktop toolbar now includes an `About` dialog that shows:
+  - runtime version
+  - base semver
+  - git build metadata
+  - latest 30 changelog entries from local `CHANGELOG.md`
 - Desktop session CRUD uses the bridge RPC path.
 - Desktop session list is note-backed, matching web:
   - question rows come from `notes.note_type = 1`

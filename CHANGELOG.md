@@ -2,7 +2,15 @@
 
 All notable changes to this project are documented here.
 
-Versioning: `vMAJOR.MINOR.PATCH`.
+Versioning: desktop runtime builds are reported as `v1.x.y+<gitCount>.<gitSha>`, with local unpackaged runs adding `-dev`.
+
+## [v1.102.0] - 2026-03-28
+
+### Added
+- Desktop toolbar now includes an `About` button that shows the runtime version, git build metadata, and the latest 30 changelog entries directly in the client.
+
+### Changed
+- Desktop runtime versioning now derives its visible build suffix from git metadata (`commit count + short sha`), so every new pushed commit results in a distinct client version string without manual version bumps.
 
 ## [v0.1.18] - 2026-03-27
 
