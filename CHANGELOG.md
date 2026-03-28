@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 Versioning: desktop runtime builds are reported as `v1.x.y+<gitCount>.<gitSha>`, with local unpackaged runs adding `-dev`.
 
+## [v1.102.1] - 2026-03-28
+
+### Changed
+- Safe desktop dependency refresh:
+  - `electron` -> `40.8.5`
+
+### Fixed
+- Desktop packaging/runtime toolchain is now aligned with the latest Electron 40 patch release without jumping to Electron 41.
+
 ## [v1.102.0] - 2026-03-28
 
 ### Added
