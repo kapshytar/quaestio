@@ -11,6 +11,7 @@ Versioning: desktop runtime builds are reported as `v1.x.y+<gitCount>.<gitSha>`,
 
 ### Changed
 - Desktop runtime versioning now derives its visible build suffix from git metadata (`commit count + short sha`), so every new pushed commit results in a distinct client version string without manual version bumps.
+- Desktop `About / Changelog` entry moved from the lower toolbar into the native top menu bar as a dedicated `About` menu.
 
 ## [v0.1.18] - 2026-03-27
 

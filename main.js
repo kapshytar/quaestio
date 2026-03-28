@@ -1498,6 +1498,23 @@ async function createWindow() {
         { type: 'separator' },
         { role: 'togglefullscreen' }
       ]
+    },
+    {
+      label: 'About',
+      submenu: [
+        {
+          label: 'About / Changelog',
+          accelerator: 'CmdOrCtrl+Shift+A',
+          click: () => {
+            const win = getPrimaryWindow();
+            if (win) {
+              win.webContents.executeJavaScript(`
+                window.openAboutDialog?.();
+              `).catch(err => console.error('About menu click error:', err));
+            }
+          }
+        }
+      ]
     }
   ];
 

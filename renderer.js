@@ -140,7 +140,6 @@ const importCookiesBtn = document.getElementById('import-cookies-btn');
 const incognitoModeBtn = document.getElementById('incognito-mode-btn');
 const toggleAddressBarBtn = document.getElementById('toggle-address-bar-btn');
 const collapseBtn = document.getElementById('collapse-toolbar');
-const aboutBtn = document.getElementById('about-btn');
 const togglesContainer = document.getElementById('toggles');
 const projectSelectorBtn = document.getElementById('project-selector-btn');
 const projectPanelEl = document.getElementById('project-panel');
@@ -360,9 +359,7 @@ function renderAboutDialog(info) {
 }
 
 function updateAboutButtonLabel(info) {
-  if (!aboutBtn) return;
-  const version = String(info?.baseVersion || info?.version || '').trim();
-  aboutBtn.textContent = version ? `About ${version}` : 'About';
+  desktopAboutInfoCache = info || desktopAboutInfoCache;
 }
 
 function showAboutModal() {
@@ -392,14 +389,14 @@ async function openAboutDialog() {
     console.error('[about] Failed to open dialog:', error);
   }
 }
+window.openAboutDialog = openAboutDialog;
 
 async function initAboutButton() {
-  if (!window.electronAPI?.getAboutInfo || !aboutBtn) return;
+  if (!window.electronAPI?.getAboutInfo) return;
   try {
     const info = await window.electronAPI.getAboutInfo();
     if (!info?.ok) return;
     desktopAboutInfoCache = info;
-    updateAboutButtonLabel(info);
   } catch (_) {}
 }
 
@@ -2137,9 +2134,6 @@ if (projectPanelCloseBtn) {
 }
 if (projectPanelScrimEl) {
   projectPanelScrimEl.addEventListener('click', hideProjectPanel);
-}
-if (aboutBtn) {
-  aboutBtn.addEventListener('click', openAboutDialog);
 }
 if (aboutCloseBtn) {
   aboutCloseBtn.addEventListener('click', hideAboutModal);
