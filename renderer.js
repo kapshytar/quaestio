@@ -852,6 +852,8 @@ function readSessionContext() {
 function persistSessionContext(sessionId, fingerprint, aggregatedNoteId = null, sourcePrompt = null) {
   if (!Number.isInteger(sessionId) || sessionId <= 0 || !fingerprint) return;
   activeSessionId = sessionId; // always keep in-memory copy
+  // Fingerprint ties the cached question context to the current enabled-slot layout,
+  // so we do not accidentally restore one question into a different slot combination.
   const normalizedAggregatedNoteId = String(aggregatedNoteId || '').trim() || null;
   const normalizedSourcePrompt = String(sourcePrompt ?? activeSessionPrompt ?? '').trim() || null;
   if (normalizedAggregatedNoteId) {
@@ -4703,6 +4705,9 @@ async function collectNowAggregation(manual = true) {
     return null;
   }
 
+  // A numeric session can accumulate multiple user questions inside the same chat tabs.
+  // We only overwrite the current aggregated root when the recovered prompt still points
+  // to that exact question; matching session_id alone is not safe enough.
   const sameQuestionAsCurrentRoot = hasLoadedQuestionContext
     ? promptsReferToSameQuestion(sourcePrompt, storedPrompt)
     : false;
@@ -4921,6 +4926,9 @@ async function executeMergeRequest(isClarification, clarificationText, previousS
     let sessionId = getCurrentQuestionSessionId();
     if ((!Number.isInteger(sessionId) || sessionId <= 0) && !isClarification && Array.isArray(aggregatedResponses) && aggregatedResponses.length > 0) {
       const bootstrapPrompt = String(client.lastSourcePrompt || activeSessionPrompt || '').trim();
+      // Merge notes are children of an aggregated root. If a loaded question has no
+      // current root note yet, we bootstrap that root first instead of creating an
+      // orphaned merge row.
       mergeLog('No active session for merge ingest; bootstrapping aggregated note first', 'info', {
         sourcePrompt: bootstrapPrompt || null,
         aggregatedResponses: aggregatedResponses.length

@@ -2,6 +2,12 @@
 
 ## Stable
 
+- Cross-cutting ecosystem rules are now split into root handoff docs:
+  - `SYSTEM_CAPABILITIES.md`
+  - `SESSION_AND_INGEST_RULES.md`
+  - `ACTION_HISTORY_AND_DB_CHANGE_LOG.md`
+  - `CLIENT_VERSIONING_AND_RELEASE_RULES.md`
+
 - Desktop runtime/app debug version now comes from `package.json` plus git metadata and is reported as:
   - packaged build: `1.x.y+<gitCount>.<gitSha>`
   - unpackaged/dev run: same build string plus `-dev`
