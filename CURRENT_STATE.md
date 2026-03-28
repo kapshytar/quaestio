@@ -5,7 +5,7 @@
 - Desktop runtime/app debug version now comes from `package.json` plus git metadata and is reported as:
   - packaged build: `1.x.y+<gitCount>.<gitSha>`
   - unpackaged/dev run: same build string plus `-dev`
-- Desktop toolbar now includes an `About` dialog that shows:
+- Desktop native top menu now includes `About -> About / Changelog`, which opens a dialog that shows:
   - runtime version
   - base semver
   - git build metadata
@@ -75,6 +75,7 @@
 - Desktop scrape quality is much better than before, but provider-specific DOM changes can still regress extraction. Use `debug-runs` first before changing renderers.
 - Deleting a visible session row does not necessarily destroy the underlying note-backed question context; the same chat fingerprint can still reattach to the existing question root on the next collect.
 - Current local repo should stay clean except for fresh debug artifacts if you run new traces.
+- If git blocks on `.git/index.lock`, first verify whether a real git process is still running. If not, remove the stale lock once and retry instead of looping failed git commands.
 
 ## Current Contracts
 
