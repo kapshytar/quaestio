@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 
 Versioning: desktop runtime builds are reported as `v1.x.y+<gitCount>.<gitSha>`, with local unpackaged runs adding `-dev`.
 
+## [v1.102.2] - 2026-03-28
+
+### Changed
+- Desktop app branding is now `Verity` instead of `Gunshi` in package metadata, build product name, and main window titles.
+
 ## [v1.102.1] - 2026-03-28
 
 ### Changed

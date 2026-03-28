@@ -1,7 +1,7 @@
 {
-  "name": "gunshi",
+  "name": "verity",
   "version": "1.102.0",
-  "description": "Gunshi — multi-AI chat aggregator",
+  "description": "Verity - multi-AI chat aggregator",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -35,8 +35,8 @@
     "rimraf": "^6.0.1"
   },
   "build": {
-    "appId": "com.gunshi.app",
-    "productName": "Gunshi",
+    "appId": "com.verity.app",
+    "productName": "Verity",
     "directories": {
       "output": "dist"
     },
