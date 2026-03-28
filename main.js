@@ -1006,7 +1006,7 @@ ipcMain.handle('dream-open-session-window', async (_event, session) => {
         backgroundThrottling: true
       },
       backgroundColor: '#1a1a1a',
-      title: `Gunshi — ${session?.name || 'Session'}`,
+      title: `Verity — ${session?.name || 'Session'}`,
       icon: path.join(__dirname, IS_MAC ? 'icon.png' : 'icon.ico')
     });
     // Pass session as query param so the new window can restore it
@@ -1235,7 +1235,7 @@ async function createWindow() {
       backgroundThrottling: true
     },
     backgroundColor: '#1a1a1a',
-    title: 'Gunshi (alpha)',
+    title: 'Verity (alpha)',
     icon: path.join(__dirname, IS_MAC ? 'icon.png' : 'icon.ico')
   });
 
@@ -1257,9 +1257,15 @@ async function createWindow() {
     setAllWebviewsBackgrounded(false);
   });
 
-  window.webContents.on('console-message', (event, level, message) => {
-    const levelTag = ['LOG', 'WARN', 'ERR'][level] || 'LOG';
-    console.log(`[renderer][${levelTag}] ${message}`);
+  window.webContents.on('console-message', (event) => {
+    const levelMap = {
+      info: 'LOG',
+      warning: 'WARN',
+      error: 'ERR',
+      debug: 'DBG',
+    };
+    const levelTag = levelMap[event.level] || 'LOG';
+    console.log(`[renderer][${levelTag}] ${event.message}`);
   });
 
   window.on('focus', () => {
@@ -1278,10 +1284,16 @@ async function createWindow() {
     const slotTag = `slot-${webviewCounter}`;
     webviewContents.setUserAgent(DESKTOP_USER_AGENT);
 
-    webviewContents.on('console-message', (event, level, message) => {
-      if (level >= 2) {
-        const levelTag = ['LOG', 'WARN', 'ERR'][level] || 'LOG';
-        console.log(`[webview:${slotTag}][${levelTag}] ${message}`);
+    webviewContents.on('console-message', (event) => {
+      if (event.level === 'warning' || event.level === 'error') {
+        const levelMap = {
+          info: 'LOG',
+          warning: 'WARN',
+          error: 'ERR',
+          debug: 'DBG',
+        };
+        const levelTag = levelMap[event.level] || 'LOG';
+        console.log(`[webview:${slotTag}][${levelTag}] ${event.message}`);
       }
     });
 
