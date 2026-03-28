@@ -17,18 +17,11 @@
 4. Экспортируй куки (Cookie-Editor)
 5. Импортируй в приложение
 
-**Решение 3: Вручную**
-1. В приложении кликни правой кнопкой внутри панели Gemini
-2. Inspect Element
-3. В DevTools открой Console
-4. Попробуй залогиниться через UI
-5. Если не работает — используй Решение 1
-
 ---
 
 ### Grok - не логинится
 
-**Причина:** Grok требует авторизацию через X (Twitter), и у тебя либо нет подписки X Premium, либо не залогинен.
+**Причина:** Grok требует авторизацию через X (Twitter).
 
 **Решение 1: Используй прямой URL** (уже исправлено)
 - Новый URL: https://grok.x.com
@@ -38,15 +31,6 @@
 1. Смени URL на https://x.com
 2. Залогинься в Twitter/X
 3. Потом вручную перейди на https://grok.x.com
-
-**Решение 3: Если нет X Premium**
-- Grok доступен только для X Premium подписчиков
-- Альтернатива: поменяй URL на другой AI:
-  ```
-  https://perplexity.ai
-  https://chat.deepseek.com
-  https://copilot.microsoft.com
-  ```
 
 ---
 
@@ -69,26 +53,6 @@ Unexpected error while loading: GUEST_VIEW_MANAGER_CALL
 ✅ Gemini → AI Studio (без reCAPTCHA)  
 ✅ Grok → grok.x.com (прямой доступ)  
 ✅ UserAgent добавлен для обхода некоторых проверок  
-
----
-
-## Если всё равно не работает
-
-### Вариант 1: Замени на другие AI
-
-Вместо Gemini и Grok используй:
-
-**Вместо Gemini:**
-- Perplexity: https://perplexity.ai
-- Copilot: https://copilot.microsoft.com
-
-**Вместо Grok:**
-- DeepSeek: https://chat.deepseek.com
-- Phind: https://phind.com
-
-### Вариант 2: Просто не используй их
-
-Сними галочки с Gemini и Grok в верхней панели. Работай с ChatGPT и Claude — они стабильные.
 
 ---
 
