@@ -1,5 +1,12 @@
 # Current State
 
+## Document Authority
+
+- This file is the authoritative summary of the current functional state and contracts for `chat-aggregator`.
+- Root docs in `Verity/` still win for workspace-wide or cross-repo rules.
+- `CHANGELOG.md`, dated handoff docs, and older session notes are historical context only.
+- `CLAUDE.md` is operational/task-entry guidance; if it disagrees with this file about current product behavior, treat that as a doc mismatch and update the docs instead of guessing.
+
 ## Stable
 
 - Cross-cutting ecosystem rules are now split into root handoff docs:

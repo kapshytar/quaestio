@@ -290,7 +290,7 @@ ${Object.entries(responses).map(([model, text]) => `### ${model}\n${text.slice(0
     // OpenRouter extra headers
     if (config.provider.id === 'openrouter_api') {
       headers['HTTP-Referer'] = 'https://github.com/kvitaliq-maker/chat-aggregator-android';
-      headers['X-Title'] = 'Gunshi';
+      headers['X-Title'] = 'Verity';
     }
 
     const response = await fetch(config.endpoint, {

@@ -329,7 +329,7 @@ function renderAboutDialog(info) {
   if (info?.gitCommitCount) gitBits.push(`#${info.gitCommitCount}`);
   if (info?.gitShortSha) gitBits.push(info.gitShortSha);
 
-  aboutAppNameEl.textContent = String(info?.appName || 'Gunshi');
+  aboutAppNameEl.textContent = String(info?.appName || 'Verity');
   aboutVersionEl.textContent = String(info?.version || '-');
   aboutBaseVersionEl.textContent = String(info?.baseVersion || '-');
   aboutGitMetaEl.textContent = gitBits.length > 0 ? gitBits.join(' · ') : 'Not available';
@@ -1000,7 +1000,7 @@ function getCurrentQuestionSessionId() {
 
 function buildAggregatedPayload(params) {
   const sourcePrompt = (params.sourcePrompt || '').trim();
-  const title = sourcePrompt || `Gunshi merge ${new Date().toISOString()}`;
+  const title = sourcePrompt || `Verity merge ${new Date().toISOString()}`;
   const sessionId = Number.isInteger(params?.sessionId) && params.sessionId > 0
     ? params.sessionId
     : null;
@@ -5377,11 +5377,18 @@ async function loadSession(sessionId) {
 
   async function deleteSession(sessionId) {
     const sessions = await loadSessionsList();
+    const session = sessions.find((s) => s.id === sessionId) || null;
 
     // Delete from database first
     if (window.electronAPI?.deleteSession) {
       try {
-        await window.electronAPI.deleteSession(sessionId);
+        await window.electronAPI.deleteSession({
+          recordId: String(session?.id ?? sessionId),
+          sessionId: Number.isInteger(session?.sessionId)
+            ? session.sessionId
+            : (Number.isInteger(session?.session_id) ? session.session_id : null),
+          noteId: String(session?.noteId ?? session?.note_id ?? '').trim() || null
+        });
       console.log('[deleteSession] Deleted from DB:', sessionId);
       setSessionsNotice(`Deleted from database: ${sessionId}`, 'ok');
     } catch (error) {
@@ -5576,4 +5583,3 @@ if (document.readyState === 'loading') {
 }
 
 console.log('Renderer initialized');
-

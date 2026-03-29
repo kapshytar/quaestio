@@ -6,6 +6,7 @@ const { execFileSync } = require('child_process');
 
 const APP_DATA_PATH = app.getPath('appData');
 const FIXED_USER_DATA_PATH = path.join(APP_DATA_PATH, 'chat-aggregator');
+app.setName('Verity');
 
 // NOTE:
 // Full profile-directory merge (including Local State / Network DBs) can break
@@ -611,6 +612,91 @@ async function callSupabaseRestGet(endpointPath, allow404 = false) {
   }
 }
 
+async function callSupabaseRestWrite(method, endpointPath, payload = null, options = {}) {
+  const { supabaseUrl, serviceRoleKey } = getSupabaseConfig();
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('Supabase env is not configured (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).');
+  }
+
+  const headers = {
+    apikey: serviceRoleKey,
+    Authorization: `Bearer ${serviceRoleKey}`,
+    Accept: 'application/json',
+    Prefer: options?.prefer || 'return=minimal'
+  };
+  if (payload != null) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const response = await fetch(buildSupabaseRestUrl(endpointPath), {
+    method,
+    headers,
+    body: payload != null ? JSON.stringify(payload) : undefined
+  });
+
+  const rawText = await response.text();
+  if (!response.ok) {
+    throw new Error(`REST ${method} ${endpointPath} failed: ${response.status} ${rawText}`);
+  }
+  if (!rawText) return null;
+  try {
+    return JSON.parse(rawText);
+  } catch (_) {
+    return rawText;
+  }
+}
+
+async function callSupabaseRestPatch(endpointPath, payload, options = {}) {
+  return callSupabaseRestWrite('PATCH', endpointPath, payload, options);
+}
+
+async function callSupabaseRestDelete(endpointPath, options = {}) {
+  return callSupabaseRestWrite('DELETE', endpointPath, null, options);
+}
+
+function encodeFilterValue(value) {
+  return encodeURIComponent(String(value ?? '').trim());
+}
+
+async function deleteSessionViaRestFallback(target) {
+  const recordId = String(target?.recordId || '').trim();
+  let noteId = String(target?.noteId || '').trim();
+  let sessionId = Number.isInteger(target?.sessionId) && target.sessionId > 0 ? target.sessionId : null;
+
+  if (!sessionId && /^\d+$/.test(recordId)) {
+    sessionId = Number.parseInt(recordId, 10);
+  }
+
+  if (!noteId && sessionId) {
+    const noteRows = await callSupabaseRestGet(`notes?select=id&note_session_id=eq.${sessionId}&order=updated_at.desc&limit=1`);
+    const note = Array.isArray(noteRows) && noteRows.length > 0 ? noteRows[0] : null;
+    noteId = typeof note?.id === 'string' ? note.id : '';
+  }
+
+  if (noteId) {
+    const noteRows = await callSupabaseRestGet(`notes?select=id,parent_id,note_session_id&id=eq.${encodeFilterValue(noteId)}&limit=1`);
+    const note = Array.isArray(noteRows) && noteRows.length > 0 ? noteRows[0] : null;
+    if (note?.id) {
+      const parentId = note.parent_id ?? null;
+      await callSupabaseRestPatch(`notes?parent_id=eq.${encodeFilterValue(note.id)}`, { parent_id: parentId });
+      await callSupabaseRestDelete(`notes?id=eq.${encodeFilterValue(note.id)}`);
+    }
+
+    await callSupabaseRestDelete(`aggregator_sessions?note_id=eq.${encodeFilterValue(noteId)}`);
+  }
+
+  if (sessionId) {
+    const remainingNotes = await callSupabaseRestGet(`notes?select=id&note_session_id=eq.${sessionId}&limit=1`);
+    if (!Array.isArray(remainingNotes) || remainingNotes.length === 0) {
+      await callSupabaseRestDelete(`aggregator_sessions?session_id=eq.${sessionId}`);
+    }
+  } else if (recordId && !noteId) {
+    await callSupabaseRestDelete(`aggregator_sessions?id=eq.${encodeFilterValue(recordId)}`);
+  }
+
+  return { ok: true, fallback: 'rest' };
+}
+
 function normalizeSlotUrlEntry(value) {
   if (typeof value === 'string') return value.trim();
   if (!value || typeof value !== 'object') return '';
@@ -1021,21 +1107,41 @@ ipcMain.handle('dream-open-session-window', async (_event, session) => {
   }
 });
 
-ipcMain.handle('dream-delete-session', async (_event, sessionId) => {
+ipcMain.handle('dream-delete-session', async (_event, sessionTarget) => {
   try {
+    const recordId = typeof sessionTarget === 'object' && sessionTarget
+      ? String(sessionTarget.recordId ?? sessionTarget.id ?? '').trim()
+      : String(sessionTarget || '').trim();
+    const noteId = typeof sessionTarget === 'object' && sessionTarget
+      ? String(sessionTarget.noteId ?? sessionTarget.note_id ?? '').trim()
+      : '';
+    const sessionId = typeof sessionTarget === 'object' && sessionTarget
+      ? (Number.isInteger(sessionTarget.sessionId)
+          ? sessionTarget.sessionId
+          : (Number.isInteger(sessionTarget.session_id) ? sessionTarget.session_id : null))
+      : null;
+
     return await callSupabaseRpc('aggregator_sessions_bridge_v1', {
       p_action: 'delete',
-      p_record_id: String(sessionId || ''),
-      p_session_id: null,
+      p_record_id: recordId,
+      p_session_id: sessionId,
       p_name: null,
       p_slot_config: null,
       p_slot_urls: null,
       p_slot_enabled: null,
+      p_note_id: noteId || null,
       p_limit: 1
     });
   } catch (error) {
     console.error('[dream-delete-session] failed:', error);
-    throw error;
+    try {
+      const fallbackResult = await deleteSessionViaRestFallback(sessionTarget);
+      console.warn('[dream-delete-session] bridge failed, REST fallback used');
+      return fallbackResult;
+    } catch (fallbackError) {
+      console.error('[dream-delete-session] REST fallback failed:', fallbackError);
+      throw error;
+    }
   }
 });
 
@@ -1569,5 +1675,3 @@ if (!gotSingleInstanceLock) {
     }
   });
 }
-
-
