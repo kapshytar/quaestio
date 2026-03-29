@@ -1,0 +1,21 @@
+# macOS / editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+captures/
+
+# Xcode / SwiftPM
+DerivedData/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcuserstate
+.swiftpm/
+
+# Node / shared tooling
+node_modules/
+
