@@ -20,6 +20,7 @@
 - Shared mobile assets now include:
   - `shared/js/sendMessage.js`
   - `shared/js/attachFile.js`
+  - `shared/js/scrapeReply.js`
   - `shared/contracts/servicePresets.json`
 - iOS source scaffold now exists under `ios/VerityMobile/` with:
   - SwiftUI app entry
@@ -36,6 +37,7 @@
 - First shared-surface candidates are now identified:
   - `../chat-aggregator-android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
   - scrape/injection fragments currently embedded in `ChatFragment.kt`
+- First pass of shared reply scraping is now extracted into `shared/js/scrapeReply.js`.
 - iOS runtime validation is blocked by the current machine missing full Xcode / simulator tooling.
 
 ## Current Contracts
@@ -52,6 +54,6 @@
 
 ## Next Steps
 
-- Identify the first Android files/functions that should migrate into `shared/js`.
+- Define thin Android/iOS wrappers that call `shared/js/scrapeReply.js`.
 - Add an iOS bootstrap plan and initial Xcode-facing folder contract.
 - Decide when the Android repo is ready to move into `android/`.

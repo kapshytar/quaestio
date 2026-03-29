@@ -54,14 +54,12 @@ Current source:
 - scrape-related JavaScript embedded in:
   - `../chat-aggregator-android/app/src/main/java/com/chataggregator/app/ChatFragment.kt`
 
-Why it should move later, not first:
+Status:
 
-- it is larger and more entangled with Android-side callback/result shaping
-- it still needs a clean boundary between:
-  - pure DOM traversal
-  - native result parsing / state updates
+- first extraction pass is now implemented in `shared/js/scrapeReply.js`
+- native wrapper work is still pending
 
-Suggested target split:
+Target split:
 
 - `shared/js/scrapeReply.js`
   - DOM traversal and normalized JSON payload generation
@@ -93,4 +91,3 @@ Suggested target split:
 Do not move the Android project into `android/` until at least the first shared JS extraction is real.
 
 The monorepo should prove it can hold shared behavior before it absorbs the full native project.
-
