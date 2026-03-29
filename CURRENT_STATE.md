@@ -10,7 +10,7 @@
 ## Stable
 
 - `chat-aggregator-mobile` now exists as a separate git repo inside the `Verity` workspace.
-- The repo is intentionally a scaffold, not yet a shipping mobile app.
+- The repo now contains a running iOS simulator-tested MVP shell, but it is still not a shipping mobile app.
 - Expected monorepo structure is:
   - `android/`
   - `ios/`
@@ -22,25 +22,27 @@
   - `shared/js/attachFile.js`
   - `shared/js/scrapeReply.js`
   - `shared/contracts/servicePresets.json`
-- iOS source scaffold now exists under `ios/VerityMobile/` with:
+- iOS source now exists under `ios/VerityMobile/` with:
   - SwiftUI app entry
-  - 4-slot grid shell
-  - merge placeholder view
-  - settings/debug placeholder view
-  - `WKWebView` wrapper
+  - top provider tabs
+  - shared bottom composer for send-to-all
+  - merge/settings entry points aligned with the tab row
+  - persistent `WKWebView` models per slot
   - `project.yml` for XcodeGen-driven project generation
-  - `scripts/bootstrap-ios.sh` for local iOS project bootstrap once Xcode is installed
+  - `scripts/bootstrap-ios.sh` for local iOS project bootstrap
+- Shared JS resources are now bundled into the iOS app, not only read from workspace-relative dev paths.
 
 ## In Progress
 
 - Android code has not been moved yet from `../chat-aggregator-android`.
-- iOS source scaffold exists, but no `.xcodeproj` or simulator-validated app build exists yet.
-- Shared JS boundaries are not finalized yet.
+- Shared JS boundaries are still being finalized against real provider behavior.
 - First shared-surface candidates are now identified:
   - `../chat-aggregator-android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
   - scrape/injection fragments currently embedded in `ChatFragment.kt`
 - First pass of shared reply scraping is now extracted into `shared/js/scrapeReply.js`.
-- iOS runtime validation is blocked by the current machine missing full Xcode / simulator tooling.
+- iOS `send-to-all` is partially wired but not yet fully reliable across all providers.
+- Inactive slots are now preloaded and slot switching no longer forces a reload back to the service home URL.
+- iOS visual iteration is currently done in the simulator, but simulator-side system services can still create noisy CPU spikes.
 
 ## Current Contracts
 
@@ -49,6 +51,7 @@
   - WebView JS injection payloads
   - scrape/extraction JS
   - cross-client payload schemas/contracts
+- Shared provider DOM logic should stay in `shared/js/`; platform wrappers should add lifecycle/retry/verification behavior around it, not fork the DOM logic.
 - Shared logic should not prematurely absorb:
   - native UI layers
   - billing
@@ -56,6 +59,6 @@
 
 ## Next Steps
 
-- Define thin Android/iOS wrappers that call `shared/js/scrapeReply.js`.
-- Add an iOS bootstrap plan and initial Xcode-facing folder contract.
+- Finish real provider validation for iOS `send-to-all`, starting with `ChatGPT` and then other default slots.
+- Move Android onto the same shared JS contract without duplicating provider DOM logic.
 - Decide when the Android repo is ready to move into `android/`.

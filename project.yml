@@ -22,6 +22,14 @@ targets:
       - path: ios/VerityMobile
         excludes:
           - Resources/Info.plist
+      - path: shared/contracts/servicePresets.json
+        buildPhase: resources
+      - path: shared/js/sendMessage.js
+        buildPhase: resources
+      - path: shared/js/attachFile.js
+        buildPhase: resources
+      - path: shared/js/scrapeReply.js
+        buildPhase: resources
     settings:
       base:
         INFOPLIST_FILE: ios/VerityMobile/Resources/Info.plist
@@ -39,4 +47,3 @@ schemes:
       config: Debug
     archive:
       config: Release
-

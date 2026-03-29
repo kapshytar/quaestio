@@ -91,3 +91,20 @@ Target split:
 Do not move the Android project into `android/` until at least the first shared JS extraction is real.
 
 The monorepo should prove it can hold shared behavior before it absorbs the full native project.
+
+## Shared Space Rules
+
+- `shared/js/` is the source of truth for provider DOM behavior.
+- Android and iOS wrappers should execute the same shared DOM scripts, not fork them per platform.
+- Platform wrappers may add:
+  - webview lifecycle handling
+  - retry/fallback timing
+  - result verification
+  - native UI integration
+- Platform wrappers should not duplicate:
+  - provider selectors
+  - DOM traversal heuristics
+  - input/button finding logic
+  - scrape payload shape
+- If a fix is about what exists in the page DOM, it belongs in `shared/js/`.
+- If a fix is about when or how the script is executed in a platform webview, it belongs in the platform wrapper.

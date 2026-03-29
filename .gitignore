@@ -11,11 +11,12 @@ captures/
 
 # Xcode / SwiftPM
 DerivedData/
+VerityMobile.xcodeproj/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
 *.xcuserstate
 .swiftpm/
+.tools/
 
 # Node / shared tooling
 node_modules/
-

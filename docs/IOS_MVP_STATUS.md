@@ -16,44 +16,49 @@ Current source pieces:
 - `SettingsView.swift`
 - `SlotWebViewModel.swift`
 - `SharedScriptBridge.swift`
+- `SharedScriptLoader.swift`
+- `DesignSystem.swift`
 - service/state loaders for shared presets and shared JS
 - `project.yml` for XcodeGen-based project generation
-- `scripts/bootstrap-ios.sh` for local setup once Xcode is installed
+- `scripts/bootstrap-ios.sh` for local setup and project generation
 
 ## Intended MVP Shape
 
-- 4 chat slots rendered through `WKWebView`
-- separate merge tab
-- settings/debug tab
+- provider tabs across the top
+- one active `WKWebView` workspace at a time
+- one shared composer that sends to all enabled slots
+- merge/settings utilities attached to the top tab row
 - shared service presets loaded from `shared/contracts/servicePresets.json`
 - shared WebView JS loaded from `shared/js/`
 
 ## What Has Been Validated
 
 - shared JS files pass local JS syntax checks
-- Swift source tree exists and is organized for an Xcode project to consume
+- XcodeGen project generation works locally
+- `xcodebuild` succeeds against the iOS simulator target
+- simulator app bundle now includes:
+  - `sendMessage.js`
+  - `attachFile.js`
+  - `scrapeReply.js`
+  - `servicePresets.json`
+- iOS slot switching now preserves live provider sessions instead of force-reloading the home URL
+- inactive slots are preloaded so send-to-all can target more than the currently visible slot
 
-## What Is Blocked
+## What Is Still In Progress
 
-This machine currently has:
-
-- Swift command line tools
-- but not full Xcode
-
-Missing capabilities right now:
-
-- `xcodebuild`
-- `simctl`
-- iOS Simulator
-- real app bundle build validation
+- real send-to-all behavior still needs provider-by-provider validation
+- current iOS wrapper now shares DOM logic with Android, but Android still has a more mature retry/verification flow overall
+- simulator runtime can still be noisy and CPU-heavy, so final behavior should be confirmed on a real iPhone
+- merge/settings utility icons and shell density are still being polished
 
 ## Honest Status
 
-This is a near-launch source scaffold, not a proven running iOS MVP yet.
+This is no longer just a scaffold. It is a running iOS MVP shell with:
 
-The codebase is now far enough along that the next major milestone should be:
+1. shared bundled JS resources
+2. persistent slot webviews
+3. top-tab navigation
+4. shared bottom composer
+5. simulator-validated build/run flow
 
-1. install full Xcode
-2. run `./scripts/bootstrap-ios.sh`
-3. open or build the generated `.xcodeproj`
-4. fix compile/runtime issues against real simulator output
+It is still not a shipping client because send-to-all reliability and provider compatibility are not finished yet.
