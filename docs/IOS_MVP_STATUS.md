@@ -14,7 +14,11 @@ Current source pieces:
 - `WebViewSlot.swift`
 - `MergeView.swift`
 - `SettingsView.swift`
+- `SlotWebViewModel.swift`
+- `SharedScriptBridge.swift`
 - service/state loaders for shared presets and shared JS
+- `project.yml` for XcodeGen-based project generation
+- `scripts/bootstrap-ios.sh` for local setup once Xcode is installed
 
 ## Intended MVP Shape
 
@@ -50,7 +54,6 @@ This is a near-launch source scaffold, not a proven running iOS MVP yet.
 The codebase is now far enough along that the next major milestone should be:
 
 1. install full Xcode
-2. create `.xcodeproj`
-3. wire these files into the target
+2. run `./scripts/bootstrap-ios.sh`
+3. open or build the generated `.xcodeproj`
 4. fix compile/runtime issues against real simulator output
-

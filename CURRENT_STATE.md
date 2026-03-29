@@ -28,6 +28,8 @@
   - merge placeholder view
   - settings/debug placeholder view
   - `WKWebView` wrapper
+  - `project.yml` for XcodeGen-driven project generation
+  - `scripts/bootstrap-ios.sh` for local iOS project bootstrap once Xcode is installed
 
 ## In Progress
 
