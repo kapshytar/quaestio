@@ -17,15 +17,26 @@
   - `shared/js/`
   - `shared/contracts/`
   - `docs/`
+- Shared mobile assets now include:
+  - `shared/js/sendMessage.js`
+  - `shared/js/attachFile.js`
+  - `shared/contracts/servicePresets.json`
+- iOS source scaffold now exists under `ios/VerityMobile/` with:
+  - SwiftUI app entry
+  - 4-slot grid shell
+  - merge placeholder view
+  - settings/debug placeholder view
+  - `WKWebView` wrapper
 
 ## In Progress
 
 - Android code has not been moved yet from `../chat-aggregator-android`.
-- iOS code has not been created yet.
+- iOS source scaffold exists, but no `.xcodeproj` or simulator-validated app build exists yet.
 - Shared JS boundaries are not finalized yet.
 - First shared-surface candidates are now identified:
   - `../chat-aggregator-android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
   - scrape/injection fragments currently embedded in `ChatFragment.kt`
+- iOS runtime validation is blocked by the current machine missing full Xcode / simulator tooling.
 
 ## Current Contracts
 

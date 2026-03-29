@@ -8,5 +8,8 @@ Planned direction:
 - `WKWebView`-based chat slots
 - shared WebView JS loaded from `../shared/js`
 
-Initial Xcode project files have not been created yet.
+Current state:
 
+- source scaffold now exists under `ios/VerityMobile/`
+- no `.xcodeproj` has been created yet
+- full Xcode is still required before build/simulator validation
