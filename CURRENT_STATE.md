@@ -23,6 +23,9 @@
 - Android code has not been moved yet from `../chat-aggregator-android`.
 - iOS code has not been created yet.
 - Shared JS boundaries are not finalized yet.
+- First shared-surface candidates are now identified:
+  - `../chat-aggregator-android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
+  - scrape/injection fragments currently embedded in `ChatFragment.kt`
 
 ## Current Contracts
 
@@ -41,4 +44,3 @@
 - Identify the first Android files/functions that should migrate into `shared/js`.
 - Add an iOS bootstrap plan and initial Xcode-facing folder contract.
 - Decide when the Android repo is ready to move into `android/`.
-
