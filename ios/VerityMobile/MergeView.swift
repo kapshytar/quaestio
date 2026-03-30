@@ -8,6 +8,7 @@ struct MergeView: View {
     @State private var customModel: String = ""
     @State private var fallbackModels: String = ""
     @State private var mergeInstructions: String = ""
+    @State private var clarificationInstructions: String = ""
     @State private var selectedProviderId: String = ""
     @State private var isRunning = false
 
@@ -92,6 +93,12 @@ struct MergeView: View {
                             .foregroundStyle(AppTheme.textPrimary)
                             .padding(14)
                             .glassCard(padding: 0, radius: AppTheme.compactRadius)
+
+                        TextField("Clarification instructions", text: $clarificationInstructions, axis: .vertical)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(AppTheme.textPrimary)
+                            .padding(14)
+                            .glassCard(padding: 0, radius: AppTheme.compactRadius)
                     }
 
                     Button {
@@ -108,6 +115,33 @@ struct MergeView: View {
                     }
                     .buttonStyle(PrimaryActionButtonStyle())
                     .disabled(isRunning)
+
+                    if !appState.mergeOutput.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionLabel(text: "Clarify")
+
+                            TextField("Ask a follow-up about the merged answer", text: $appState.mergeClarificationText, axis: .vertical)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(AppTheme.textPrimary)
+                                .padding(14)
+                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
+
+                            Button {
+                                Task {
+                                    await runClarificationMerge()
+                                }
+                            } label: {
+                                HStack {
+                                    Text(isRunning ? "Running..." : "Run Clarification")
+                                    Spacer()
+                                    Image(systemName: "text.append")
+                                        .font(.system(size: 14, weight: .semibold))
+                                }
+                            }
+                            .buttonStyle(PrimaryActionButtonStyle())
+                            .disabled(isRunning)
+                        }
+                    }
 
                     VStack(alignment: .leading, spacing: 12) {
                         SectionLabel(text: "Output")
@@ -141,6 +175,9 @@ struct MergeView: View {
         if mergeInstructions.isEmpty {
             mergeInstructions = catalog?.defaultMergeInstructions ?? ""
         }
+        if clarificationInstructions.isEmpty {
+            clarificationInstructions = catalog?.defaultClarificationInstructions ?? ""
+        }
         syncProviderDefaults()
     }
 
@@ -171,6 +208,7 @@ struct MergeView: View {
             appState.mergeOutput = "No source replies were found in enabled slots."
             return
         }
+        appState.beginMergeConversation(responses: responses)
 
         let config = MergeRunConfig(
             provider: selectedProvider,
@@ -179,17 +217,65 @@ struct MergeView: View {
             customModel: customModel.trimmingCharacters(in: .whitespacesAndNewlines),
             fallbackModelsRaw: fallbackModels,
             sourcePrompt: prompt,
-            mergeInstructions: mergeInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+            mergeInstructions: mergeInstructions.trimmingCharacters(in: .whitespacesAndNewlines),
+            clarificationInstructions: clarificationInstructions.trimmingCharacters(in: .whitespacesAndNewlines),
+            clarificationText: "",
+            previousSummary: "",
+            isClarificationMerge: false,
+            originalResponses: responses
         )
 
         appState.statusMessage = "Running merge via \(selectedProvider.title)..."
         do {
             let result = try await MergeApiClient.merge(config: config, responses: responses)
-            appState.mergeOutput = result.text
+            appState.finishMergeConversation(with: result.text)
             appState.statusMessage = "Merge completed with \(responses.count) source reply(s)"
         } catch {
             appState.mergeOutput = "Merge failed: \(error.localizedDescription)"
             appState.statusMessage = "Merge failed"
+        }
+        isRunning = false
+    }
+
+    private func runClarificationMerge() async {
+        guard let selectedProvider else { return }
+        let clarification = appState.mergeClarificationText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clarification.isEmpty else {
+            appState.statusMessage = "Clarification text required"
+            return
+        }
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            appState.statusMessage = "Merge API key required"
+            return
+        }
+
+        isRunning = true
+        appState.appendClarificationUserTurn(clarification)
+        appState.statusMessage = "Running clarification via \(selectedProvider.title)..."
+
+        let config = MergeRunConfig(
+            provider: selectedProvider,
+            apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+            customEndpoint: customEndpoint.trimmingCharacters(in: .whitespacesAndNewlines),
+            customModel: customModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            fallbackModelsRaw: fallbackModels,
+            sourcePrompt: prompt,
+            mergeInstructions: mergeInstructions.trimmingCharacters(in: .whitespacesAndNewlines),
+            clarificationInstructions: clarificationInstructions.trimmingCharacters(in: .whitespacesAndNewlines),
+            clarificationText: clarification,
+            previousSummary: appState.mergeHistory,
+            isClarificationMerge: true,
+            originalResponses: appState.lastOriginalResponses
+        )
+
+        do {
+            let result = try await MergeApiClient.merge(config: config, responses: [:])
+            appState.finishMergeConversation(with: result.text)
+            appState.mergeClarificationText = ""
+            appState.statusMessage = "Clarification completed"
+        } catch {
+            appState.mergeOutput = "Clarification failed: \(error.localizedDescription)"
+            appState.statusMessage = "Clarification failed"
         }
         isRunning = false
     }

@@ -8,6 +8,11 @@ struct MergeRunConfig {
     let fallbackModelsRaw: String
     let sourcePrompt: String
     let mergeInstructions: String
+    let clarificationInstructions: String
+    let clarificationText: String
+    let previousSummary: String
+    let isClarificationMerge: Bool
+    let originalResponses: [String: String]
 }
 
 enum MergeApiClient {
@@ -19,7 +24,7 @@ enum MergeApiClient {
     }
 
     static func merge(config: MergeRunConfig, responses: [String: String]) async throws -> MergeResult {
-        if responses.isEmpty {
+        if responses.isEmpty && config.previousSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw NSError(domain: "MergeApiClient", code: 1, userInfo: [NSLocalizedDescriptionKey: "No source responses"])
         }
 
@@ -54,13 +59,97 @@ enum MergeApiClient {
         return result
     }
 
+    private static func buildClarificationHistory(
+        historyStr: String,
+        originalResponses: [String: String],
+        sourcePrompt: String
+    ) -> [[String: String]] {
+        let historyMessages = parseHistoryToMessages(historyStr)
+        var messages: [[String: String]] = []
+
+        let responsesBlock: String?
+        if originalResponses.isEmpty {
+            responsesBlock = nil
+        } else {
+            responsesBlock = originalResponses.map { model, text in
+                "### \(model)\n\(String(text.prefix(4000)))"
+            }
+            .joined(separator: "\n\n")
+        }
+
+        if let responsesBlock {
+            let prefix: String
+            if sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                prefix = "Here are the original AI model responses to synthesize:\n\n"
+            } else {
+                prefix = "The user's original question was: \"\(sourcePrompt)\"\n\nHere are the AI model responses to that question:\n\n"
+            }
+
+            messages.append([
+                "role": "user",
+                "content": "\(prefix)\(responsesBlock)\n\n(Your first task, shown below, was to synthesize these responses — identifying consensus and disagreements, and presenting a unified answer.)"
+            ])
+        } else if !sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            messages.append([
+                "role": "user",
+                "content": "The user's original question was: \"\(sourcePrompt)\"\n\n(Your first task, shown below, was to synthesize all AI responses to that question — identifying consensus and disagreements, and presenting a unified answer.)"
+            ])
+        }
+
+        if let firstAssistant = historyMessages.first, firstAssistant["role"] == "assistant" {
+            messages.append(firstAssistant)
+            messages.append(contentsOf: historyMessages.dropFirst())
+        } else {
+            messages.append(contentsOf: historyMessages)
+        }
+
+        return messages
+    }
+
+    private static func parseHistoryToMessages(_ historyStr: String) -> [[String: String]] {
+        let trimmed = historyStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let normalized = trimmed.replacingOccurrences(
+            of: "\n\nUser:",
+            with: "\n§§SPLIT§§User:",
+            options: .regularExpression
+        )
+        .replacingOccurrences(
+            of: "\n\nAssistant:",
+            with: "\n§§SPLIT§§Assistant:",
+            options: .regularExpression
+        )
+
+        let parts = normalized.components(separatedBy: "§§SPLIT§§")
+        var messages: [[String: String]] = []
+        for part in parts {
+            if part.hasPrefix("User:") {
+                messages.append(["role": "user", "content": String(part.dropFirst("User:".count)).trimmingCharacters(in: .whitespacesAndNewlines)])
+            } else if part.hasPrefix("Assistant:") {
+                messages.append(["role": "assistant", "content": String(part.dropFirst("Assistant:".count)).trimmingCharacters(in: .whitespacesAndNewlines)])
+            }
+        }
+
+        if messages.last?["role"] == "user" {
+            messages.removeLast()
+        }
+        return messages
+    }
+
     private static func callOpenAICompatible(config: MergeRunConfig, responses: [String: String]) async throws -> MergeResult {
         let endpoint = config.customEndpoint.isEmpty ? config.provider.defaultEndpoint : config.customEndpoint
         let models = buildModelFallbackChain(
             primary: config.customModel.isEmpty ? config.provider.defaultModel : config.customModel,
             raw: config.fallbackModelsRaw
         )
-        let prompt = buildMergePrompt(config: config, responses: responses)
+        let prompt = config.isClarificationMerge ? config.clarificationText : buildMergePrompt(config: config, responses: responses)
+        let systemPrompt = config.isClarificationMerge
+            ? (config.clarificationInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "You are a helpful assistant continuing a conversation. Respond naturally and helpfully." : config.clarificationInstructions)
+            : "Synthesize multi-model output."
+        let chatHistory = config.isClarificationMerge
+            ? buildClarificationHistory(historyStr: config.previousSummary, originalResponses: config.originalResponses, sourcePrompt: config.sourcePrompt)
+            : nil
 
         var attempted: [String] = []
         var lastError: Error?
@@ -72,6 +161,8 @@ enum MergeApiClient {
                     apiKey: config.apiKey,
                     model: model,
                     prompt: prompt,
+                    systemPrompt: systemPrompt,
+                    chatHistory: chatHistory,
                     providerId: config.provider.id,
                     extraHeaders: config.provider.id == "openrouter_api" ? [
                         "HTTP-Referer": "https://github.com/kvitaliq-maker/chat-aggregator-mobile",
@@ -95,16 +186,21 @@ enum MergeApiClient {
         apiKey: String,
         model: String,
         prompt: String,
+        systemPrompt: String,
+        chatHistory: [[String: String]]?,
         providerId: String,
         extraHeaders: [String: String],
         attemptedModels: [String]
     ) async throws -> MergeResult {
+        var messages: [[String: String]] = [["role": "system", "content": systemPrompt]]
+        if let chatHistory {
+            messages.append(contentsOf: chatHistory)
+        }
+        messages.append(["role": "user", "content": prompt])
+
         let payload: [String: Any] = [
             "model": model,
-            "messages": [
-                ["role": "system", "content": "Synthesize multi-model output."],
-                ["role": "user", "content": prompt]
-            ],
+            "messages": messages,
             "temperature": 0.2,
             "stream": false
         ]
@@ -125,13 +221,20 @@ enum MergeApiClient {
     private static func callClaude(config: MergeRunConfig, responses: [String: String]) async throws -> MergeResult {
         let endpoint = config.customEndpoint.isEmpty ? config.provider.defaultEndpoint : config.customEndpoint
         let model = config.customModel.isEmpty ? config.provider.defaultModel : config.customModel
+        let prompt = config.isClarificationMerge ? config.clarificationText : buildMergePrompt(config: config, responses: responses)
+        let systemPrompt = config.isClarificationMerge
+            ? (config.clarificationInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "You are a helpful assistant continuing a conversation. Respond naturally and helpfully." : config.clarificationInstructions)
+            : "Synthesize multi-model output."
+        let chatHistory = config.isClarificationMerge
+            ? buildClarificationHistory(historyStr: config.previousSummary, originalResponses: config.originalResponses, sourcePrompt: config.sourcePrompt)
+            : nil
+        var messages = chatHistory ?? []
+        messages.append(["role": "user", "content": prompt])
         let payload: [String: Any] = [
             "model": model,
             "max_tokens": 1200,
-            "system": "Synthesize multi-model output.",
-            "messages": [
-                ["role": "user", "content": buildMergePrompt(config: config, responses: responses)]
-            ]
+            "system": systemPrompt,
+            "messages": messages
         ]
         let json = try await postJSON(
             endpoint: endpoint,
@@ -154,14 +257,31 @@ enum MergeApiClient {
         let model = config.customModel.isEmpty ? config.provider.defaultModel : config.customModel
         let base = (config.customEndpoint.isEmpty ? config.provider.defaultEndpoint : config.customEndpoint).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let endpoint = "\(base)/models/\(model):generateContent?key=\(config.apiKey)"
+        let prompt = config.isClarificationMerge ? config.clarificationText : buildMergePrompt(config: config, responses: responses)
+        let systemPrompt = config.isClarificationMerge
+            ? (config.clarificationInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "You are a helpful assistant continuing a conversation. Respond naturally and helpfully." : config.clarificationInstructions)
+            : "Synthesize multi-model output."
+        let chatHistory = config.isClarificationMerge
+            ? buildClarificationHistory(historyStr: config.previousSummary, originalResponses: config.originalResponses, sourcePrompt: config.sourcePrompt)
+            : nil
+        var contents: [[String: Any]] = []
+        if let chatHistory {
+            for message in chatHistory {
+                contents.append([
+                    "role": message["role"] == "assistant" ? "model" : "user",
+                    "parts": [["text": message["content"] ?? ""]]
+                ])
+            }
+        }
+        contents.append([
+            "role": "user",
+            "parts": [["text": prompt]]
+        ])
         let payload: [String: Any] = [
             "system_instruction": [
-                "parts": [["text": "Synthesize multi-model output."]]
+                "parts": [["text": systemPrompt]]
             ],
-            "contents": [[
-                "role": "user",
-                "parts": [["text": buildMergePrompt(config: config, responses: responses)]]
-            ]],
+            "contents": contents,
             "generationConfig": ["temperature": 0.2]
         ]
         let json = try await postJSON(endpoint: endpoint, headers: [:], body: payload)

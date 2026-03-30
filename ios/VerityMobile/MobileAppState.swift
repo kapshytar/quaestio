@@ -10,6 +10,8 @@ final class MobileAppState: ObservableObject {
         didSet { persistWorkspaceState() }
     }
     @Published var mergeOutput: String = ""
+    @Published var mergeHistory: String = ""
+    @Published var mergeClarificationText: String = ""
     @Published var statusMessage: String = "MVP scaffold"
     @Published var composerText: String = ""
     @Published var isSendingComposer: Bool = false
@@ -21,6 +23,7 @@ final class MobileAppState: ObservableObject {
 
     let presets: [String: ServicePreset]
     private let webModels: [Int: SlotWebViewModel]
+    private(set) var lastOriginalResponses: [String: String] = [:]
 
     init() {
         let catalog = ServicePresetLoader.loadCatalog()
@@ -127,6 +130,39 @@ final class MobileAppState: ObservableObject {
         }
 
         return collected
+    }
+
+    func resetMergeConversation() {
+        mergeOutput = ""
+        mergeHistory = ""
+        mergeClarificationText = ""
+        lastOriginalResponses = [:]
+    }
+
+    func beginMergeConversation(responses: [String: String]) {
+        lastOriginalResponses = responses
+        mergeHistory = ""
+        mergeClarificationText = ""
+    }
+
+    func finishMergeConversation(with assistantResponse: String) {
+        let clean = assistantResponse.trimmingCharacters(in: .whitespacesAndNewlines)
+        mergeOutput = clean
+        if mergeHistory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            mergeHistory = "Assistant: \(clean)"
+        } else {
+            mergeHistory += "\n\nAssistant: \(clean)"
+        }
+    }
+
+    func appendClarificationUserTurn(_ text: String) {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        if mergeHistory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            mergeHistory = "User: \(clean)"
+        } else {
+            mergeHistory += "\n\nUser: \(clean)"
+        }
     }
 
     func updateSelectedSlotService(to serviceId: String) {
