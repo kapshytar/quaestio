@@ -6,6 +6,7 @@ struct MergeProviderDescriptor: Codable, Hashable, Identifiable {
     let defaultEndpoint: String
     let defaultModel: String
     let family: String
+    let supportsPreinstalledKey: Bool
 }
 
 struct MergeConfigCatalog: Codable {

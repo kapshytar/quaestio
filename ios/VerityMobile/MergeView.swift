@@ -10,6 +10,7 @@ struct MergeView: View {
     @State private var mergeInstructions: String = ""
     @State private var clarificationInstructions: String = ""
     @State private var selectedProviderId: String = ""
+    @State private var usePreinstalledKey = true
     @State private var isRunning = false
 
     private let catalog = MergeCatalogLoader.loadCatalog()
@@ -46,14 +47,30 @@ struct MergeView: View {
                                 syncProviderDefaults()
                             }
 
-                            TextField("API key", text: $apiKey)
-                                .textContentType(.password)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(AppTheme.textPrimary)
-                                .padding(14)
-                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
+                            if selectedProvider.supportsPreinstalledKey {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("API Key Source")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(AppTheme.textSecondary)
+
+                                    Picker("API Key Source", selection: $usePreinstalledKey) {
+                                        Text("Use Preinstalled Key").tag(true)
+                                        Text("Enter Custom Key").tag(false)
+                                    }
+                                    .pickerStyle(.segmented)
+                                }
+                            }
+
+                            if !selectedProvider.supportsPreinstalledKey || !usePreinstalledKey {
+                                TextField("API key", text: $apiKey)
+                                    .textContentType(.password)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                    .padding(14)
+                                    .glassCard(padding: 0, radius: AppTheme.compactRadius)
+                            }
 
                             TextField("Endpoint", text: $customEndpoint, axis: .vertical)
                                 .font(.system(size: 14, weight: .medium))
@@ -183,6 +200,11 @@ struct MergeView: View {
 
     private func syncProviderDefaults() {
         guard let selectedProvider else { return }
+        if !selectedProvider.supportsPreinstalledKey {
+            usePreinstalledKey = false
+        } else if selectedProvider.id == "deepseek_api" && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            usePreinstalledKey = true
+        }
         if customEndpoint.isEmpty || customEndpoint == providers.first(where: { $0.id == selectedProviderId })?.defaultEndpoint {
             customEndpoint = selectedProvider.defaultEndpoint
         }
@@ -193,7 +215,8 @@ struct MergeView: View {
 
     private func runMerge() async {
         guard let selectedProvider else { return }
-        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let resolvedApiKey = resolvedApiKey(for: selectedProvider)
+        guard !resolvedApiKey.isEmpty else {
             appState.statusMessage = "Merge API key required"
             appState.mergeOutput = "Merge API key required."
             return
@@ -212,7 +235,7 @@ struct MergeView: View {
 
         let config = MergeRunConfig(
             provider: selectedProvider,
-            apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+            apiKey: resolvedApiKey,
             customEndpoint: customEndpoint.trimmingCharacters(in: .whitespacesAndNewlines),
             customModel: customModel.trimmingCharacters(in: .whitespacesAndNewlines),
             fallbackModelsRaw: fallbackModels,
@@ -244,7 +267,8 @@ struct MergeView: View {
             appState.statusMessage = "Clarification text required"
             return
         }
-        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let resolvedApiKey = resolvedApiKey(for: selectedProvider)
+        guard !resolvedApiKey.isEmpty else {
             appState.statusMessage = "Merge API key required"
             return
         }
@@ -255,7 +279,7 @@ struct MergeView: View {
 
         let config = MergeRunConfig(
             provider: selectedProvider,
-            apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+            apiKey: resolvedApiKey,
             customEndpoint: customEndpoint.trimmingCharacters(in: .whitespacesAndNewlines),
             customModel: customModel.trimmingCharacters(in: .whitespacesAndNewlines),
             fallbackModelsRaw: fallbackModels,
@@ -278,5 +302,12 @@ struct MergeView: View {
             appState.statusMessage = "Clarification failed"
         }
         isRunning = false
+    }
+
+    private func resolvedApiKey(for provider: MergeProviderDescriptor) -> String {
+        if provider.supportsPreinstalledKey && usePreinstalledKey && provider.id == "deepseek_api" {
+            return KeyObfuscation.getDeepSeekPreinstalledKey().trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
