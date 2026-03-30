@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_change_service"
+        android:title="@string/action_change_service" />
+    <item
+        android:id="@+id/action_reload"
+        android:title="@string/action_reload" />
+    <item
+        android:id="@+id/action_hard_reload"
+        android:title="@string/action_hard_reload" />
+    <item
+        android:id="@+id/action_import_cookies"
+        android:title="@string/action_import_cookies" />
+</menu>

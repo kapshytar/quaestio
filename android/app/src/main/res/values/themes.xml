@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Verity" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorOnPrimary">@color/text_primary</item>
+        <item name="colorSecondary">@color/accent_secondary</item>
+        <item name="colorOnSecondary">@color/text_primary</item>
+        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <item name="android:navigationBarColor">?attr/colorSurface</item>
+        <item name="colorSurface">@color/bg_surface</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="tabStyle">@style/ChatTab</item>
+    </style>
+
+    <style name="ChatTab" parent="Widget.Material3.TabLayout">
+        <item name="tabIndicatorColor">@color/accent</item>
+        <item name="tabTextColor">@color/text_secondary</item>
+        <item name="tabSelectedTextColor">@color/text_primary</item>
+        <item name="tabBackground">@color/bg_surface</item>
+    </style>
+
+    <style name="ServiceDialogTheme" parent="Theme.Material3.DayNight.Dialog.Alert">
+        <item name="colorPrimary">@color/accent</item>
+    </style>
+</resources>

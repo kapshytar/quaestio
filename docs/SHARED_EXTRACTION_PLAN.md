@@ -2,7 +2,7 @@
 
 ## Goal
 
-Define the first Android-origin logic that should move into `shared/js/` and later be consumed by both:
+Define the Android-origin logic that should move into `shared/js/` and later be consumed by both:
 
 - Android WebView wrappers
 - iOS WKWebView wrappers
@@ -13,7 +13,7 @@ Define the first Android-origin logic that should move into `shared/js/` and lat
 
 Current source:
 
-- `../chat-aggregator-android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
+- `android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
 
 Why it is a good first move:
 
@@ -35,7 +35,7 @@ Expected split:
 
 Current source:
 
-- `../chat-aggregator-android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
+- `android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
 
 Why it is a good candidate:
 
@@ -52,7 +52,7 @@ Expected split:
 Current source:
 
 - scrape-related JavaScript embedded in:
-  - `../chat-aggregator-android/app/src/main/java/com/chataggregator/app/ChatFragment.kt`
+  - `android/app/src/main/java/com/chataggregator/app/ChatFragment.kt`
 
 Status:
 
@@ -88,9 +88,9 @@ Target split:
 
 ## Practical Rule
 
-Do not move the Android project into `android/` until at least the first shared JS extraction is real.
+The Android project now belongs in `android/`.
 
-The monorepo should prove it can hold shared behavior before it absorbs the full native project.
+The migration should preserve Android as the first implementation source while shared behavior is extracted into `shared/js/`.
 
 ## Shared Space Rules
 
@@ -108,3 +108,9 @@ The monorepo should prove it can hold shared behavior before it absorbs the full
   - scrape payload shape
 - If a fix is about what exists in the page DOM, it belongs in `shared/js/`.
 - If a fix is about when or how the script is executed in a platform webview, it belongs in the platform wrapper.
+
+## Non-Goals For Shared JS
+
+- `shared/js/` should not pretend to solve provider policy restrictions.
+- If a provider blocks embedded auth with errors like `disallowed_useragent`, that is a compatibility limitation of the embedded browser path, not something to "fix" by adding more DOM selectors.
+- Social login, OAuth handoff, cookie import/export, and native account/session bridging should stay documented as platform/provider compatibility concerns outside the shared DOM layer.

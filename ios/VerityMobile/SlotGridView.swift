@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import WebKit
 
 private struct MergeConvergeIcon: View {
     var body: some View {
@@ -31,6 +33,9 @@ private struct MergeConvergeIcon: View {
 struct SlotGridView: View {
     @EnvironmentObject private var appState: MobileAppState
     @Binding var selectedSection: RootSection
+    @State private var showsSlotControlStrip = false
+    @State private var slotAddressDraft = ""
+    @StateObject private var systemAuth = SystemAuthCoordinator()
 
     private var selectedSlot: SlotState? {
         appState.slots.first { $0.id == appState.selectedSlotId } ?? appState.slots.first
@@ -43,22 +48,45 @@ struct SlotGridView: View {
                 .padding(.top, 6)
                 .padding(.bottom, 4)
 
-            if let slot = selectedSlot {
-                WebViewSlot(slot: slot, model: appState.webModel(for: slot.id))
-                .id(slot.id)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(AppTheme.border, lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(0.16), radius: 10, x: 0, y: 6)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 4)
-            } else {
-                ContentUnavailableView("No Slots", systemImage: "square.slash")
+            ZStack(alignment: .top) {
+                if let slot = selectedSlot {
+                    let model = appState.webModel(for: slot.id)
+
+                    WebViewSlot(slot: slot, model: model)
+                    .id(slot.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(AppTheme.border, lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.16), radius: 10, x: 0, y: 6)
+
+                    if let popupWebView = model.popupWebView {
+                        popupOverlay(webView: popupWebView) {
+                            model.closePopup()
+                        }
+                        .padding(.horizontal, 22)
+                        .padding(.top, 18)
+                        .padding(.bottom, 18)
+                        .zIndex(30)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                    }
+                } else {
+                    ContentUnavailableView("No Slots", systemImage: "square.slash")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+
+                if showsSlotControlStrip, let slot = selectedSlot {
+                    slotControlStrip(for: slot)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .zIndex(20)
+                }
             }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 4)
 
             bottomPanel
                 .padding(.horizontal, 10)
@@ -68,6 +96,17 @@ struct SlotGridView: View {
         .shellBackground()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
+        .animation(.spring(response: 0.28, dampingFraction: 0.88), value: showsSlotControlStrip)
+        .onAppear {
+            syncSlotAddressDraft()
+        }
+        .onChange(of: appState.selectedSlotId) { _, _ in
+            showsSlotControlStrip = false
+            syncSlotAddressDraft()
+        }
+        .onChange(of: appState.slots) { _, _ in
+            syncSlotAddressDraft()
+        }
     }
 
     private var slotTabBar: some View {
@@ -76,7 +115,12 @@ struct SlotGridView: View {
                 HStack(spacing: -6) {
                     ForEach(appState.slots) { slot in
                         Button {
-                            appState.selectedSlotId = slot.id
+                            if appState.selectedSlotId == slot.id {
+                                syncSlotAddressDraft()
+                                showsSlotControlStrip.toggle()
+                            } else {
+                                appState.selectedSlotId = slot.id
+                            }
                         } label: {
                             HStack(spacing: 8) {
                                 Circle()
@@ -120,8 +164,14 @@ struct SlotGridView: View {
                                         lineWidth: 1
                                     )
                             )
-                            .zIndex(appState.selectedSlotId == slot.id ? 2 : 1)
+                            .shadow(
+                                color: appState.selectedSlotId == slot.id ? Color.black.opacity(0.18) : .clear,
+                                radius: 10,
+                                x: 0,
+                                y: -1
+                            )
                         }
+                        .zIndex(appState.selectedSlotId == slot.id ? 100 : Double(99 - slot.id))
                         .buttonStyle(.plain)
                     }
                 }
@@ -139,6 +189,115 @@ struct SlotGridView: View {
             }
             .padding(.bottom, 1)
         }
+    }
+
+    private func slotControlStrip(for slot: SlotState) -> some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Menu {
+                    ForEach(Array(appState.presets.values).sorted(by: { $0.name < $1.name })) { preset in
+                        Button(preset.name) {
+                            appState.updateSelectedSlotService(to: preset.id)
+                            syncSlotAddressDraft()
+                            showsSlotControlStrip = false
+                        }
+                    }
+                } label: {
+                    stripPillLabel(
+                        systemName: "square.grid.2x2",
+                        text: slot.title
+                    )
+                }
+
+                Menu {
+                    Button("System Auth") {
+                        openSystemAuth(for: slot)
+                    }
+
+                    Button("Open in Safari") {
+                        openSafari(for: slot)
+                    }
+                }
+                label: {
+                    stripPillLabel(
+                        systemName: "safari",
+                        text: "Auth"
+                    )
+                }
+
+                Button {
+                    appState.stopSelectedSlotLoading()
+                    showsSlotControlStrip = false
+                } label: {
+                    stripIconButton(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    appState.reloadSelectedSlot()
+                    showsSlotControlStrip = false
+                } label: {
+                    stripIconButton(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "link")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AppTheme.textMuted)
+
+                    TextField("Paste URL or provider", text: $slotAddressDraft)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.go)
+                        .onSubmit {
+                            appState.navigateSelectedSlot(to: slotAddressDraft)
+                            syncSlotAddressDraft()
+                            showsSlotControlStrip = false
+                        }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                Button {
+                    appState.navigateSelectedSlot(to: slotAddressDraft)
+                    syncSlotAddressDraft()
+                    showsSlotControlStrip = false
+                } label: {
+                    Text("Go")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(AppTheme.actionText)
+                        .frame(width: 44, height: 40)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(AppTheme.actionFill)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+
+            if systemAuth.status != "idle" {
+                Text(systemAuth.status)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(2)
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.22), radius: 18, x: 0, y: 10)
     }
 
     private var bottomPanel: some View {
@@ -278,5 +437,91 @@ struct SlotGridView: View {
             .frame(width: 26, height: 26)
         }
         .buttonStyle(.plain)
+    }
+
+    private func stripPillLabel(systemName: String, text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemName)
+                .font(.system(size: 11.5, weight: .bold))
+            Text(text)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(AppTheme.textPrimary)
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .background(Color.white.opacity(0.06))
+        .clipShape(Capsule(style: .continuous))
+    }
+
+    private func stripIconButton(systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(AppTheme.textPrimary)
+            .frame(width: 34, height: 34)
+            .background(Color.white.opacity(0.06))
+            .clipShape(Circle())
+    }
+
+    private func popupOverlay(webView: WKWebView, onClose: @escaping () -> Void) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("Sign-In Window")
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(AppTheme.textPrimary)
+
+                Spacer(minLength: 0)
+
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.black.opacity(0.18))
+
+            HostedWebView(webView: webView)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.white)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.28), radius: 24, x: 0, y: 16)
+    }
+
+    private func syncSlotAddressDraft() {
+        slotAddressDraft = selectedSlot?.url ?? ""
+    }
+
+    private func openSystemAuth(for slot: SlotState) {
+        let candidate = appState.webModel(for: slot.id).currentLocationHref
+        let rawURL = candidate.isEmpty ? slot.url : candidate
+        guard let url = URL(string: rawURL) else { return }
+        systemAuth.start(url: url)
+        showsSlotControlStrip = false
+    }
+
+    private func openSafari(for slot: SlotState) {
+        let candidate = appState.webModel(for: slot.id).currentLocationHref
+        let rawURL = candidate.isEmpty ? slot.url : candidate
+        guard let url = URL(string: rawURL) else { return }
+        UIApplication.shared.open(url)
+        showsSlotControlStrip = false
     }
 }

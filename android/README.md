@@ -1,10 +1,14 @@
-# Android Placeholder
+# Android
 
-This directory is reserved for the Android project after migration into the mobile monorepo.
+This directory is now the Android home inside `chat-aggregator-mobile`.
 
-Current live source still lives in:
+Rules:
 
-- `../../chat-aggregator-android`
+- During migration, Android remains the first implementation source for mobile features.
+- The target state is shared-first: shared logic and shared assets should become the source of truth for both Android and iOS.
+- Native Android code should remain only where platform behavior cannot be cleanly shared.
 
-Do not treat this directory as the Android source of truth yet.
+Notes:
 
+- This directory was migrated from `../chat-aggregator-android`.
+- The old standalone repo is now a migration source and rollback reference, not the intended long-term home.

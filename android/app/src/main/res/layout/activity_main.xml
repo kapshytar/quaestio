@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark">
+
+    <!-- Background for top bar to cover gaps -->
+    <View
+        android:id="@+id/topBarBg"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/bg_surface"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="@id/tabLayout"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Narrow left tab with project selector chevron -->
+    <LinearLayout
+        android:id="@+id/projectTabContainer"
+        android:layout_width="34dp"
+        android:layout_height="0dp"
+        android:background="@color/bg_surface"
+        android:gravity="center"
+        android:paddingVertical="1dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:orientation="vertical"
+        app:layout_constraintTop_toTopOf="@id/tabLayout"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="@id/tabLayout">
+
+        <ImageView
+            android:id="@+id/projectChevron"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:src="@drawable/ic_chevron_right"
+            android:tint="@color/text_secondary"
+            android:rotation="0"
+            android:contentDescription="@null" />
+    </LinearLayout>
+
+    <!-- Tab bar at top -->
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/tabLayout"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="@color/bg_surface"
+        app:tabBackground="@color/bg_surface"
+        app:tabMode="fixed"
+        app:tabGravity="fill"
+        app:tabIndicatorColor="@color/accent"
+        app:tabTextColor="@color/text_secondary"
+        app:tabSelectedTextColor="@color/accent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toEndOf="@id/projectTabContainer"
+        app:layout_constraintEnd_toStartOf="@id/btnSettings" />
+
+    <!-- Subtle lavender separator for Merge tab -->
+    <View
+        android:id="@+id/tabSeparator"
+        android:layout_width="1.5dp"
+        android:layout_height="24dp"
+        android:background="#E0CBFF"
+        app:layout_constraintTop_toTopOf="@id/tabLayout"
+        app:layout_constraintBottom_toBottomOf="@id/tabLayout"
+        app:layout_constraintStart_toStartOf="@id/tabLayout" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnSettings"
+        style="@style/Widget.Material3.Button.IconButton"
+        android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:layout_marginEnd="2dp"
+        android:contentDescription="@string/settings"
+        android:background="@color/bg_surface"
+        app:icon="@drawable/ic_settings"
+        app:iconSize="16dp"
+        app:iconTint="@color/text_primary"
+        app:layout_constraintTop_toTopOf="@id/tabLayout"
+        app:layout_constraintBottom_toBottomOf="@id/tabLayout"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <LinearLayout
+        android:id="@+id/findBarContainer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="@color/bg_surface"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="6dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/tabLayout"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <EditText
+            android:id="@+id/findInput"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_input"
+            android:hint="@string/find_in_page_hint"
+            android:imeOptions="actionSearch"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:maxLines="1"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_secondary" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnFindPrev"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginStart="4dp"
+            android:minWidth="0dp"
+            android:text="@string/find_prev" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnFindNext"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginStart="4dp"
+            android:minWidth="0dp"
+            android:text="@string/find_next" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnFindClose"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginStart="4dp"
+            android:minWidth="0dp"
+            android:text="@string/find_close" />
+    </LinearLayout>
+
+    <!-- WebView pages -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/viewPager"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toBottomOf="@id/findBarContainer"
+        app:layout_constraintBottom_toTopOf="@id/bottomPanel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <View
+        android:id="@+id/edgeSwipeLeft"
+        android:layout_width="28dp"
+        android:layout_height="0dp"
+        android:background="@android:color/transparent"
+        android:importantForAccessibility="no"
+        app:layout_constraintTop_toTopOf="@id/viewPager"
+        app:layout_constraintBottom_toBottomOf="@id/viewPager"
+        app:layout_constraintStart_toStartOf="@id/viewPager" />
+
+    <View
+        android:id="@+id/edgeSwipeRight"
+        android:layout_width="28dp"
+        android:layout_height="0dp"
+        android:background="@android:color/transparent"
+        android:importantForAccessibility="no"
+        app:layout_constraintTop_toTopOf="@id/viewPager"
+        app:layout_constraintBottom_toBottomOf="@id/viewPager"
+        app:layout_constraintEnd_toEndOf="@id/viewPager" />
+
+    <LinearLayout
+        android:id="@+id/bottomPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@color/bg_surface"
+        android:padding="12dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- Slot enable toggles row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <HorizontalScrollView
+                android:id="@+id/checkboxRow"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fillViewport="true"
+                android:overScrollMode="never"
+                android:scrollbars="none"
+                android:paddingBottom="2dp">
+
+                <com.google.android.material.chip.ChipGroup
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:chipSpacingHorizontal="8dp"
+                    app:singleLine="true"
+                    app:selectionRequired="false"
+                    app:singleSelection="false">
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/cbSlot0"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:checked="true"
+                    android:text="S1"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:checkedIconVisible="false"
+                    app:chipBackgroundColor="@color/chip_bg_selector"
+                    app:chipCornerRadius="16dp"
+                    app:chipStrokeColor="@color/chip_stroke_selector"
+                    app:chipStrokeWidth="1.5dp"
+                    app:chipSurfaceColor="@android:color/transparent"
+                    app:ensureMinTouchTargetSize="false"
+                    app:chipMinHeight="32dp"
+                    app:rippleColor="@color/chip_checked_bg"
+                    android:textColor="@color/chip_text_selector" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/cbSlot1"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:checked="true"
+                    android:text="S2"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:checkedIconVisible="false"
+                    app:chipBackgroundColor="@color/chip_bg_selector"
+                    app:chipCornerRadius="16dp"
+                    app:chipStrokeColor="@color/chip_stroke_selector"
+                    app:chipStrokeWidth="1.5dp"
+                    app:chipSurfaceColor="@android:color/transparent"
+                    app:ensureMinTouchTargetSize="false"
+                    app:chipMinHeight="32dp"
+                    app:rippleColor="@color/chip_checked_bg"
+                    android:textColor="@color/chip_text_selector" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/cbSlot2"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:checked="true"
+                    android:text="S3"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:checkedIconVisible="false"
+                    app:chipBackgroundColor="@color/chip_bg_selector"
+                    app:chipCornerRadius="16dp"
+                    app:chipStrokeColor="@color/chip_stroke_selector"
+                    app:chipStrokeWidth="1.5dp"
+                    app:chipSurfaceColor="@android:color/transparent"
+                    app:ensureMinTouchTargetSize="false"
+                    app:chipMinHeight="32dp"
+                    app:rippleColor="@color/chip_checked_bg"
+                    android:textColor="@color/chip_text_selector" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/cbSlot3"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:checked="true"
+                    android:text="S4"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    app:checkedIconVisible="false"
+                    app:chipBackgroundColor="@color/chip_bg_selector"
+                    app:chipCornerRadius="16dp"
+                    app:chipStrokeColor="@color/chip_stroke_selector"
+                    app:chipStrokeWidth="1.5dp"
+                    app:chipSurfaceColor="@android:color/transparent"
+                    app:ensureMinTouchTargetSize="false"
+                    app:chipMinHeight="32dp"
+                    app:rippleColor="@color/chip_checked_bg"
+                    android:textColor="@color/chip_text_selector" />
+
+                </com.google.android.material.chip.ChipGroup>
+            </HorizontalScrollView>
+
+            <View
+                android:id="@+id/sessionStateDot"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_marginStart="8dp"
+                android:layout_marginEnd="4dp"
+                android:background="@drawable/bg_session_state_dot" />
+
+            <TextView
+                android:id="@+id/tvSessionId"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- Message input row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <EditText
+                android:id="@+id/messageInput"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="@string/hint_message"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary"
+                android:background="@drawable/bg_input"
+                android:padding="10dp"
+                android:textSize="14sp"
+                android:maxLines="4"
+                android:inputType="textMultiLine"
+                android:imeOptions="actionSend"
+                android:importantForAutofill="no" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnAttach"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_marginStart="6dp"
+                android:contentDescription="@string/btn_attach"
+                app:icon="@drawable/ic_attach_file"
+                app:iconTint="@color/text_primary"
+                app:iconSize="24dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSend"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_marginStart="6dp"
+                android:contentDescription="@string/btn_send"
+                app:icon="@drawable/ic_action_send"
+                app:iconTint="@android:color/white"
+                app:backgroundTint="@color/action_primary"
+                app:iconSize="24dp" />
+
+        </LinearLayout>
+    </LinearLayout>
+
+    <View
+        android:id="@+id/projectPanelScrim"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:alpha="0"
+        android:background="#66000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <include
+        android:id="@+id/projectPanel"
+        layout="@layout/project_selector_panel"
+        android:layout_width="280dp"
+        android:layout_height="0dp"
+        android:translationX="-280dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

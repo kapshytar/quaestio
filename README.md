@@ -1,6 +1,6 @@
 # chat-aggregator-mobile
 
-Monorepo scaffold for the future shared mobile workspace:
+Shared mobile monorepo for the Verity clients:
 
 - `android/`
 - `ios/`
@@ -9,16 +9,16 @@ Monorepo scaffold for the future shared mobile workspace:
 
 ## Current Status
 
-This repo is intentionally starting as a scaffold only.
+This repo is now the target mobile workspace.
 
-- The live Android app still exists in the sibling repo:
-  - `../chat-aggregator-android`
-- iOS code has not been ported yet.
-- `shared/js` is reserved for platform-agnostic WebView injection/scrape logic.
+- iOS work lives here and is actively developed in `ios/`.
+- Android is being moved here under `android/`.
+- `shared/js` and `shared/contracts` are the shared source of truth for cross-platform WebView/provider behavior.
+- The sibling repo `../chat-aggregator-android` is now a migration source and rollback reference, not the intended long-term home.
 
 ## Goal
 
-Move from separate mobile clients toward one mobile monorepo where:
+Keep mobile development in one repo where:
 
 - Android lives under `android/`
 - iOS lives under `ios/`
@@ -37,10 +37,15 @@ chat-aggregator-mobile/
 └── docs/
 ```
 
-## Immediate Next Steps
+## Working Rule
 
-1. Define the shared JS surface area before copying code.
-2. Document which Android files will become the migration source.
-3. Create the iOS project shell around the same shared contracts.
-4. Only then move Android code into `android/`.
+- `Android first during migration`
+- `shared first as the target state`
+- `native only where necessary`
 
+## Current Migration Direction
+
+1. Keep the migrated Android project in `android/` as the mobile Android home.
+2. Keep shared provider DOM logic in `shared/js/`.
+3. Keep shared payload/config/contracts in `shared/contracts/`.
+4. Let iOS and Android wrap shared logic only where platform-native behavior is required.

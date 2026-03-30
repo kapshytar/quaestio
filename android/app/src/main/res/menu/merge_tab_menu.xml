@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_edit_merge_instructions"
+        android:title="@string/merge_edit_instructions" />
+    <item
+        android:id="@+id/action_edit_clarification_instructions"
+        android:title="@string/clarification_edit_instructions" />
+    <item
+        android:id="@+id/action_toggle_merge_provider"
+        android:title="@string/merge_edit_provider_model" />
+</menu>

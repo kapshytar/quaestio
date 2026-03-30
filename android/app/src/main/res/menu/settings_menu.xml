@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_debug_mode"
+        android:title="@string/settings_debug_mode"
+        android:checkable="true" />
+    <item
+        android:id="@+id/action_detailed_logging"
+        android:title="@string/settings_detailed_logging"
+        android:checkable="true" />
+    <item
+        android:id="@+id/action_auto_cache_cleanup"
+        android:title="@string/settings_auto_cache_cleanup"
+        android:checkable="true" />
+    <item
+        android:id="@+id/action_incognito_mode"
+        android:title="@string/settings_incognito_mode"
+        android:checkable="true" />
+    <item
+        android:id="@+id/action_manage_subscription"
+        android:title="@string/settings_manage_subscription" />
+    <item
+        android:id="@+id/action_find_in_page"
+        android:title="@string/settings_find_in_page" />
+    <item
+        android:id="@+id/action_sessions"
+        android:title="Sessions" />
+    <item
+        android:id="@+id/action_about"
+        android:title="@string/settings_about" />
+    <item
+        android:id="@+id/action_changelog"
+        android:title="@string/settings_changelog" />
+</menu>

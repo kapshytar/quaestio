@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct RootTabView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var appState: MobileAppState
     @State private var selectedSection: RootSection = .chats
 
     var body: some View {
@@ -18,6 +20,11 @@ struct RootTabView: View {
                 standaloneSection(section: .settings) {
                     SettingsView()
                 }
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                appState.handleAppDidBecomeActive()
             }
         }
     }
