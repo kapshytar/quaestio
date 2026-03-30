@@ -1,5 +1,12 @@
 {
   "defaultProviderId": "deepseek_api",
+  "aggregationPolicy": {
+    "maxChecks": 12,
+    "waitIntervalMs": 2500,
+    "settleDelayMs": 1500,
+    "allowPartialResults": true,
+    "minimumRepliesRequired": 1
+  },
   "providers": [
     {
       "id": "chatgpt_api",
@@ -7,7 +14,10 @@
       "defaultEndpoint": "https://api.openai.com/v1/chat/completions",
       "defaultModel": "gpt-4o-mini",
       "family": "openai",
-      "supportsPreinstalledKey": false
+      "supportsPreinstalledKey": false,
+      "supportsCustomEndpoint": false,
+      "supportsCustomModel": false,
+      "supportsFallbackModels": false
     },
     {
       "id": "deepseek_api",
@@ -15,7 +25,10 @@
       "defaultEndpoint": "https://api.deepseek.com/v1/chat/completions",
       "defaultModel": "deepseek-chat",
       "family": "openai",
-      "supportsPreinstalledKey": true
+      "supportsPreinstalledKey": true,
+      "supportsCustomEndpoint": false,
+      "supportsCustomModel": false,
+      "supportsFallbackModels": false
     },
     {
       "id": "gemini_api",
@@ -23,7 +36,10 @@
       "defaultEndpoint": "https://generativelanguage.googleapis.com/v1beta",
       "defaultModel": "gemini-2.0-flash",
       "family": "gemini",
-      "supportsPreinstalledKey": false
+      "supportsPreinstalledKey": false,
+      "supportsCustomEndpoint": false,
+      "supportsCustomModel": false,
+      "supportsFallbackModels": false
     },
     {
       "id": "perplexity_api",
@@ -31,7 +47,10 @@
       "defaultEndpoint": "https://api.perplexity.ai/chat/completions",
       "defaultModel": "sonar",
       "family": "openai",
-      "supportsPreinstalledKey": false
+      "supportsPreinstalledKey": false,
+      "supportsCustomEndpoint": false,
+      "supportsCustomModel": false,
+      "supportsFallbackModels": false
     },
     {
       "id": "claude_api",
@@ -39,7 +58,10 @@
       "defaultEndpoint": "https://api.anthropic.com/v1/messages",
       "defaultModel": "claude-3-5-sonnet-latest",
       "family": "claude",
-      "supportsPreinstalledKey": false
+      "supportsPreinstalledKey": false,
+      "supportsCustomEndpoint": false,
+      "supportsCustomModel": false,
+      "supportsFallbackModels": false
     },
     {
       "id": "openrouter_api",
@@ -47,7 +69,10 @@
       "defaultEndpoint": "https://openrouter.ai/api/v1/chat/completions",
       "defaultModel": "openai/gpt-4o-mini",
       "family": "openai",
-      "supportsPreinstalledKey": false
+      "supportsPreinstalledKey": false,
+      "supportsCustomEndpoint": false,
+      "supportsCustomModel": false,
+      "supportsFallbackModels": true
     },
     {
       "id": "huggingface_api",
@@ -55,7 +80,10 @@
       "defaultEndpoint": "https://router.huggingface.co/v1/chat/completions",
       "defaultModel": "",
       "family": "openai",
-      "supportsPreinstalledKey": false
+      "supportsPreinstalledKey": false,
+      "supportsCustomEndpoint": false,
+      "supportsCustomModel": true,
+      "supportsFallbackModels": true
     },
     {
       "id": "custom_api",
@@ -63,7 +91,10 @@
       "defaultEndpoint": "",
       "defaultModel": "",
       "family": "openai",
-      "supportsPreinstalledKey": false
+      "supportsPreinstalledKey": false,
+      "supportsCustomEndpoint": true,
+      "supportsCustomModel": true,
+      "supportsFallbackModels": true
     }
   ],
   "defaultMergeInstructions": "You are a neutral synthesis editor.\nWrite strictly in clean Markdown, with calm concise wording.\n\nFormatting rules (mandatory):\n- Keep structure exactly:\n  - `## Consensus`\n  - `## Disagreements` (include only if real disagreements exist)\n  - `## Practical Answer`\n- Use bullet lists with one idea per bullet.\n- Do NOT use horizontal rules (`---`), “Download”, or code fences unless user explicitly asked for code.\n- For tables, output valid GitHub Markdown tables only:\n  - header row\n  - separator row with exactly one `---` per column\n  - consistent column count in all rows.",

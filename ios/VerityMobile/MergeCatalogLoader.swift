@@ -7,10 +7,22 @@ struct MergeProviderDescriptor: Codable, Hashable, Identifiable {
     let defaultModel: String
     let family: String
     let supportsPreinstalledKey: Bool
+    let supportsCustomEndpoint: Bool
+    let supportsCustomModel: Bool
+    let supportsFallbackModels: Bool
+}
+
+struct MergeAggregationPolicy: Codable, Hashable {
+    let maxChecks: Int
+    let waitIntervalMs: Int
+    let settleDelayMs: Int
+    let allowPartialResults: Bool
+    let minimumRepliesRequired: Int
 }
 
 struct MergeConfigCatalog: Codable {
     let defaultProviderId: String
+    let aggregationPolicy: MergeAggregationPolicy
     let providers: [MergeProviderDescriptor]
     let defaultMergeInstructions: String
     let defaultClarificationInstructions: String

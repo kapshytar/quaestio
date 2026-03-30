@@ -26,14 +26,19 @@ class MergeFragment : Fragment(), Findable {
     companion object {
         private const val TAG = "MergeFragment"
         private const val MERGE_PREFS = "merge_config"
-        private const val AGGREGATION_WAIT_MAX_CHECKS = 12
-        private const val AGGREGATION_WAIT_INTERVAL_MS = 2500L
-        private const val AGGREGATION_SETTLE_DELAY_MS = 1500L
     }
 
     private var _binding: FragmentMergeBinding? = null
     private val binding get() = _binding!!
     private lateinit var markwon: Markwon
+    private val mergeCatalog by lazy(LazyThreadSafetyMode.NONE) { MergeConfigCatalogLoader.load(requireContext()) }
+    private val fallbackAggregationPolicy = MergeAggregationPolicy(
+        maxChecks = 12,
+        waitIntervalMs = 2500L,
+        settleDelayMs = 1500L,
+        allowPartialResults = true,
+        minimumRepliesRequired = 1
+    )
 
     private val providers = MergeProvider.entries.toList()
     private var ignoreSpinnerEvents = false
@@ -141,6 +146,14 @@ class MergeFragment : Fragment(), Findable {
     private fun selectedProvider(): MergeProvider {
         val idx = binding.providerSpinner.selectedItemPosition.coerceAtLeast(0)
         return providers.getOrElse(idx) { MergeProvider.CHATGPT }
+    }
+
+    private fun catalogProvider(provider: MergeProvider): MergeProviderDescriptor? {
+        return mergeCatalog?.providers?.firstOrNull { it.id == provider.id }
+    }
+
+    private fun aggregationPolicy(): MergeAggregationPolicy {
+        return mergeCatalog?.aggregationPolicy ?: fallbackAggregationPolicy
     }
 
     private fun runClarificationMerge() {
@@ -345,13 +358,13 @@ class MergeFragment : Fragment(), Findable {
         val prefs = requireContext().getSharedPreferences(MERGE_PREFS, 0)
         val id = prefs.getString("selected_provider", null)
         if (id == null) {
-            // First launch: default to DeepSeek since it has the preinstalled key
-            val deepSeekIdx = providers.indexOfFirst { it == MergeProvider.DEEPSEEK }
-            if (deepSeekIdx >= 0) {
+            val defaultProviderId = mergeCatalog?.defaultProviderId ?: MergeProvider.DEEPSEEK.id
+            val defaultIdx = providers.indexOfFirst { it.id == defaultProviderId }
+            if (defaultIdx >= 0) {
                 ignoreSpinnerEvents = true
-                binding.providerSpinner.setSelection(deepSeekIdx)
+                binding.providerSpinner.setSelection(defaultIdx)
                 ignoreSpinnerEvents = false
-                saveSelectedProvider(MergeProvider.DEEPSEEK)
+                saveSelectedProvider(providers[defaultIdx])
             }
             return
         }
@@ -376,30 +389,42 @@ class MergeFragment : Fragment(), Findable {
 
     private fun loadFieldsForProvider(p: MergeProvider) {
         val prefs = requireContext().getSharedPreferences(MERGE_PREFS, 0)
+        val descriptor = catalogProvider(p)
 
         // For DeepSeek, check if using preinstalled key
-        val apiKey = if (p == MergeProvider.DEEPSEEK && isPreinstalledKeySelected()) {
+        val apiKey = if ((descriptor?.supportsPreinstalledKey == true) && isPreinstalledKeySelected()) {
             KeyObfuscation.getDeepSeekPreinstalledKey()
         } else {
             prefs.getString(prefsKey(p, "api_key"), "") ?: ""
         }
 
         binding.apiKeyInput.setText(apiKey)
-        binding.customEndpointInput.setText(prefs.getString(prefsKey(p, "custom_endpoint"), p.defaultEndpoint) ?: p.defaultEndpoint)
-        binding.customModelInput.setText(prefs.getString(prefsKey(p, "custom_model"), p.defaultModel) ?: p.defaultModel)
+        binding.customEndpointInput.setText(
+            prefs.getString(prefsKey(p, "custom_endpoint"), descriptor?.defaultEndpoint ?: p.defaultEndpoint)
+                ?: (descriptor?.defaultEndpoint ?: p.defaultEndpoint)
+        )
+        binding.customModelInput.setText(
+            prefs.getString(prefsKey(p, "custom_model"), descriptor?.defaultModel ?: p.defaultModel)
+                ?: (descriptor?.defaultModel ?: p.defaultModel)
+        )
         binding.fallbackModelsInput.setText(prefs.getString(prefsKey(p, "fallback_models"), "") ?: "")
     }
 
     private fun applyProviderUi(p: MergeProvider) {
-        val showFallback = p == MergeProvider.CUSTOM || p == MergeProvider.OPENROUTER || p == MergeProvider.HUGGINGFACE
+        val descriptor = catalogProvider(p)
+        val showFallback = descriptor?.supportsFallbackModels == true
+        val showEndpoint = descriptor?.supportsCustomEndpoint == true
+        val showModel = descriptor?.supportsCustomModel == true
         binding.fallbackModelsInput.visibility = if (showFallback) View.VISIBLE else View.GONE
+        binding.customEndpointInput.visibility = if (showEndpoint) View.VISIBLE else View.GONE
+        binding.customModelInput.visibility = if (showModel) View.VISIBLE else View.GONE
 
         // Only DeepSeek supports the preinstalled/custom key switch.
         // All other providers must keep a visible API key field.
-        val isDeepSeek = p == MergeProvider.DEEPSEEK
-        binding.apiKeySourceGroup.visibility = if (isDeepSeek) View.VISIBLE else View.GONE
+        val supportsPreinstalledKey = descriptor?.supportsPreinstalledKey == true
+        binding.apiKeySourceGroup.visibility = if (supportsPreinstalledKey) View.VISIBLE else View.GONE
         binding.apiKeyInput.visibility = when {
-            !isDeepSeek -> View.VISIBLE
+            !supportsPreinstalledKey -> View.VISIBLE
             isCustomKeySelected() -> View.VISIBLE
             else -> View.GONE
         }
@@ -407,8 +432,9 @@ class MergeFragment : Fragment(), Findable {
 
     private fun setupApiKeySourceSelection() {
         val provider = selectedProvider()
+        val descriptor = catalogProvider(provider)
         binding.apiKeySourceGroup.setOnCheckedChangeListener(null)
-        if (provider != MergeProvider.DEEPSEEK) {
+        if (descriptor?.supportsPreinstalledKey != true) {
             binding.apiKeySourceGroup.visibility = View.GONE
             binding.apiKeyInput.visibility = View.VISIBLE
             return
@@ -475,14 +501,12 @@ class MergeFragment : Fragment(), Findable {
     private fun hasAnyConfiguredApiKey(): Boolean {
         val prefs = requireContext().getSharedPreferences(MERGE_PREFS, 0)
         return providers.any { provider ->
-            // For DeepSeek, check if preinstalled key is selected or a custom key is provided
-            if (provider == MergeProvider.DEEPSEEK) {
+            if (catalogProvider(provider)?.supportsPreinstalledKey == true) {
                 val usePreinstalled = prefs.getBoolean("use_preinstalled_key", true)
                 if (usePreinstalled) {
-                    return@any true  // Preinstalled key is configured
+                    return@any true
                 }
             }
-            // For all providers, check if a custom key is configured
             val key = prefs.getString(prefsKey(provider, "api_key"), "")?.trim().orEmpty()
             key.isNotBlank()
         }
@@ -638,23 +662,30 @@ class MergeFragment : Fragment(), Findable {
         refreshAggregationStatuses(silent = true) { items ->
             if (!pendingAggregation) return@refreshAggregationStatuses
             val readyCount = items.count { it.status == AggregationSlotStatus.READY }
+            val policy = aggregationPolicy()
             appendVisibleDebug("Aggregation check ${aggregationWaitAttempt + 1}: $readyCount/${items.size} ready")
             if (readyCount >= items.size && items.isNotEmpty()) {
                 appendVisibleDebug("All slots ready, collecting after settle delay")
                 setMergeStatusText("All ${items.size} slot(s) ready. Collecting now...")
-                aggregationHandler.postDelayed({ collectNowForPendingMerge(manual = false) }, AGGREGATION_SETTLE_DELAY_MS)
+                aggregationHandler.postDelayed({ collectNowForPendingMerge(manual = false) }, policy.settleDelayMs)
                 return@refreshAggregationStatuses
             }
 
             aggregationWaitAttempt += 1
-            if (aggregationWaitAttempt >= AGGREGATION_WAIT_MAX_CHECKS) {
+            if (aggregationWaitAttempt >= policy.maxChecks) {
+                if (policy.allowPartialResults && readyCount >= policy.minimumRepliesRequired) {
+                    appendVisibleDebug("Aggregation timeout reached with partial data; collecting now")
+                    setMergeStatusText("Collected $readyCount/${items.size} source reply(s). Running merge...")
+                    collectNowForPendingMerge(manual = false)
+                    return@refreshAggregationStatuses
+                }
                 appendVisibleDebug("Aggregation still waiting after $aggregationWaitAttempt checks")
                 setMergeStatusText("Aggregation still waiting. Use Collect now or Pause aggregation.")
                 return@refreshAggregationStatuses
             }
 
             setMergeStatusText("Waiting for replies: $readyCount/${items.size} ready")
-            aggregationHandler.postDelayed({ waitForAggregationReadyOrPause() }, AGGREGATION_WAIT_INTERVAL_MS)
+            aggregationHandler.postDelayed({ waitForAggregationReadyOrPause() }, policy.waitIntervalMs)
         }
     }
 
@@ -721,9 +752,10 @@ class MergeFragment : Fragment(), Findable {
         endpoint: String,
         model: String
     ): Int? {
+        val descriptor = catalogProvider(provider)
         if (apiKey.isBlank()) return R.string.merge_api_key_required
-        if (provider == MergeProvider.CUSTOM && endpoint.isBlank()) return R.string.merge_endpoint_required
-        if (provider == MergeProvider.HUGGINGFACE && model.isBlank()) return R.string.merge_model_required
+        if (descriptor?.supportsCustomEndpoint == true && endpoint.isBlank()) return R.string.merge_endpoint_required
+        if (descriptor?.supportsCustomModel == true && descriptor.defaultModel.isBlank() && model.isBlank()) return R.string.merge_model_required
         return null
     }
 

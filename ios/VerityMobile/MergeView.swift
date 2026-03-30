@@ -90,13 +90,15 @@ struct MergeView: View {
                                     .buttonStyle(SecondaryCapsuleButtonStyle())
 
                                     if showAdvancedConfig {
-                                        if selectedProvider.id == "custom_api" {
+                                        if selectedProvider.supportsCustomEndpoint {
                                             TextField("Endpoint", text: $customEndpoint, axis: .vertical)
                                                 .font(.system(size: 14, weight: .medium))
                                                 .foregroundStyle(AppTheme.textPrimary)
                                                 .padding(14)
                                                 .glassCard(padding: 0, radius: AppTheme.compactRadius)
+                                        }
 
+                                        if selectedProvider.supportsCustomModel {
                                             TextField("Model", text: $customModel)
                                                 .font(.system(size: 14, weight: .medium))
                                                 .foregroundStyle(AppTheme.textPrimary)
@@ -389,11 +391,11 @@ struct MergeView: View {
     }
 
     private func shouldShowAdvancedConfig(for provider: MergeProviderDescriptor) -> Bool {
-        provider.id == "custom_api" || supportsFallbackModels(provider)
+        provider.supportsCustomEndpoint || provider.supportsCustomModel || supportsFallbackModels(provider)
     }
 
     private func supportsFallbackModels(_ provider: MergeProviderDescriptor) -> Bool {
-        provider.id == "custom_api" || provider.id == "openrouter_api" || provider.id == "huggingface_api"
+        provider.supportsFallbackModels
     }
 
     private func color(for status: MergeAggregationSlotStatus) -> Color {

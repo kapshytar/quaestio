@@ -34,13 +34,22 @@ final class MobileAppState: ObservableObject {
     private static let slotsDefaultsKey = "verity.mobile.slots"
     private static let selectedSlotDefaultsKey = "verity.mobile.selectedSlotId"
     private static let slotUserAgentPresetsDefaultsKey = "verity.mobile.slotUserAgentPresets"
+    private static let defaultMergeAggregationPolicy = MergeAggregationPolicy(
+        maxChecks: 12,
+        waitIntervalMs: 2500,
+        settleDelayMs: 1500,
+        allowPartialResults: true,
+        minimumRepliesRequired: 1
+    )
 
     let presets: [String: ServicePreset]
     private let webModels: [Int: SlotWebViewModel]
+    private let mergeAggregationPolicy: MergeAggregationPolicy
     private(set) var lastOriginalResponses: [String: String] = [:]
 
     init() {
         let catalog = ServicePresetLoader.loadCatalog()
+        let mergeCatalog = MergeCatalogLoader.loadCatalog()
         let presets = catalog?.services ?? [:]
         let defaults = catalog?.defaultSlots ?? ["chatgpt", "claude", "gemini", "grok"]
         let defaultSlots = defaults.enumerated().map { index, serviceId in
@@ -64,6 +73,7 @@ final class MobileAppState: ObservableObject {
         self.slots = slots
         self.selectedSlotId = Self.loadPersistedSelectedSlotId(validSlots: slots) ?? (slots.first?.id ?? 1)
         self.webModels = webModels
+        self.mergeAggregationPolicy = mergeCatalog?.aggregationPolicy ?? Self.defaultMergeAggregationPolicy
         self.slotUserAgentPresets = Self.loadPersistedUserAgentPresets(validSlots: slots)
 
         applyAllSlotUserAgentPresets()
@@ -138,14 +148,21 @@ final class MobileAppState: ObservableObject {
             return [:]
         }
 
-        let maxChecks = 6
-        let waitIntervalNs: UInt64 = 1_200_000_000
+        let maxChecks = max(1, mergeAggregationPolicy.maxChecks)
+        let waitIntervalNs = UInt64(max(0, mergeAggregationPolicy.waitIntervalMs)) * 1_000_000
+        let settleDelayNs = UInt64(max(0, mergeAggregationPolicy.settleDelayMs)) * 1_000_000
+        let minimumRepliesRequired = max(1, mergeAggregationPolicy.minimumRepliesRequired)
         var lastResult = await scrapeReplies(sourcePrompt: sourcePrompt)
         mergeAggregationSnapshots = lastResult.snapshots
         mergeAggregationSummary = formatAggregationSummary(lastResult.snapshots)
 
         for attempt in 1..<maxChecks {
             if lastResult.responses.count >= enabledSlots.count {
+                if settleDelayNs > 0 {
+                    try? await Task.sleep(nanoseconds: settleDelayNs)
+                    lastResult = await scrapeReplies(sourcePrompt: sourcePrompt)
+                    mergeAggregationSnapshots = lastResult.snapshots
+                }
                 mergeAggregationSummary = "All \(enabledSlots.count) slot(s) ready. Collecting now..."
                 return lastResult.responses
             }
@@ -164,13 +181,15 @@ final class MobileAppState: ObservableObject {
             }
         }
 
-        if !lastResult.responses.isEmpty {
+        if mergeAggregationPolicy.allowPartialResults && lastResult.responses.count >= minimumRepliesRequired {
             mergeAggregationSummary = "Collected \(lastResult.responses.count)/\(enabledSlots.count) source reply(s)"
         } else {
             mergeAggregationSummary = "Aggregation still waiting. Use Collect now or refresh statuses."
         }
 
-        return lastResult.responses
+        return mergeAggregationPolicy.allowPartialResults && lastResult.responses.count >= minimumRepliesRequired
+            ? lastResult.responses
+            : [:]
     }
 
     func resetMergeConversation() {

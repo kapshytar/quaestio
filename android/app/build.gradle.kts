@@ -153,6 +153,7 @@ android {
     }
 
     sourceSets["main"].res.srcDir(generatedChangelogResDir.get().asFile)
+    sourceSets["main"].assets.srcDir(rootProject.file("../shared/contracts"))
 }
 
 tasks.matching {

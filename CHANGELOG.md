@@ -32,6 +32,8 @@ Versioning policy:
   - `DeepSeek` no longer shows a cluttered config by default
   - merge aggregation now polls for replies before giving up instead of doing one naive scrape pass
   - iOS merge screen now exposes Android-like aggregation status refresh/collect controls
+- merge provider visibility and aggregation retry policy now live in the shared `mergeConfig.json` contract and are consumed by both mobile clients
+- Android and iOS now use the same mobile repo version milestone `1.103.0` for this merge-parity pass
 
 ### Fixed
 - iOS merge build path is now reproducible from `project.yml` + `xcodegen` instead of depending only on Xcode GUI state.
