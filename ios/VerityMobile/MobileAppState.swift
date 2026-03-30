@@ -107,6 +107,28 @@ final class MobileAppState: ObservableObject {
         statusMessage = "Stopped active slot"
     }
 
+    func collectLatestRepliesForMerge(sourcePrompt: String) async -> [String: String] {
+        var collected: [String: String] = [:]
+
+        for slot in slots where slot.isEnabled {
+            guard let preset = presets[slot.serviceId] else { continue }
+            let model = webModel(for: slot.id)
+            guard let raw = await model.scrapeLatestReply(serviceId: preset.id, sourcePrompt: sourcePrompt),
+                  let data = raw.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                continue
+            }
+
+            let text = (object["replyText"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !text.isEmpty {
+                collected[slot.title] = text
+            }
+        }
+
+        return collected
+    }
+
     func updateSelectedSlotService(to serviceId: String) {
         guard let index = slots.firstIndex(where: { $0.id == selectedSlotId }),
               let preset = presets[serviceId]

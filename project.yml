@@ -24,6 +24,8 @@ targets:
           - Resources/Info.plist
       - path: shared/contracts/servicePresets.json
         buildPhase: resources
+      - path: shared/contracts/mergeConfig.json
+        buildPhase: resources
       - path: shared/js/sendMessage.js
         buildPhase: resources
       - path: shared/js/attachFile.js
