@@ -239,9 +239,7 @@ struct MergeView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         SectionLabel(text: "Output")
 
-                        Text(appState.mergeOutput.isEmpty ? "Merged output will appear here." : appState.mergeOutput)
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(AppTheme.textPrimary)
+                        MergeMarkdownView(markdown: appState.mergeOutput)
                             .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
                             .padding(16)
                             .glassCard(padding: 0)

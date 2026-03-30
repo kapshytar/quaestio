@@ -77,11 +77,19 @@
     return null;
   }
 
-  function firstString(root, paths) {
+  function firstString(root, paths, options) {
+    var trim = !options || options.trim !== false;
     for (var i = 0; i < paths.length; i += 1) {
       var value = valueAt(root, parsePath(paths[i]));
       var text = collapseToString(value);
-      if (text && String(text).trim()) return String(text).trim();
+      if (text == null) continue;
+      var stringValue = String(text);
+      if (trim) {
+        var trimmed = stringValue.trim();
+        if (trimmed) return trimmed;
+      } else if (stringValue.length > 0) {
+        return stringValue;
+      }
     }
     return null;
   }
@@ -104,14 +112,14 @@
     var config = parseConfig(configJson);
     var object = typeof jsonText === "string" ? JSON.parse(jsonText) : jsonText;
     return JSON.stringify({
-      deltaText: firstString(object, config.deltaTextPaths) || "",
-      modelUsed: firstString(object, config.modelPaths)
+      deltaText: firstString(object, config.deltaTextPaths, { trim: false }) || "",
+      modelUsed: firstString(object, config.modelPaths, { trim: true })
     });
   };
 
   global.extractMergeFinalText = function (jsonText, fallback, configJson) {
     var config = parseConfig(configJson);
     var object = typeof jsonText === "string" ? JSON.parse(jsonText) : jsonText;
-    return firstString(object, config.finalTextPaths) || String(fallback || "");
+    return firstString(object, config.finalTextPaths, { trim: false }) || String(fallback || "");
   };
 })(this);
