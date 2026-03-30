@@ -1,5 +1,5 @@
 {
-  "defaultProviderId": "chatgpt_api",
+  "defaultProviderId": "deepseek_api",
   "providers": [
     {
       "id": "chatgpt_api",

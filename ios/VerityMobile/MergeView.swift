@@ -11,6 +11,7 @@ struct MergeView: View {
     @State private var clarificationInstructions: String = ""
     @State private var selectedProviderId: String = ""
     @State private var usePreinstalledKey = true
+    @State private var showAdvancedConfig = false
     @State private var isRunning = false
 
     private let catalog = MergeCatalogLoader.loadCatalog()
@@ -72,23 +73,96 @@ struct MergeView: View {
                                     .glassCard(padding: 0, radius: AppTheme.compactRadius)
                             }
 
-                            TextField("Endpoint", text: $customEndpoint, axis: .vertical)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(AppTheme.textPrimary)
-                                .padding(14)
-                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
+                            if shouldShowAdvancedConfig(for: selectedProvider) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.16)) {
+                                            showAdvancedConfig.toggle()
+                                        }
+                                    } label: {
+                                        HStack {
+                                            Text(showAdvancedConfig ? "Hide advanced config" : "Show advanced config")
+                                            Spacer()
+                                            Image(systemName: showAdvancedConfig ? "chevron.up" : "chevron.down")
+                                                .font(.system(size: 12, weight: .semibold))
+                                        }
+                                    }
+                                    .buttonStyle(SecondaryCapsuleButtonStyle())
 
-                            TextField("Model", text: $customModel)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(AppTheme.textPrimary)
-                                .padding(14)
-                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
+                                    if showAdvancedConfig {
+                                        if selectedProvider.id == "custom_api" {
+                                            TextField("Endpoint", text: $customEndpoint, axis: .vertical)
+                                                .font(.system(size: 14, weight: .medium))
+                                                .foregroundStyle(AppTheme.textPrimary)
+                                                .padding(14)
+                                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
 
-                            TextField("Fallback models (comma or newline separated)", text: $fallbackModels, axis: .vertical)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(AppTheme.textPrimary)
-                                .padding(14)
-                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
+                                            TextField("Model", text: $customModel)
+                                                .font(.system(size: 14, weight: .medium))
+                                                .foregroundStyle(AppTheme.textPrimary)
+                                                .padding(14)
+                                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
+                                        }
+
+                                        if supportsFallbackModels(selectedProvider) {
+                                            TextField("Fallback models (comma or newline separated)", text: $fallbackModels, axis: .vertical)
+                                                .font(.system(size: 14, weight: .medium))
+                                                .foregroundStyle(AppTheme.textPrimary)
+                                                .padding(14)
+                                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        SectionLabel(text: "Aggregation")
+
+                        HStack(spacing: 10) {
+                            Button {
+                                Task {
+                                    await appState.refreshMergeAggregationStatuses(sourcePrompt: prompt)
+                                }
+                            } label: {
+                                Text("Refresh statuses")
+                            }
+                            .buttonStyle(SecondaryCapsuleButtonStyle())
+
+                            Button {
+                                Task {
+                                    _ = await appState.collectLatestRepliesForMerge(sourcePrompt: prompt)
+                                }
+                            } label: {
+                                Text("Collect now")
+                            }
+                            .buttonStyle(SecondaryCapsuleButtonStyle())
+                        }
+
+                        Text(appState.mergeAggregationSummary)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(AppTheme.textSecondary)
+
+                        if !appState.mergeAggregationSnapshots.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(appState.mergeAggregationSnapshots) { snapshot in
+                                    HStack(spacing: 10) {
+                                        Circle()
+                                            .fill(color(for: snapshot.status))
+                                            .frame(width: 8, height: 8)
+                                        Text(snapshot.title)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(AppTheme.textPrimary)
+                                        Spacer()
+                                        Text(label(for: snapshot.status))
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                }
+                            }
+                            .padding(14)
+                            .glassCard(padding: 0, radius: AppTheme.compactRadius)
                         }
                     }
 
@@ -211,6 +285,9 @@ struct MergeView: View {
         if customModel.isEmpty || customModel == providers.first(where: { $0.id == selectedProviderId })?.defaultModel {
             customModel = selectedProvider.defaultModel
         }
+        if !shouldShowAdvancedConfig(for: selectedProvider) {
+            showAdvancedConfig = false
+        }
     }
 
     private func runMerge() async {
@@ -309,5 +386,35 @@ struct MergeView: View {
             return KeyObfuscation.getDeepSeekPreinstalledKey().trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func shouldShowAdvancedConfig(for provider: MergeProviderDescriptor) -> Bool {
+        provider.id == "custom_api" || supportsFallbackModels(provider)
+    }
+
+    private func supportsFallbackModels(_ provider: MergeProviderDescriptor) -> Bool {
+        provider.id == "custom_api" || provider.id == "openrouter_api" || provider.id == "huggingface_api"
+    }
+
+    private func color(for status: MergeAggregationSlotStatus) -> Color {
+        switch status {
+        case .ready:
+            return Color(red: 0.36, green: 0.86, blue: 0.64)
+        case .waiting:
+            return Color(red: 0.96, green: 0.75, blue: 0.33)
+        case .error:
+            return Color(red: 0.96, green: 0.40, blue: 0.40)
+        }
+    }
+
+    private func label(for status: MergeAggregationSlotStatus) -> String {
+        switch status {
+        case .ready:
+            return "Ready"
+        case .waiting:
+            return "Waiting"
+        case .error:
+            return "Empty"
+        }
     }
 }

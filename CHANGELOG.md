@@ -24,6 +24,11 @@ Versioning policy:
   - shared first as the target state
   - native only where necessary
 - iOS auth/browser-like behavior was hardened with shared session state, popup handling, diagnostics, and provider login experiments.
+- iOS `Merge` now follows Android more closely for first-run defaults and aggregation behavior:
+  - `DeepSeek API` is now the default provider because it has the preinstalled key path
+  - `DeepSeek` no longer shows a cluttered config by default
+  - merge aggregation now polls for replies before giving up instead of doing one naive scrape pass
+  - iOS merge screen now exposes Android-like aggregation status refresh/collect controls
 
 ### Fixed
 - iOS merge build path is now reproducible from `project.yml` + `xcodegen` instead of depending only on Xcode GUI state.

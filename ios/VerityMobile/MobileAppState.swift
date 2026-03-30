@@ -1,6 +1,18 @@
 import Foundation
 import WebKit
 
+enum MergeAggregationSlotStatus: String {
+    case ready
+    case waiting
+    case error
+}
+
+struct MergeAggregationSlotSnapshot: Identifiable {
+    let id: Int
+    let title: String
+    let status: MergeAggregationSlotStatus
+}
+
 @MainActor
 final class MobileAppState: ObservableObject {
     @Published var slots: [SlotState] = [] {
@@ -12,6 +24,8 @@ final class MobileAppState: ObservableObject {
     @Published var mergeOutput: String = ""
     @Published var mergeHistory: String = ""
     @Published var mergeClarificationText: String = ""
+    @Published var mergeAggregationSummary: String = "Slot aggregation idle"
+    @Published var mergeAggregationSnapshots: [MergeAggregationSlotSnapshot] = []
     @Published var statusMessage: String = "MVP scaffold"
     @Published var composerText: String = ""
     @Published var isSendingComposer: Bool = false
@@ -110,26 +124,53 @@ final class MobileAppState: ObservableObject {
         statusMessage = "Stopped active slot"
     }
 
-    func collectLatestRepliesForMerge(sourcePrompt: String) async -> [String: String] {
-        var collected: [String: String] = [:]
+    func refreshMergeAggregationStatuses(sourcePrompt: String) async {
+        let result = await scrapeReplies(sourcePrompt: sourcePrompt)
+        mergeAggregationSnapshots = result.snapshots
+        mergeAggregationSummary = formatAggregationSummary(result.snapshots)
+    }
 
-        for slot in slots where slot.isEnabled {
-            guard let preset = presets[slot.serviceId] else { continue }
-            let model = webModel(for: slot.id)
-            guard let raw = await model.scrapeLatestReply(serviceId: preset.id, sourcePrompt: sourcePrompt),
-                  let data = raw.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else {
-                continue
+    func collectLatestRepliesForMerge(sourcePrompt: String) async -> [String: String] {
+        let enabledSlots = slots.filter(\.isEnabled)
+        guard !enabledSlots.isEmpty else {
+            mergeAggregationSnapshots = []
+            mergeAggregationSummary = "No enabled slots for merge."
+            return [:]
+        }
+
+        let maxChecks = 6
+        let waitIntervalNs: UInt64 = 1_200_000_000
+        var lastResult = await scrapeReplies(sourcePrompt: sourcePrompt)
+        mergeAggregationSnapshots = lastResult.snapshots
+        mergeAggregationSummary = formatAggregationSummary(lastResult.snapshots)
+
+        for attempt in 1..<maxChecks {
+            if lastResult.responses.count >= enabledSlots.count {
+                mergeAggregationSummary = "All \(enabledSlots.count) slot(s) ready. Collecting now..."
+                return lastResult.responses
             }
 
-            let text = (object["replyText"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !text.isEmpty {
-                collected[slot.title] = text
+            let readyCount = lastResult.responses.count
+            mergeAggregationSummary = "Waiting for replies: \(readyCount)/\(enabledSlots.count) ready"
+            statusMessage = "Waiting for replies: \(readyCount)/\(enabledSlots.count) ready"
+            try? await Task.sleep(nanoseconds: waitIntervalNs)
+
+            lastResult = await scrapeReplies(sourcePrompt: sourcePrompt)
+            mergeAggregationSnapshots = lastResult.snapshots
+            mergeAggregationSummary = formatAggregationSummary(lastResult.snapshots)
+
+            if attempt == maxChecks - 1 {
+                break
             }
         }
 
-        return collected
+        if !lastResult.responses.isEmpty {
+            mergeAggregationSummary = "Collected \(lastResult.responses.count)/\(enabledSlots.count) source reply(s)"
+        } else {
+            mergeAggregationSummary = "Aggregation still waiting. Use Collect now or refresh statuses."
+        }
+
+        return lastResult.responses
     }
 
     func resetMergeConversation() {
@@ -226,6 +267,82 @@ final class MobileAppState: ObservableObject {
         guard let index = slots.firstIndex(where: { $0.id == slotID }) else { return }
         guard slots[index].url != url else { return }
         slots[index].url = url
+    }
+
+    private func scrapeReplies(sourcePrompt: String) async -> (responses: [String: String], snapshots: [MergeAggregationSlotSnapshot]) {
+        var collected: [String: String] = [:]
+        var snapshots: [MergeAggregationSlotSnapshot] = []
+
+        for slot in slots where slot.isEnabled {
+            guard let preset = presets[slot.serviceId] else { continue }
+            let model = webModel(for: slot.id)
+            let scrapedText = await scrapeReplyText(from: model, serviceId: preset.id, sourcePrompt: sourcePrompt)
+
+            if let scrapedText, !scrapedText.isEmpty {
+                collected[slot.title] = scrapedText
+                snapshots.append(MergeAggregationSlotSnapshot(id: slot.id, title: slot.title, status: .ready))
+            } else if isSlotLikelyStillWorking(model) {
+                snapshots.append(MergeAggregationSlotSnapshot(id: slot.id, title: slot.title, status: .waiting))
+            } else {
+                snapshots.append(MergeAggregationSlotSnapshot(id: slot.id, title: slot.title, status: .error))
+            }
+        }
+
+        return (collected, snapshots)
+    }
+
+    private func scrapeReplyText(from model: SlotWebViewModel, serviceId: String, sourcePrompt: String) async -> String? {
+        guard let raw = await model.scrapeLatestReply(serviceId: serviceId, sourcePrompt: sourcePrompt),
+              let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+
+        let text = (object["text"] as? String ?? object["replyText"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private func isSlotLikelyStillWorking(_ model: SlotWebViewModel) -> Bool {
+        let states = [
+            model.lastNavigationState.lowercased(),
+            model.popupNavigationState.lowercased()
+        ]
+        if states.contains(where: { ["requested", "forced", "starting", "committed", "reload", "back-navigation"].contains($0) }) {
+            return true
+        }
+
+        let hrefs = [
+            model.currentLocationHref.lowercased(),
+            model.popupLocationHref.lowercased()
+        ]
+        return hrefs.contains(where: {
+            $0.contains("accounts.google.com")
+                || $0.contains("auth.openai.com")
+                || $0.contains("claude.ai/login")
+                || $0.contains("accounts.x.ai")
+        })
+    }
+
+    private func formatAggregationSummary(_ snapshots: [MergeAggregationSlotSnapshot]) -> String {
+        guard !snapshots.isEmpty else { return "Slot aggregation idle" }
+        let readyCount = snapshots.filter { $0.status == .ready }.count
+        let waitingCount = snapshots.filter { $0.status == .waiting }.count
+        let errorCount = snapshots.filter { $0.status == .error }.count
+
+        if readyCount == snapshots.count {
+            return "All \(snapshots.count) slot(s) ready"
+        }
+
+        var pieces = ["\(readyCount)/\(snapshots.count) ready"]
+        if waitingCount > 0 {
+            pieces.append("\(waitingCount) waiting")
+        }
+        if errorCount > 0 {
+            pieces.append("\(errorCount) empty")
+        }
+        return pieces.joined(separator: " • ")
     }
 
     private func persistWorkspaceState() {
