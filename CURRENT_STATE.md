@@ -41,7 +41,10 @@
   - native only where necessary
 - Versioning/changelog rule for this repo is now explicit:
   - meaningful mobile milestones must be recorded in `CHANGELOG.md`
-  - version bump decisions must follow the global Verity `1.x.y` policy instead of being implied
+  - this repo follows `1.x.y`
+  - every code change increments `y`
+  - every commit/push milestone increments `x`
+  - after incrementing `x`, `y` resets to `0`
 
 ## In Progress
 

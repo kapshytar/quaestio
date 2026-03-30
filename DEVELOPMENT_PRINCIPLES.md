@@ -26,7 +26,10 @@ This repo follows a layered source-of-truth model.
 
 6. Versioning and changelog are mandatory
 - Meaningful mobile milestones must be recorded in this repo's `CHANGELOG.md`.
-- Version bump decisions must follow the global Verity `1.x.y` rule rather than being improvised per session.
+- This repo follows the global Verity `1.x.y` rule:
+  - every code change increments `y`
+  - every commit/push milestone increments `x`
+  - after incrementing `x`, `y` resets to `0`
 - Do not treat release/version changes as optional cleanup after the fact.
 
 Working rule:

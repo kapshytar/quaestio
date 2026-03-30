@@ -5,6 +5,9 @@ All notable changes to this repo are documented here.
 Versioning policy:
 - mobile follows the shared Verity client `1.x.y` family
 - during the Android/iOS migration period, iOS and Android version sources may still live in different files
+- every code change in this repo increments `y`
+- every commit/push milestone in this repo increments `x`
+- after incrementing `x`, `y` resets to `0`
 - meaningful mobile milestones must still be recorded here even before version-source unification is complete
 
 ## [Unreleased] - 2026-03-30
