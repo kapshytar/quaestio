@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.105.3
+- replace iOS and Android app icons with `/Users/v/Desktop/ChatGPT Image Mar 31, 2026, 01_54_38 AM.png`
+
+## 1.105.2
+- pin Android Gradle to the local Temurin 17 JDK at `/Users/v/.jdks/temurin-17/Contents/Home` so builds do not depend on shell session state
+
+## 1.105.1
+- replace iOS and Android app icons with the Firefly V concept from `/Users/v/Desktop/Firefly.jpg`
+
 All notable changes to this repo are documented here.
 
 Versioning policy:
