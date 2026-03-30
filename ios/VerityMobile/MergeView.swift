@@ -328,8 +328,13 @@ struct MergeView: View {
         )
 
         appState.statusMessage = "Running merge via \(selectedProvider.title)..."
+        appState.mergeOutput = ""
         do {
-            let result = try await MergeApiClient.merge(config: config, responses: responses)
+            let result = try await MergeApiClient.merge(config: config, responses: responses) { partial in
+                await MainActor.run {
+                    appState.mergeOutput = partial
+                }
+            }
             appState.finishMergeConversation(with: result.text)
             appState.statusMessage = "Merge completed with \(responses.count) source reply(s)"
         } catch {
@@ -372,7 +377,12 @@ struct MergeView: View {
         )
 
         do {
-            let result = try await MergeApiClient.merge(config: config, responses: [:])
+            appState.mergeOutput = ""
+            let result = try await MergeApiClient.merge(config: config, responses: [:]) { partial in
+                await MainActor.run {
+                    appState.mergeOutput = partial
+                }
+            }
             appState.finishMergeConversation(with: result.text)
             appState.mergeClarificationText = ""
             appState.statusMessage = "Clarification completed"

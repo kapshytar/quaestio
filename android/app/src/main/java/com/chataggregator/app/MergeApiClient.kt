@@ -43,6 +43,8 @@ data class MergeRequestConfig(
 
 object MergeApiClient {
     private const val TAG = "MergeApiClient"
+    @Volatile
+    private var streamingConfigured = false
 
     private data class OpenAiAttemptResult(
         val text: String,
@@ -78,6 +80,12 @@ Formatting rules (mandatory):
         "You are a helpful assistant continuing a conversation. Respond naturally and helpfully."
 
     private val gson = Gson()
+
+    fun configureSharedStreaming(context: android.content.Context) {
+        if (streamingConfigured) return
+        MergeStreamParser.configure(context.applicationContext)
+        streamingConfigured = true
+    }
 
     fun defaultMergeInstructions(): String = DEFAULT_MERGE_INSTRUCTIONS
     fun defaultClarificationInstructions(): String = DEFAULT_CLARIFICATION_INSTRUCTIONS
@@ -497,20 +505,18 @@ Formatting rules (mandatory):
                 val line = raw.trim()
                 if (line.startsWith("data:")) {
                     sawSseData = true
-                    val data = line.removePrefix("data:").trim()
-                    if (data == "[DONE]" || data.isBlank()) return@forEach
-                    try {
-                        val json = JsonParser.parseString(data).asJsonObject
+                    val json = MergeStreamParser.parseSsePayload(line)
+                    if (json != null) {
+                        val chunk = MergeStreamParser.parseChunk(json)
                         if (modelUsed.isNullOrBlank()) {
-                            modelUsed = json.get("model")?.asString?.trim().orEmpty().ifBlank { null }
+                            modelUsed = chunk.modelUsed?.trim().orEmpty().ifBlank { null }
                         }
-                        val delta = extractDeltaText(json)
-                        if (delta.isNotEmpty()) {
-                            textBuilder.append(delta)
+                        if (chunk.deltaText.isNotEmpty()) {
+                            textBuilder.append(chunk.deltaText)
                             onPartial?.invoke(textBuilder.toString())
                         }
-                    } catch (_: Exception) {
-                        if (detailedLogging) Log.w(TAG, "SSE parse skip: ${data.take(120)}")
+                    } else if (detailedLogging) {
+                        Log.w(TAG, "SSE parse skip: ${line.take(120)}")
                     }
                 } else if (!sawSseData) {
                     rawBodyBuilder.append(raw)
@@ -531,81 +537,14 @@ Formatting rules (mandatory):
         }
         return try {
             val json = JsonParser.parseString(rawBody).asJsonObject
-            val text = extractDeltaText(json).ifBlank {
-                json.getAsJsonArray("choices")
-                    ?.firstOrNull()?.asJsonObject
-                    ?.getAsJsonObject("message")
-                    ?.get("content")?.asString?.trim()
-                    .orEmpty()
-            }
-            val parsedModel = json.get("model")?.asString?.trim().orEmpty().ifBlank { modelUsed }
+            val chunk = MergeStreamParser.parseChunk(json)
+            val text = MergeStreamParser.extractFinalText(json, rawBody)
+            val parsedModel = chunk.modelUsed?.trim().orEmpty().ifBlank { modelUsed }
             StreamAwareResponse(text = text, modelUsed = parsedModel)
         } catch (e: Exception) {
             if (detailedLogging) Log.w(TAG, "Non-SSE parse fallback failed: ${e.message}")
             StreamAwareResponse(text = rawBody, modelUsed = modelUsed)
         }
-    }
-
-    private fun extractDeltaText(json: JsonObject): String {
-        val choices = json.getAsJsonArray("choices")
-        if (choices != null) {
-            val first = choices.firstOrNull()?.asJsonObject
-            if (first != null) {
-                val deltaObj = first.getAsJsonObject("delta")
-                if (deltaObj != null) {
-                    val fromContent = extractTextContent(deltaObj.get("content"))
-                    if (fromContent.isNotEmpty()) return fromContent
-                    val fromText = extractTextContent(deltaObj.get("text"))
-                    if (fromText.isNotEmpty()) return fromText
-                }
-                val fromChoiceText = extractTextContent(first.get("text"))
-                if (fromChoiceText.isNotEmpty()) return fromChoiceText
-                val messageObj = first.getAsJsonObject("message")
-                if (messageObj != null) {
-                    val fromMessage = extractTextContent(messageObj.get("content"))
-                    if (fromMessage.isNotEmpty()) return fromMessage
-                }
-            }
-        }
-
-        // Anthropic streaming shape (content_block_delta): {"delta":{"text":"..."}}
-        val topDelta = json.getAsJsonObject("delta")
-        if (topDelta != null) {
-            val fromTopDelta = extractTextContent(topDelta.get("text"))
-            if (fromTopDelta.isNotEmpty()) return fromTopDelta
-            val fromTopContent = extractTextContent(topDelta.get("content"))
-            if (fromTopContent.isNotEmpty()) return fromTopContent
-        }
-        return ""
-    }
-
-    private fun extractTextContent(element: JsonElement?): String {
-        if (element == null || element.isJsonNull) return ""
-        if (element.isJsonPrimitive) {
-            return element.asString.orEmpty()
-        }
-        if (element.isJsonArray) {
-            return buildString {
-                element.asJsonArray.forEach { item ->
-                    when {
-                        item.isJsonPrimitive -> append(item.asString.orEmpty())
-                        item.isJsonObject -> {
-                            val obj = item.asJsonObject
-                            val text = extractTextContent(obj.get("text"))
-                            if (text.isNotEmpty()) append(text)
-                        }
-                    }
-                }
-            }
-        }
-        if (element.isJsonObject) {
-            val obj = element.asJsonObject
-            val text = extractTextContent(obj.get("text"))
-            if (text.isNotEmpty()) return text
-            val content = extractTextContent(obj.get("content"))
-            if (content.isNotEmpty()) return content
-        }
-        return ""
     }
 
     private fun postJson(endpoint: String, headers: Map<String, String>, jsonBody: String, detailedLogging: Boolean): String {

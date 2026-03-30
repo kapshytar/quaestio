@@ -71,6 +71,7 @@ class MergeFragment : Fragment(), Findable {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        MergeApiClient.configureSharedStreaming(requireContext())
         markwon = Markwon.builder(requireContext())
             .usePlugin(TablePlugin.create(requireContext()))
             .build()

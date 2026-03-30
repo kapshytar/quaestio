@@ -10,8 +10,8 @@ settings:
   base:
     PRODUCT_BUNDLE_IDENTIFIER: com.verity.mobile
     SWIFT_VERSION: 6.0
-    CURRENT_PROJECT_VERSION: 103
-    MARKETING_VERSION: 1.103.0
+    CURRENT_PROJECT_VERSION: 106
+    MARKETING_VERSION: 1.104.0
     DEVELOPMENT_TEAM: "Y7643GTM35"
 targets:
   VerityMobile:
@@ -26,11 +26,15 @@ targets:
         buildPhase: resources
       - path: shared/contracts/mergeConfig.json
         buildPhase: resources
+      - path: shared/contracts/streamParserConfig.json
+        buildPhase: resources
       - path: shared/js/sendMessage.js
         buildPhase: resources
       - path: shared/js/attachFile.js
         buildPhase: resources
       - path: shared/js/scrapeReply.js
+        buildPhase: resources
+      - path: shared/js/mergeStreamParser.js
         buildPhase: resources
     settings:
       base:

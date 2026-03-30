@@ -33,7 +33,9 @@ Versioning policy:
   - merge aggregation now polls for replies before giving up instead of doing one naive scrape pass
   - iOS merge screen now exposes Android-like aggregation status refresh/collect controls
 - merge provider visibility and aggregation retry policy now live in the shared `mergeConfig.json` contract and are consumed by both mobile clients
-- Android and iOS now use the same mobile repo version milestone `1.103.0` for this merge-parity pass
+- Android and iOS now use the same mobile repo version milestone `1.104.0` for this merge-and-streaming pass
+- SSE parsing now lives in shared `mergeStreamParser.js`, with Android and iOS acting as transport wrappers around the same parser surface
+- mobile merge streaming now reads chunk/model extraction rules from shared `streamParserConfig.json` instead of hardcoding SSE parsing behavior separately in Swift and Kotlin
 
 ### Fixed
 - iOS merge build path is now reproducible from `project.yml` + `xcodegen` instead of depending only on Xcode GUI state.

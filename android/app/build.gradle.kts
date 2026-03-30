@@ -48,6 +48,7 @@ val hasCustomSigning =
     !signingKeyPassword.isNullOrBlank()
 val changelogSourceFile = rootProject.file("CHANGELOG.md")
 val generatedChangelogResDir = layout.buildDirectory.dir("generated/res/changelog")
+val generatedSharedAssetsDir = layout.buildDirectory.dir("generated/assets/shared")
 val generateLatestChangelogResource = tasks.register("generateLatestChangelogResource") {
     val outputDir = generatedChangelogResDir.get().asFile.resolve("raw")
     val outputFile = outputDir.resolve("changelog_latest.txt")
@@ -85,6 +86,10 @@ val generateLatestChangelogResource = tasks.register("generateLatestChangelogRes
             else entries.joinToString(System.lineSeparator())
         )
     }
+}
+val prepareSharedStreamingJs = tasks.register<Copy>("prepareSharedStreamingJs") {
+    from(rootProject.file("../shared/js/mergeStreamParser.js"))
+    into(generatedSharedAssetsDir)
 }
 
 android {
@@ -154,15 +159,18 @@ android {
 
     sourceSets["main"].res.srcDir(generatedChangelogResDir.get().asFile)
     sourceSets["main"].assets.srcDir(rootProject.file("../shared/contracts"))
+    sourceSets["main"].assets.srcDir(generatedSharedAssetsDir.get().asFile)
 }
 
 tasks.matching {
     it.name.contains("Resources", ignoreCase = true) ||
+        it.name.contains("Assets", ignoreCase = true) ||
         it.name.contains("Navigation", ignoreCase = true) ||
         it.name.contains("SourceSetPaths", ignoreCase = true)
 }
     .configureEach {
         dependsOn(generateLatestChangelogResource)
+        dependsOn(prepareSharedStreamingJs)
     }
 
 kotlin {
@@ -184,4 +192,5 @@ dependencies {
     implementation("com.android.billingclient:billing-ktx:8.3.0")
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:ext-tables:4.6.2")
+    implementation("org.mozilla:rhino:1.7.15")
 }

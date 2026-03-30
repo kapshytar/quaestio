@@ -24,6 +24,14 @@ enum MergeApiClient {
     }
 
     static func merge(config: MergeRunConfig, responses: [String: String]) async throws -> MergeResult {
+        try await merge(config: config, responses: responses, onPartial: nil)
+    }
+
+    static func merge(
+        config: MergeRunConfig,
+        responses: [String: String],
+        onPartial: (@Sendable (String) async -> Void)?
+    ) async throws -> MergeResult {
         if responses.isEmpty && config.previousSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw NSError(domain: "MergeApiClient", code: 1, userInfo: [NSLocalizedDescriptionKey: "No source responses"])
         }
@@ -34,7 +42,7 @@ enum MergeApiClient {
         case "gemini":
             return try await callGemini(config: config, responses: responses)
         default:
-            return try await callOpenAICompatible(config: config, responses: responses)
+            return try await callOpenAICompatible(config: config, responses: responses, onPartial: onPartial)
         }
     }
 
@@ -137,7 +145,11 @@ enum MergeApiClient {
         return messages
     }
 
-    private static func callOpenAICompatible(config: MergeRunConfig, responses: [String: String]) async throws -> MergeResult {
+    private static func callOpenAICompatible(
+        config: MergeRunConfig,
+        responses: [String: String],
+        onPartial: (@Sendable (String) async -> Void)?
+    ) async throws -> MergeResult {
         let endpoint = config.customEndpoint.isEmpty ? config.provider.defaultEndpoint : config.customEndpoint
         let models = buildModelFallbackChain(
             primary: config.customModel.isEmpty ? config.provider.defaultModel : config.customModel,
@@ -168,7 +180,8 @@ enum MergeApiClient {
                         "HTTP-Referer": "https://github.com/kvitaliq-maker/chat-aggregator-mobile",
                         "X-Title": "VerityMobile"
                     ] : [:],
-                    attemptedModels: attempted
+                    attemptedModels: attempted,
+                    onPartial: onPartial
                 )
             } catch {
                 lastError = error
@@ -190,7 +203,8 @@ enum MergeApiClient {
         chatHistory: [[String: String]]?,
         providerId: String,
         extraHeaders: [String: String],
-        attemptedModels: [String]
+        attemptedModels: [String],
+        onPartial: (@Sendable (String) async -> Void)?
     ) async throws -> MergeResult {
         var messages: [[String: String]] = [["role": "system", "content": systemPrompt]]
         if let chatHistory {
@@ -202,19 +216,19 @@ enum MergeApiClient {
             "model": model,
             "messages": messages,
             "temperature": 0.2,
-            "stream": false
+            "stream": true
         ]
-        let json = try await postJSON(
+        let response = try await postJSONStreamAware(
             endpoint: endpoint,
             headers: ["Authorization": "Bearer \(apiKey)"].merging(extraHeaders, uniquingKeysWith: { _, rhs in rhs }),
-            body: payload
+            body: payload,
+            onPartial: onPartial
         )
-        let content = (((json["choices"] as? [[String: Any]])?.first)?["message"] as? [String: Any])?["content"] as? String
-        let text = content?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let text = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
             throw NSError(domain: "MergeApiClient", code: 3, userInfo: [NSLocalizedDescriptionKey: "Empty response from provider"])
         }
-        let modelUsed = (json["model"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? model
+        let modelUsed = response.modelUsed?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? model
         return MergeResult(text: appendModelMetadata(text: text, providerId: providerId, modelUsed: modelUsed, attemptedModels: attemptedModels), providerId: providerId, modelUsed: modelUsed, attemptedModels: attemptedModels)
     }
 
@@ -320,6 +334,97 @@ enum MergeApiClient {
         return object
     }
 
+    private struct StreamAwareResponse {
+        let text: String
+        let modelUsed: String?
+    }
+
+    private static func postJSONStreamAware(
+        endpoint: String,
+        headers: [String: String],
+        body: [String: Any],
+        onPartial: (@Sendable (String) async -> Void)?
+    ) async throws -> StreamAwareResponse {
+        guard let url = URL(string: endpoint) else {
+            throw NSError(domain: "MergeApiClient", code: 10, userInfo: [NSLocalizedDescriptionKey: "Invalid endpoint"])
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        headers.forEach { key, value in
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if !(200...299).contains(status) {
+            let errorData = try await collectAllBytes(from: bytes)
+            let errorBody = String(data: errorData, encoding: .utf8) ?? "HTTP \(status)"
+            throw NSError(domain: "MergeApiClient", code: status, userInfo: [NSLocalizedDescriptionKey: "Provider error (\(status)): \(String(errorBody.prefix(300)))"])
+        }
+
+        var textBuilder = ""
+        var rawBody = ""
+        var modelUsed: String?
+        var sawSseData = false
+
+        for try await rawLine in bytes.lines {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.hasPrefix("data:") {
+                sawSseData = true
+                guard let object = MergeStreamParser.parseSsePayload(line) else {
+                    continue
+                }
+
+                let chunk = MergeStreamParser.parseChunk(object)
+                if modelUsed == nil {
+                    modelUsed = chunk.modelUsed?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+                }
+                let delta = chunk.deltaText
+                if !delta.isEmpty {
+                    textBuilder.append(delta)
+                    if let onPartial {
+                        await onPartial(textBuilder)
+                    }
+                }
+            } else if !sawSseData {
+                rawBody.append(rawLine)
+                rawBody.append("\n")
+            }
+        }
+
+        if sawSseData {
+            return StreamAwareResponse(text: textBuilder, modelUsed: modelUsed)
+        }
+
+        let fallbackData = rawBody.data(using: .utf8) ?? Data()
+        guard
+            !fallbackData.isEmpty,
+            let object = try JSONSerialization.jsonObject(with: fallbackData) as? [String: Any]
+        else {
+            return StreamAwareResponse(text: rawBody.trimmingCharacters(in: .whitespacesAndNewlines), modelUsed: modelUsed)
+        }
+
+        if modelUsed == nil {
+            modelUsed = MergeStreamParser.parseChunk(object).modelUsed?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        }
+        let text = MergeStreamParser.extractFinalText(
+            from: object,
+            fallback: rawBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        return StreamAwareResponse(text: text, modelUsed: modelUsed)
+    }
+
+    private static func collectAllBytes(from bytes: URLSession.AsyncBytes) async throws -> Data {
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+        }
+        return data
+    }
+
     private static func buildModelFallbackChain(primary: String, raw: String) -> [String] {
         ([primary] + raw.split(whereSeparator: { [",", "\n", ";"].contains($0) }).map(String.init))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -346,13 +451,6 @@ enum MergeApiClient {
         Fallback used: `\(fallbackUsed)`
         Attempted models: `\(attempted.joined(separator: " -> "))`
         """
-    }
-}
-
-private extension String {
-    var nonEmpty: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
