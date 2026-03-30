@@ -1482,7 +1482,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
         SettingsManager.setLastUserPrompt(this, text)
         SettingsManager.setParallelIngestSourcePrompt(this, text)
-        SettingsManager.clearParallelIngestActiveNoteId(this)
+        SettingsManager.clearParallelIngestState(this)
+        SettingsManager.setParallelIngestSourcePrompt(this, text)
         if (SettingsManager.isDetailedLoggingEnabled(this)) {
             val bytes = text.toByteArray(Charsets.UTF_8)
             val hexString = bytes.joinToString(separator = " ") { byte -> "%02x".format(byte) }
@@ -1827,12 +1828,17 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
         val currentFingerprint = buildSessionFingerprint(collectCurrentSlotUrls(), enabledSlotKeys)
         if (currentFingerprint.isBlank()) return null
+        val currentSourcePrompt = SettingsManager.getParallelIngestSourcePrompt(this).trim()
 
         val matching = sessionManager.getAllSessions()
             .firstOrNull { snapshot ->
                 snapshot.sessionId != null &&
                     !snapshot.noteId.isNullOrBlank() &&
-                    buildSessionFingerprint(snapshot.slotUrls, enabledSlotKeys) == currentFingerprint
+                    buildSessionFingerprint(snapshot.slotUrls, enabledSlotKeys) == currentFingerprint &&
+                    (
+                        currentSourcePrompt.isBlank() ||
+                            promptsReferToSameQuestion(currentSourcePrompt, snapshot.name)
+                    )
             } ?: return null
 
         matching.sessionId?.let { SettingsManager.setParallelIngestSessionId(this, it) }

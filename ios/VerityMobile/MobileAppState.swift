@@ -30,10 +30,12 @@ final class MobileAppState: ObservableObject {
     @Published var composerText: String = ""
     @Published var isSendingComposer: Bool = false
     @Published private(set) var slotUserAgentPresets: [Int: UserAgentPreset] = [:]
+    @Published private(set) var lastUserPrompt: String = ""
 
     private static let slotsDefaultsKey = "verity.mobile.slots"
     private static let selectedSlotDefaultsKey = "verity.mobile.selectedSlotId"
     private static let slotUserAgentPresetsDefaultsKey = "verity.mobile.slotUserAgentPresets"
+    private static let lastUserPromptDefaultsKey = "verity.mobile.lastUserPrompt"
     private static let defaultMergeAggregationPolicy = MergeAggregationPolicy(
         maxChecks: 12,
         waitIntervalMs: 2500,
@@ -75,6 +77,7 @@ final class MobileAppState: ObservableObject {
         self.webModels = webModels
         self.mergeAggregationPolicy = mergeCatalog?.aggregationPolicy ?? Self.defaultMergeAggregationPolicy
         self.slotUserAgentPresets = Self.loadPersistedUserAgentPresets(validSlots: slots)
+        self.lastUserPrompt = Self.loadPersistedLastUserPrompt()
 
         applyAllSlotUserAgentPresets()
 
@@ -120,8 +123,18 @@ final class MobileAppState: ObservableObject {
             : "Sent to \(successCount) of \(activeSlots.count) active chats"
 
         if successCount > 0 {
+            lastUserPrompt = message
+            persistLastUserPrompt(message)
             composerText = ""
         }
+    }
+
+    func resolvedMergeSourcePrompt() -> String {
+        let composer = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !composer.isEmpty {
+            return composer
+        }
+        return lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func reloadSelectedSlot() {
@@ -372,6 +385,10 @@ final class MobileAppState: ObservableObject {
         UserDefaults.standard.set(selectedSlotId, forKey: Self.selectedSlotDefaultsKey)
     }
 
+    private func persistLastUserPrompt(_ prompt: String) {
+        UserDefaults.standard.set(prompt, forKey: Self.lastUserPromptDefaultsKey)
+    }
+
     private static func loadPersistedSlots() -> [SlotState]? {
         guard let data = UserDefaults.standard.data(forKey: slotsDefaultsKey) else { return nil }
         return try? JSONDecoder().decode([SlotState].self, from: data)
@@ -381,6 +398,11 @@ final class MobileAppState: ObservableObject {
         let storedId = UserDefaults.standard.integer(forKey: selectedSlotDefaultsKey)
         guard storedId != 0, validSlots.contains(where: { $0.id == storedId }) else { return nil }
         return storedId
+    }
+
+    private static func loadPersistedLastUserPrompt() -> String {
+        UserDefaults.standard.string(forKey: lastUserPromptDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private static func loadPersistedUserAgentPresets(validSlots: [SlotState]) -> [Int: UserAgentPreset] {

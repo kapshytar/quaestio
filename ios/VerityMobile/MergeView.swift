@@ -2,7 +2,6 @@ import SwiftUI
 
 struct MergeView: View {
     @EnvironmentObject private var appState: MobileAppState
-    @State private var prompt: String = ""
     @State private var apiKey: String = ""
     @State private var customEndpoint: String = ""
     @State private var customModel: String = ""
@@ -22,6 +21,10 @@ struct MergeView: View {
 
     private var selectedProvider: MergeProviderDescriptor? {
         providers.first(where: { $0.id == selectedProviderId }) ?? providers.first
+    }
+
+    private var sourcePrompt: String {
+        appState.resolvedMergeSourcePrompt()
     }
 
     var body: some View {
@@ -125,7 +128,7 @@ struct MergeView: View {
                         HStack(spacing: 10) {
                             Button {
                                 Task {
-                                    await appState.refreshMergeAggregationStatuses(sourcePrompt: prompt)
+                                    await appState.refreshMergeAggregationStatuses(sourcePrompt: sourcePrompt)
                                 }
                             } label: {
                                 Text("Refresh statuses")
@@ -134,7 +137,7 @@ struct MergeView: View {
 
                             Button {
                                 Task {
-                                    _ = await appState.collectLatestRepliesForMerge(sourcePrompt: prompt)
+                                    _ = await appState.collectLatestRepliesForMerge(sourcePrompt: sourcePrompt)
                                 }
                             } label: {
                                 Text("Collect now")
@@ -166,16 +169,6 @@ struct MergeView: View {
                             .padding(14)
                             .glassCard(padding: 0, radius: AppTheme.compactRadius)
                         }
-                    }
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        SectionLabel(text: "Prompt")
-
-                        TextField("Describe what the merge should produce", text: $prompt, axis: .vertical)
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(AppTheme.textPrimary)
-                            .padding(14)
-                            .glassCard(padding: 0, radius: AppTheme.compactRadius)
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
@@ -301,7 +294,7 @@ struct MergeView: View {
 
         isRunning = true
         appState.statusMessage = "Collecting source replies..."
-        let responses = await appState.collectLatestRepliesForMerge(sourcePrompt: prompt)
+        let responses = await appState.collectLatestRepliesForMerge(sourcePrompt: sourcePrompt)
         guard !responses.isEmpty else {
             isRunning = false
             appState.statusMessage = "No source replies available"
@@ -316,7 +309,7 @@ struct MergeView: View {
             customEndpoint: customEndpoint.trimmingCharacters(in: .whitespacesAndNewlines),
             customModel: customModel.trimmingCharacters(in: .whitespacesAndNewlines),
             fallbackModelsRaw: fallbackModels,
-            sourcePrompt: prompt,
+            sourcePrompt: sourcePrompt,
             mergeInstructions: mergeInstructions.trimmingCharacters(in: .whitespacesAndNewlines),
             clarificationInstructions: clarificationInstructions.trimmingCharacters(in: .whitespacesAndNewlines),
             clarificationText: "",
@@ -365,7 +358,7 @@ struct MergeView: View {
             customEndpoint: customEndpoint.trimmingCharacters(in: .whitespacesAndNewlines),
             customModel: customModel.trimmingCharacters(in: .whitespacesAndNewlines),
             fallbackModelsRaw: fallbackModels,
-            sourcePrompt: prompt,
+            sourcePrompt: sourcePrompt,
             mergeInstructions: mergeInstructions.trimmingCharacters(in: .whitespacesAndNewlines),
             clarificationInstructions: clarificationInstructions.trimmingCharacters(in: .whitespacesAndNewlines),
             clarificationText: clarification,
