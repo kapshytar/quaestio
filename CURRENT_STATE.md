@@ -5,6 +5,7 @@
 - This file is the authoritative summary of the current functional state and migration intent for `chat-aggregator-mobile`.
 - Root docs in `Verity/` still win for workspace-wide or cross-repo rules.
 - `README.md` explains repo purpose and directory layout.
+- `CHANGELOG.md` is the required running history for meaningful mobile milestones.
 - Migration notes under `docs/` explain the move into this repo and should reflect actual migration status.
 
 ## Stable
@@ -38,6 +39,9 @@
   - Android first during migration
   - shared first as the target state
   - native only where necessary
+- Versioning/changelog rule for this repo is now explicit:
+  - meaningful mobile milestones must be recorded in `CHANGELOG.md`
+  - version bump decisions must follow the global Verity `1.x.y` policy instead of being implied
 
 ## In Progress
 
@@ -68,6 +72,7 @@
   - platform-specific cookie/file plumbing
 - Normal iOS app updates must not wipe cookies or login state. Do not change the bundle identifier, clear website data, or uninstall the app unless that destructive step is explicitly chosen.
 - Embedded social/OAuth login should be treated as provider-compatibility-sensitive, not assumed to work just because the page renders inside a webview.
+- Do not ship meaningful mobile client changes without updating this repo's `CHANGELOG.md`.
 
 ## Next Steps
 

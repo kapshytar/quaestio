@@ -24,6 +24,11 @@ This repo follows a layered source-of-truth model.
 - Write platform-specific code only for parts that cannot be shared cleanly.
 - Android and iOS wrappers should adapt platform lifecycle, system APIs, and native constraints around shared mobile logic instead of replacing it.
 
+6. Versioning and changelog are mandatory
+- Meaningful mobile milestones must be recorded in this repo's `CHANGELOG.md`.
+- Version bump decisions must follow the global Verity `1.x.y` rule rather than being improvised per session.
+- Do not treat release/version changes as optional cleanup after the fact.
+
 Working rule:
 
 `Verity architecture first -> Android first during migration -> shared first as the target state -> native only where necessary`
