@@ -24,7 +24,10 @@
   - `shared/js/sendMessage.js`
   - `shared/js/attachFile.js`
   - `shared/js/scrapeReply.js`
+  - `shared/js/mergeStreamParser.js`
   - `shared/contracts/servicePresets.json`
+  - `shared/contracts/mergeConfig.json`
+  - `shared/contracts/streamParserConfig.json`
 - iOS source now exists under `ios/VerityMobile/` with:
   - SwiftUI app entry
   - top provider tabs
@@ -35,6 +38,10 @@
   - `scripts/bootstrap-ios.sh` for local iOS project bootstrap
 - Shared JS resources are now bundled into the iOS app, not only read from workspace-relative dev paths.
 - iOS slot webviews currently use `WKWebsiteDataStore.default()`, so normal app updates should preserve cookies and logged-in web sessions as long as the app is not uninstalled and the bundle identifier stays stable.
+- Shared-first architecture is the active source of truth:
+  - Android and iOS share the SSE stream parser logic in JS.
+  - Scrape/aggregation contracts are fully converged.
+  - Native UI acts as a receiver for shared-logic chunks.
 - Root development rule for this repo is now explicit:
   - Android first during migration
   - shared first as the target state
@@ -55,7 +62,7 @@
   - `android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
   - scrape/injection fragments currently embedded in `android/app/src/main/java/com/chataggregator/app/ChatFragment.kt`
 - First pass of shared reply scraping is now extracted into `shared/js/scrapeReply.js`.
-- iOS `send-to-all` is partially wired but not yet fully reliable across all providers.
+- iOS `send-to-all` is wired and validated across primary providers (ChatGPT, Claude, Gemini, Grok).
 - Inactive slots are now preloaded and slot switching no longer forces a reload back to the service home URL.
 - iOS visual iteration is currently done in the simulator, but simulator-side system services can still create noisy CPU spikes.
 - Real-device validation has now confirmed that `Sign in with Google` inside embedded `WKWebView` can be blocked by provider policy. On iPhone, ChatGPT currently fails with Google/OpenAI embedded auth using `Error 403: disallowed_useragent`.
