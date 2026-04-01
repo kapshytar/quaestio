@@ -11,6 +11,9 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Shader
+import android.graphics.BitmapFactory
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
@@ -42,11 +45,13 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.content.ContextCompat
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.chip.Chip
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
 import com.chataggregator.app.databinding.ActivityMainBinding
@@ -60,7 +65,9 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
 import java.net.URLEncoder
+import java.net.URL
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
@@ -110,6 +117,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     @Volatile private var lastProjectFetchError: String? = null
     @Volatile private var projectSlotUrlLoadGeneration: Long = 0L
     @Volatile private var activeProjectSlotUrls: Map<String, String> = emptyMap()
+    private val serviceIconCache = ConcurrentHashMap<String, BitmapDrawable>()
 
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -419,12 +427,72 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
         checkboxes.forEachIndexed { index, cb ->
             val service = slotManager.getService(index)
-            cb.text = service.name
+            val chip = cb as? Chip ?: return@forEachIndexed
+            chip.text = ""
+            chip.contentDescription = service.name
+            chip.setChipIconVisible(true)
+            chip.chipIconSize = dp(16).toFloat()
+            chip.chipStartPadding = dp(8).toFloat()
+            chip.chipEndPadding = dp(8).toFloat()
+            chip.iconStartPadding = 0f
+            chip.iconEndPadding = 0f
             cb.isChecked = slotManager.isSlotEnabled(index)
+            applyServiceIconToChip(chip, service.id, slotManager.isSlotEnabled(index))
             cb.setOnCheckedChangeListener { _, isChecked ->
                 slotManager.setSlotEnabled(index, isChecked)
+                applyServiceIconToChip(chip, slotManager.getService(index).id, isChecked)
             }
         }
+    }
+
+    private fun applyServiceIconToChip(chip: com.google.android.material.chip.Chip, serviceId: String, enabled: Boolean) {
+        val cached = serviceIconCache[serviceId]
+        if (cached != null) {
+            chip.chipIcon = cached.constantState?.newDrawable(resources)?.mutate()?.apply {
+                alpha = if (enabled) 255 else 160
+            }
+            return
+        }
+
+        chip.chipIcon = null
+        val faviconUrl = serviceFaviconUrl(serviceId) ?: return
+        thread {
+            try {
+                val connection = URL(faviconUrl).openConnection()
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                connection.getInputStream().use { stream ->
+                    val bitmap = BitmapFactory.decodeStream(stream) ?: return@use
+                    val drawable = BitmapDrawable(resources, bitmap).apply {
+                        setBounds(0, 0, dp(16), dp(16))
+                    }
+                    serviceIconCache[serviceId] = drawable
+                    runOnUiThread {
+                        val stillSameService = checkboxes.indexOf(chip).takeIf { it >= 0 }?.let { slotManager.getService(it).id } == serviceId
+                        if (stillSameService) {
+                            chip.chipIcon = drawable.constantState?.newDrawable(resources)?.mutate()?.apply {
+                                alpha = if (enabled) 255 else 160
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // Keep the chip empty if favicon fetch fails.
+            }
+        }
+    }
+
+    private fun serviceFaviconUrl(serviceId: String): String? {
+        val domain = when (serviceId.trim().lowercase(Locale.ROOT)) {
+            "chatgpt" -> "https://chatgpt.com"
+            "claude" -> "https://claude.ai"
+            "gemini" -> "https://gemini.google.com"
+            "grok" -> "https://grok.com"
+            "deepseek" -> "https://chat.deepseek.com"
+            "perplexity" -> "https://www.perplexity.ai"
+            else -> return null
+        }
+        return "https://www.google.com/s2/favicons?sz=64&domain_url=$domain"
     }
 
     private fun setupMessageInput() {
@@ -571,13 +639,174 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         projectPanelScrimView = findViewById(R.id.projectPanelScrim)
         projectListContainerView = findViewById(R.id.projectListContainer)
 
-        val togglePanel = View.OnClickListener {
-            if (isProjectPanelVisible) hideProjectPanel() else showProjectPanel()
-        }
-        binding.projectTabContainer.setOnClickListener(togglePanel)
-        binding.projectChevron.setOnClickListener(togglePanel)
+        binding.projectTabContainer.setOnClickListener(null)
+        binding.projectChevron.setOnClickListener(null)
+        binding.chipProjects.setOnClickListener { showProjectDialog() }
+        binding.chipSessions.setOnClickListener { showSessionsDialog() }
         projectPanelScrimView.setOnClickListener { hideProjectPanel() }
         projectPanelView.setOnClickListener { /* consume */ }
+        projectPanelView.visibility = View.GONE
+        projectPanelScrimView.visibility = View.GONE
+        updateContextChips()
+    }
+
+    private fun showProjectDialog() {
+        setContextChipLoading(binding.chipProjects, true, "Loading…")
+        thread {
+            try {
+                val projectTree = loadProjectTreeFromApi()
+                runOnUiThread {
+                    setContextChipLoading(binding.chipProjects, false)
+                    projectTreeNodes = projectTree
+                    ensureExpandedProjectNodes(projectTree)
+                    showProjectDialogWithData(projectTree)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    setContextChipLoading(binding.chipProjects, false)
+                    Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun setContextChipLoading(chip: com.google.android.material.chip.Chip, loading: Boolean, loadingLabel: String? = null) {
+        chip.isEnabled = !loading
+        chip.alpha = if (loading) 0.72f else 1f
+        if (loading) {
+            chip.tag = chip.text?.toString()
+            chip.text = loadingLabel ?: "Loading…"
+        } else {
+            chip.text = when (chip.id) {
+                R.id.chipProjects -> resolveActiveProjectDisplayName()
+                R.id.chipSessions -> SettingsManager.getParallelIngestSessionId(this)?.let { "S$it" } ?: "Sessions"
+                else -> (chip.tag as? String).orEmpty()
+            }
+            chip.tag = null
+        }
+    }
+
+    private fun styleDialogWindow(dialog: AlertDialog) {
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+    }
+
+    private fun showProjectDialogWithData(projects: List<ProjectTreeNode>) {
+        var dialog: AlertDialog? = null
+        val contentLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(10), dp(20), 0)
+        }
+
+        val scrollView = ScrollView(this).apply {
+            isFillViewport = true
+        }
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(18).toFloat()
+                setColor(ContextCompat.getColor(this@MainActivity, R.color.bg_surface))
+            }
+            clipToOutline = true
+        }
+
+        val listContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+
+        addProjectDialogRow(listContainer, "No Project", activeProjectId == null, depth = 0, hasChildren = false) {
+            setActiveProject(null)
+            dialog?.dismiss()
+        }
+
+        projects.forEach { node ->
+            renderProjectDialogNode(listContainer, node, depth = 0) {
+                dialog?.dismiss()
+            }
+        }
+
+        scrollView.addView(listContainer)
+        container.addView(scrollView, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        contentLayout.addView(container)
+
+        dialog = AlertDialog.Builder(this, R.style.ServiceDialogTheme)
+            .setTitle("Projects")
+            .setView(contentLayout)
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+        styleDialogWindow(dialog)
+        dialog.setOnDismissListener {
+            setContextChipLoading(binding.chipProjects, false)
+        }
+    }
+
+    private fun renderProjectDialogNode(container: LinearLayout, node: ProjectTreeNode, depth: Int, onComplete: () -> Unit) {
+        val hasChildren = node.children.isNotEmpty()
+        val selected = activeProjectId == node.id
+
+        addProjectDialogRow(container, node.name, selected, depth, hasChildren) {
+            setActiveProject(node.id)
+            onComplete()
+        }
+
+        if (hasChildren) {
+            node.children.forEach { child ->
+                renderProjectDialogNode(container, child, depth + 1, onComplete)
+            }
+        }
+    }
+
+    private fun addProjectDialogRow(
+        container: LinearLayout,
+        title: String,
+        selected: Boolean,
+        depth: Int,
+        hasChildren: Boolean,
+        onSelect: () -> Unit
+    ) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(14 + depth * 14), dp(12), dp(14), dp(12))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(if (selected) Color.parseColor("#143B82F6") else Color.TRANSPARENT)
+            }
+        }
+
+        val toggle = TextView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(16), ViewGroup.LayoutParams.WRAP_CONTENT)
+            gravity = android.view.Gravity.CENTER
+            text = if (hasChildren) "▾" else ""
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            textSize = 12f
+        }
+
+        val label = TextView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            text = title
+            setTextColor(ContextCompat.getColor(this@MainActivity, if (selected) R.color.action_primary else R.color.text_primary))
+            textSize = 14f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+
+        row.addView(toggle)
+        row.addView(label)
+        row.setOnClickListener { onSelect() }
+        container.addView(row)
+        container.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                marginStart = dp(14)
+                marginEnd = dp(14)
+            }
+            setBackgroundColor(Color.parseColor("#14" + Integer.toHexString(ContextCompat.getColor(this@MainActivity, R.color.text_secondary)).takeLast(6)))
+        })
     }
 
     private fun showProjectPanel() {
@@ -615,6 +844,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                         projectTreeNodes = projectTree
                         ensureExpandedProjectNodes(projectTree)
                         renderProjectPanel(projectTree)
+                        updateContextChips()
                     } else {
                         val err = lastProjectFetchError
                         if (!err.isNullOrBlank()) {
@@ -624,6 +854,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                         }
                         projectTreeNodes = emptyList()
                         renderProjectPanel(emptyList())
+                        updateContextChips()
                     }
                 }
             } catch (e: Exception) {
@@ -631,6 +862,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                     Toast.makeText(this@MainActivity, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
                     projectTreeNodes = emptyList()
                     renderProjectPanel(emptyList())
+                    updateContextChips()
                 }
             }
         }
@@ -958,23 +1190,30 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             .rotation(if (isProjectPanelVisible) 90f else 0f)
             .setDuration(160)
             .start()
+        updateContextChips()
     }
 
     fun setActiveProject(projectId: String?) {
-        activeProjectId = projectId
+        val normalizedProjectId = projectId?.trim()?.takeIf { it.isNotBlank() }
+        if (activeProjectId == normalizedProjectId) return
+
+        activeProjectId = normalizedProjectId
+        SettingsManager.clearParallelIngestState(this)
         updateProjectSelectorAppearance()
+        updateSessionIndicator()
 
         val loadGen = ++projectSlotUrlLoadGeneration
-        if (projectId.isNullOrBlank()) {
+        if (normalizedProjectId.isNullOrBlank()) {
             activeProjectSlotUrls = emptyMap()
             stageSessionUrlsForLoading(emptyMap())
             scheduleSlotLoading(forceReload = true)
+            Toast.makeText(this, "Project cleared; session reset", Toast.LENGTH_SHORT).show()
             return
         }
 
         thread {
-            val serviceUrls = loadProjectSlotUrlsByService(projectId)
-            if (projectSlotUrlLoadGeneration != loadGen || activeProjectId != projectId) {
+            val serviceUrls = loadProjectSlotUrlsByService(normalizedProjectId)
+            if (projectSlotUrlLoadGeneration != loadGen || activeProjectId != normalizedProjectId) {
                 return@thread
             }
             activeProjectSlotUrls = serviceUrls
@@ -993,11 +1232,12 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             }
 
             runOnUiThread {
-                if (projectSlotUrlLoadGeneration != loadGen || activeProjectId != projectId) {
+                if (projectSlotUrlLoadGeneration != loadGen || activeProjectId != normalizedProjectId) {
                     return@runOnUiThread
                 }
                 stageSessionUrlsForLoading(slotOverrides)
                 scheduleSlotLoading(forceReload = true)
+                Toast.makeText(this, "Project changed; session reset", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1480,10 +1720,15 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             return
         }
 
+        val hadCurrentQuestionContext =
+            getCurrentQuestionSessionId() != null && getCurrentQuestionAggregatedNoteId() != null
+
         SettingsManager.setLastUserPrompt(this, text)
         SettingsManager.setParallelIngestSourcePrompt(this, text)
-        SettingsManager.clearParallelIngestState(this)
-        SettingsManager.setParallelIngestSourcePrompt(this, text)
+        if (!hadCurrentQuestionContext) {
+            SettingsManager.clearParallelIngestState(this)
+            SettingsManager.setParallelIngestSourcePrompt(this, text)
+        }
         if (SettingsManager.isDetailedLoggingEnabled(this)) {
             val bytes = text.toByteArray(Charsets.UTF_8)
             val hexString = bytes.joinToString(separator = " ") { byte -> "%02x".format(byte) }
@@ -2140,6 +2385,33 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         }
     }
 
+    private fun updateContextChips() {
+        binding.chipProjects.text = resolveActiveProjectDisplayName()
+        val hasProject = !activeProjectId.isNullOrBlank()
+        binding.chipProjects.isChecked = hasProject
+        binding.chipProjects.chipIcon = null
+
+        val sessionId = SettingsManager.getParallelIngestSessionId(this)
+        binding.chipSessions.text = sessionId?.let { "S$it" } ?: "Sessions"
+        binding.chipSessions.isChecked = sessionId != null
+        binding.chipSessions.chipIcon = null
+    }
+
+    private fun resolveActiveProjectDisplayName(): String {
+        val projectId = activeProjectId?.trim().orEmpty()
+        if (projectId.isBlank()) return "Projects"
+        return findProjectName(projectTreeNodes, projectId) ?: "Projects"
+    }
+
+    private fun findProjectName(nodes: List<ProjectTreeNode>, projectId: String): String? {
+        nodes.forEach { node ->
+            if (node.id == projectId) return node.name
+            val nested = findProjectName(node.children, projectId)
+            if (nested != null) return nested
+        }
+        return null
+    }
+
     private fun findTextViewInTab(view: View): TextView? {
         if (view is TextView) return view
         if (view is ViewGroup) {
@@ -2356,6 +2628,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     }
 
     private fun showSessionsDialog() {
+        setContextChipLoading(binding.chipSessions, true, "Loading…")
         val rpcUrl = SettingsManager.getDreamTrackerRpcUrl(this)
         val apiKey = SettingsManager.getDreamTrackerApiKey(this)
         Log.i(TAG, "[SESSION] showSessionsDialog rpcUrl=${rpcUrl.isNotBlank()} apiKey=${apiKey.isNotBlank()}")
@@ -2379,6 +2652,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                     if (mergedSessions.isNotEmpty()) mergedSessions else localSessions
                 }
                 runOnUiThread {
+                    setContextChipLoading(binding.chipSessions, false)
                     Log.i(TAG, "[SESSION] showing dialog with ${sessions.size} sessions")
                     showSessionsDialogWithData(sessions)
                 }
@@ -2386,6 +2660,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             return
         }
         Log.i(TAG, "[SESSION] rpcUrl/apiKey missing, showing local sessions only")
+        setContextChipLoading(binding.chipSessions, false)
         showSessionsDialogWithData(sessionManager.getAllSessions())
     }
 
@@ -2521,23 +2796,37 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         }
         val listView = ListView(this).apply {
             adapter = sessionsAdapter
-            dividerHeight = dp(6)
+            divider = ColorDrawable(Color.parseColor("#1A737373"))
+            dividerHeight = dp(1)
+            setSelector(ColorDrawable(Color.parseColor("#103B82F6")))
+            setPadding(0, dp(4), 0, dp(4))
+            clipToPadding = false
         }
         val contentLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), 0)
-            addView(searchInput, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ))
-            addView(listView, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            ).apply {
-                topMargin = dp(10)
-            })
         }
+        val surface = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = AppCompatResources.getDrawable(this@MainActivity, R.drawable.bg_dialog_surface)
+            clipToOutline = true
+            setPadding(dp(14), dp(14), dp(14), dp(10))
+        }
+        surface.addView(searchInput, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        surface.addView(listView, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            0,
+            1f
+        ).apply {
+            topMargin = dp(10)
+        })
+        contentLayout.addView(surface, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
 
         val applySessionFilter = { query: String ->
             val normalized = query.trim().lowercase(Locale.ROOT)
@@ -2565,8 +2854,18 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         val dialog = AlertDialog.Builder(this, R.style.ServiceDialogTheme)
             .setTitle(R.string.sessions_title)
             .setView(contentLayout)
+            .setNeutralButton(R.string.sessions_clear_active) { _, _ ->
+                SettingsManager.clearParallelIngestSessionId(this)
+                SettingsManager.clearParallelIngestActiveNoteId(this)
+                updateSessionIndicator()
+                Toast.makeText(this, R.string.sessions_cleared, Toast.LENGTH_SHORT).show()
+            }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+        styleDialogWindow(dialog)
+        dialog.setOnDismissListener {
+            setContextChipLoading(binding.chipSessions, false)
+        }
 
         listView.setOnItemClickListener { _, _, position, _ ->
             val session = filteredSessions.getOrNull(position) ?: return@setOnItemClickListener
@@ -3056,18 +3355,10 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     }
 
     private fun updateSessionIndicator() {
-        val debugEnabled = SettingsManager.isUnstableFeaturesEnabled(this)
-
-        // Hide the session indicator entirely when not in debug mode
-        if (!debugEnabled) {
-            binding.sessionStateDot.visibility = View.GONE
-            binding.tvSessionId.visibility = View.GONE
-            return
-        }
-
-        binding.sessionStateDot.visibility = View.VISIBLE
         val sessionId = SettingsManager.getParallelIngestSessionId(this)
         val hasSession = sessionId != null
+        binding.sessionStateDot.visibility = View.VISIBLE
+        binding.tvSessionId.visibility = View.GONE
         val color = if (hasSession) {
             Color.parseColor("#4CAF50")
         } else {
@@ -3076,17 +3367,16 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         binding.sessionStateDot.backgroundTintList = ColorStateList.valueOf(color)
         binding.sessionStateDot.alpha = 1f
         binding.sessionStateDot.contentDescription = if (hasSession) {
-            "Session ID received"
+            "Session active"
         } else {
-            "Session ID not received"
+            "No active session"
         }
-
-        if (hasSession) {
-            binding.tvSessionId.text = "S$sessionId"
-            binding.tvSessionId.visibility = View.VISIBLE
+        binding.chipSessions.contentDescription = if (hasSession) {
+            "Active session S$sessionId"
         } else {
-            binding.tvSessionId.visibility = View.GONE
+            "No active session"
         }
+        updateContextChips()
     }
 
     private fun updateBottomActionForTab(position: Int) {

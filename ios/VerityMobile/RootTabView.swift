@@ -22,6 +22,9 @@ struct RootTabView: View {
                 }
             }
         }
+        .task {
+            await appState.loadProjectTreeIfNeeded()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 appState.handleAppDidBecomeActive()

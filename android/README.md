@@ -12,3 +12,11 @@ Notes:
 
 - This directory was migrated from `../chat-aggregator-android`.
 - The old standalone repo is now a migration source and rollback reference, not the intended long-term home.
+- canonical local Android deploy path from the mobile repo root:
+  - `./scripts/deploy-android-device.sh`
+- do not keep rebuilding ad-hoc `adb install` commands by hand when the root deploy script already knows how to:
+  - build the debug APK
+  - choose the single connected device
+  - install it
+  - verify the installed version
+  - relaunch the app

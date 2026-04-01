@@ -89,6 +89,7 @@ val generateLatestChangelogResource = tasks.register("generateLatestChangelogRes
 }
 val prepareSharedStreamingJs = tasks.register<Copy>("prepareSharedStreamingJs") {
     from(rootProject.file("../shared/js/mergeStreamParser.js"))
+    from(rootProject.file("../shared/js/scrapeReply.js"))
     into(generatedSharedAssetsDir)
 }
 

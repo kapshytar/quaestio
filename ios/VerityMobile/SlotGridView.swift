@@ -2,6 +2,79 @@ import SwiftUI
 import UIKit
 import WebKit
 
+private struct GrowingComposerTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var measuredHeight: CGFloat
+
+    let minHeight: CGFloat
+    let maxHeight: CGFloat
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.delegate = context.coordinator
+        view.backgroundColor = .clear
+        view.textColor = UIColor(AppTheme.textPrimary)
+        view.tintColor = UIColor(AppTheme.actionFill)
+        view.font = .systemFont(ofSize: 14, weight: .medium)
+        view.isScrollEnabled = false
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.autocapitalizationType = .sentences
+        view.autocorrectionType = .yes
+        view.returnKeyType = .default
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return view
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+        recalculateHeight(for: uiView)
+    }
+
+    private func recalculateHeight(for textView: UITextView) {
+        let targetWidth = textView.bounds.width > 0 ? textView.bounds.width : UIScreen.main.bounds.width
+        let fittingSize = CGSize(width: targetWidth, height: .greatestFiniteMagnitude)
+        let measured = textView.sizeThatFits(fittingSize).height
+        let clamped = min(max(measured, minHeight), maxHeight)
+        if abs(measuredHeight - clamped) > 0.5 {
+            DispatchQueue.main.async {
+                measuredHeight = clamped
+                textView.isScrollEnabled = measured > maxHeight
+            }
+        } else {
+            textView.isScrollEnabled = measured > maxHeight
+        }
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        private let parent: GrowingComposerTextView
+
+        init(_ parent: GrowingComposerTextView) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+            let targetWidth = textView.bounds.width > 0 ? textView.bounds.width : UIScreen.main.bounds.width
+            let fittingSize = CGSize(width: targetWidth, height: .greatestFiniteMagnitude)
+            let measured = textView.sizeThatFits(fittingSize).height
+            let clamped = min(max(measured, parent.minHeight), parent.maxHeight)
+            if abs(parent.measuredHeight - clamped) > 0.5 {
+                DispatchQueue.main.async {
+                    self.parent.measuredHeight = clamped
+                }
+            }
+            textView.isScrollEnabled = measured > parent.maxHeight
+        }
+    }
+}
+
 private struct MergeConvergeIcon: View {
     var body: some View {
         ZStack {
@@ -36,6 +109,10 @@ struct SlotGridView: View {
     @State private var showsSlotControlStrip = false
     @State private var slotAddressDraft = ""
     @StateObject private var systemAuth = SystemAuthCoordinator()
+    @State private var showsProjectSheet = false
+    @State private var showsSessionSheet = false
+    @State private var sessionSearchText = ""
+    @State private var composerHeight: CGFloat = 22
 
     private var selectedSlot: SlotState? {
         appState.slots.first { $0.id == appState.selectedSlotId } ?? appState.slots.first
@@ -99,6 +176,10 @@ struct SlotGridView: View {
         .animation(.spring(response: 0.28, dampingFraction: 0.88), value: showsSlotControlStrip)
         .onAppear {
             syncSlotAddressDraft()
+            Task {
+                await appState.loadProjectTreeIfNeeded()
+                await appState.loadSessionsIfNeeded()
+            }
         }
         .onChange(of: appState.selectedSlotId) { _, _ in
             showsSlotControlStrip = false
@@ -106,6 +187,16 @@ struct SlotGridView: View {
         }
         .onChange(of: appState.slots) { _, _ in
             syncSlotAddressDraft()
+        }
+        .sheet(isPresented: $showsProjectSheet) {
+            projectSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showsSessionSheet) {
+            sessionSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -124,7 +215,7 @@ struct SlotGridView: View {
                         } label: {
                             HStack(spacing: 8) {
                                 Circle()
-                                    .fill(tabAccent(for: slot))
+                                    .fill(slot.isEnabled ? tabAccent(for: slot) : AppTheme.textMuted.opacity(0.75))
                                     .frame(width: 6, height: 6)
 
                                 Text(slot.title)
@@ -188,6 +279,187 @@ struct SlotGridView: View {
                 }
             }
             .padding(.bottom, 1)
+        }
+    }
+
+    private var projectButton: some View {
+        Button {
+            showsProjectSheet = true
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "folder")
+                    .font(.system(size: 12, weight: .bold))
+                Text(appState.activeProjectDisplayName())
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+            }
+            .foregroundStyle(appState.activeProjectId == nil ? AppTheme.textSecondary : AppTheme.actionFill)
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(appState.activeProjectId == nil ? Color.white.opacity(0.05) : AppTheme.panelStrong)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var sessionButton: some View {
+        Button {
+            showsSessionSheet = true
+        } label: {
+            HStack(spacing: 3) {
+                Circle()
+                    .fill(appState.sessionIndicatorText == nil ? Color.red.opacity(0.9) : Color.green.opacity(0.9))
+                    .frame(width: 6, height: 6)
+
+                Text(appState.sessionIndicatorText ?? "Sessions")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .lineLimit(1)
+                    .foregroundStyle(appState.sessionIndicatorText == nil ? AppTheme.textSecondary : AppTheme.textPrimary)
+                    .truncationMode(.tail)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(AppTheme.textMuted)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.white.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var projectSheet: some View {
+        NavigationStack {
+            List {
+                Section("Current") {
+                    Button("No Project") {
+                        appState.setActiveProject(nil)
+                        showsProjectSheet = false
+                    }
+                }
+
+                Section("Projects") {
+                    if appState.projectTreeNodes.isEmpty {
+                        Button("Load Projects") {
+                            Task { await appState.loadProjectTree() }
+                        }
+                    } else {
+                        ForEach(flattenProjects(appState.projectTreeNodes)) { node in
+                            Button {
+                                appState.setActiveProject(node.id)
+                                showsProjectSheet = false
+                            } label: {
+                                HStack {
+                                    Text(String(repeating: "  ", count: node.depth) + node.name)
+                                    Spacer()
+                                    if appState.activeProjectId == node.id {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Projects")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") { showsProjectSheet = false }
+                }
+            }
+            .task {
+                await appState.loadProjectTreeIfNeeded()
+            }
+        }
+    }
+
+    private var filteredSessions: [SessionSnapshot] {
+        appState.sessionsForDisplay(matching: sessionSearchText)
+    }
+
+    private var sessionSheet: some View {
+        NavigationStack {
+            List {
+                Section("Current") {
+                    LabeledContent("Active Session", value: appState.sessionIndicatorText ?? "No session")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+
+                    Button("Clear Active Session", role: .destructive) {
+                        appState.clearActiveSessionSelection()
+                        showsSessionSheet = false
+                    }
+                }
+
+                Section("Saved Sessions") {
+                    if appState.isLoadingSessions {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text("Loading sessions…")
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                    } else if filteredSessions.isEmpty {
+                        Button("Load Sessions") {
+                            Task { await appState.loadSessions() }
+                        }
+                    } else {
+                        ForEach(filteredSessions) { session in
+                            Button {
+                                appState.loadSession(session)
+                                showsSessionSheet = false
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        Text(session.sessionId.map { "S\($0)" } ?? "S-")
+                                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                            .foregroundStyle(AppTheme.actionFill)
+                                        Text(appState.displaySessionName(session))
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(AppTheme.textPrimary)
+                                            .multilineTextAlignment(.leading)
+                                    }
+
+                                    Text(formattedSessionTimestamp(session.timestamp))
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $sessionSearchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search by session id or title")
+            .navigationTitle("Sessions")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Refresh") {
+                        Task { await appState.loadSessions() }
+                    }
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") { showsSessionSheet = false }
+                }
+            }
+            .task {
+                await appState.loadSessionsIfNeeded()
+            }
         }
     }
 
@@ -318,6 +590,42 @@ struct SlotGridView: View {
         .padding(.bottom, 4)
     }
 
+    private var contextCompactRow: some View {
+        HStack(spacing: 8) {
+            projectButton
+            sessionButton
+        }
+    }
+
+    private var statusRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "waveform.path.ecg")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(AppTheme.textMuted)
+
+            Text(appState.statusMessage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+                .lineLimit(2)
+
+            Spacer()
+        }
+        .padding(.horizontal, 6)
+    }
+
+    private func flattenProjects(_ roots: [ProjectTreeNode], depth: Int = 0) -> [FlatProjectNode] {
+        roots.flatMap { node in
+            [FlatProjectNode(id: node.id, name: node.name, depth: depth)] + flattenProjects(node.children, depth: depth + 1)
+        }
+    }
+
+    private func formattedSessionTimestamp(_ timestamp: Int64) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "d MMM, HH:mm"
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000))
+    }
+
     private var slotToggleRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
@@ -325,9 +633,7 @@ struct SlotGridView: View {
                     Button {
                         toggleSlotEnabled(slot.id)
                     } label: {
-                        Text("S\(slot.id)")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(slot.isEnabled ? AppTheme.textPrimary : AppTheme.textSecondary)
+                        slotChipLabel(for: slot)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
                             .background(
@@ -341,8 +647,37 @@ struct SlotGridView: View {
                     }
                     .buttonStyle(.plain)
                 }
+
+                contextCompactRow
             }
             .padding(.horizontal, 2)
+        }
+    }
+
+    @ViewBuilder
+    private func slotChipLabel(for slot: SlotState) -> some View {
+        if let iconURL = ServiceIconCatalog.faviconURL(for: slot.serviceId) {
+            AsyncImage(url: iconURL, transaction: Transaction(animation: .easeInOut(duration: 0.12))) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 14, height: 14)
+                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                        .saturation(slot.isEnabled ? 1 : 0)
+                        .brightness(slot.isEnabled ? 0 : -0.08)
+                        .opacity(slot.isEnabled ? 1 : 0.72)
+                default:
+                    Circle()
+                        .fill(slot.isEnabled ? tabAccent(for: slot).opacity(0.9) : AppTheme.textMuted.opacity(0.7))
+                        .frame(width: 10, height: 10)
+                }
+            }
+        } else {
+            Circle()
+                .fill(slot.isEnabled ? tabAccent(for: slot).opacity(0.9) : AppTheme.textMuted.opacity(0.7))
+                .frame(width: 10, height: 10)
         }
     }
 
@@ -353,11 +688,23 @@ struct SlotGridView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(AppTheme.textMuted)
 
-                TextField("Send to active chats", text: $appState.composerText)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(AppTheme.textPrimary)
-                    .textInputAutocapitalization(.sentences)
-                    .disableAutocorrection(false)
+                ZStack(alignment: .topLeading) {
+                    if appState.composerText.isEmpty {
+                        Text("Send to active chats")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(AppTheme.textMuted)
+                            .padding(.top, 1)
+                            .allowsHitTesting(false)
+                    }
+
+                    GrowingComposerTextView(
+                        text: $appState.composerText,
+                        measuredHeight: $composerHeight,
+                        minHeight: 22,
+                        maxHeight: 88
+                    )
+                    .frame(height: composerHeight)
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -524,4 +871,10 @@ struct SlotGridView: View {
         UIApplication.shared.open(url)
         showsSlotControlStrip = false
     }
+}
+
+private struct FlatProjectNode: Identifiable {
+    let id: String
+    let name: String
+    let depth: Int
 }

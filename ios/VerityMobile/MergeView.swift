@@ -37,6 +37,8 @@ struct MergeView: View {
                         subtitle: "Collect outputs from multiple models and turn them into one focused response."
                     )
 
+                    statusCard
+
                     VStack(alignment: .leading, spacing: 12) {
                         SectionLabel(text: "Provider")
 
@@ -137,12 +139,19 @@ struct MergeView: View {
 
                             Button {
                                 Task {
-                                    _ = await appState.collectLatestRepliesForMerge(sourcePrompt: sourcePrompt)
+                                    _ = await appState.manualCollectCurrentQuestion()
                                 }
                             } label: {
-                                Text("Collect now")
+                                HStack(spacing: 8) {
+                                    if appState.isManualCollecting {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
+                                    Text(appState.isManualCollecting ? "Collecting..." : "Collect now")
+                                }
                             }
                             .buttonStyle(SecondaryCapsuleButtonStyle())
+                            .disabled(appState.isManualCollecting)
                         }
 
                         Text(appState.mergeAggregationSummary)
@@ -281,6 +290,51 @@ struct MergeView: View {
         if !shouldShowAdvancedConfig(for: selectedProvider) {
             showAdvancedConfig = false
         }
+    }
+
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(appState.sessionIndicatorText == nil ? Color.red.opacity(0.9) : Color.green.opacity(0.9))
+                    .frame(width: 8, height: 8)
+
+                Text(appState.sessionIndicatorText ?? "No session")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(appState.sessionIndicatorText == nil ? AppTheme.textSecondary : AppTheme.textPrimary)
+
+                if let activeProjectId = appState.activeProjectId {
+                    Text("•")
+                        .foregroundStyle(AppTheme.textMuted)
+                    Text(activeProjectId)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+
+            Text(appState.statusMessage)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+                .lineLimit(3)
+
+            if !appState.recentIngestEvents.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(appState.recentIngestEvents, id: \.self) { event in
+                        Text(event)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(AppTheme.textMuted)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(14)
+        .glassCard(padding: 0, radius: AppTheme.compactRadius)
     }
 
     private func runMerge() async {

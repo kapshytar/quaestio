@@ -65,7 +65,7 @@ data class ClarificationPayload(
 
 object AggregatedIngestClient {
     private const val TAG = "AggregatedIngestClient"
-    private const val PLATFORM = "android"
+    private const val SOURCE_PLATFORM_CODE = "AND"
     private const val APP_NAME = "chat-aggregator-android"
     private val gson = Gson()
     private val prettyGson = GsonBuilder().setPrettyPrinting().create()
@@ -397,7 +397,7 @@ object AggregatedIngestClient {
     ): JsonObject {
         val event = JsonObject()
         event.addProperty("trace_id", traceId)
-        event.addProperty("platform", PLATFORM)
+        event.addProperty("source_platform_code", SOURCE_PLATFORM_CODE)
         event.addProperty("app_name", APP_NAME)
         event.addProperty("app_version", com.chataggregator.app.BuildConfig.DISPLAY_VERSION)
         if (sessionId == null) {

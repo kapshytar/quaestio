@@ -26,10 +26,56 @@ struct SlotState: Identifiable, Hashable, Codable {
     var isEnabled: Bool
 }
 
+enum ServiceIconCatalog {
+    static func faviconURL(for serviceId: String) -> URL? {
+        let domain: String
+        switch serviceId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "chatgpt":
+            domain = "https://chatgpt.com"
+        case "claude":
+            domain = "https://claude.ai"
+        case "gemini":
+            domain = "https://gemini.google.com"
+        case "grok":
+            domain = "https://grok.com"
+        case "deepseek":
+            domain = "https://chat.deepseek.com"
+        case "perplexity":
+            domain = "https://www.perplexity.ai"
+        default:
+            return nil
+        }
+
+        let encodedDomain = domain.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? domain
+        return URL(string: "https://www.google.com/s2/favicons?sz=64&domain_url=\(encodedDomain)")
+    }
+}
+
 struct SlotDebugEvent: Identifiable, Hashable {
     let id = UUID()
     let timestamp: Date
     let message: String
+}
+
+struct ProjectTreeNode: Identifiable, Hashable, Codable {
+    let id: String
+    let name: String
+    let children: [ProjectTreeNode]
+}
+
+struct ProjectTagRow: Decodable, Sendable {
+    let id: String
+    let name: String
+}
+
+struct ProjectTagParentRow: Decodable, Sendable {
+    let tagId: String?
+    let parentId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case tagId = "tag_id"
+        case parentId = "parent_id"
+    }
 }
 
 enum UserAgentPreset: String, CaseIterable, Identifiable, Codable {

@@ -22,7 +22,7 @@ object KeyObfuscation {
 
     // Supabase JWT Service Role Key (Base64 encoded) - for testing only
     // Encoded from: ***REMOVED-OLD-JWT***
-    private const val SUPABASE_API_KEY = "ZXlKaGJHY2lPaUpJVXpJMU5pSjkuZXlKcmRIa2lPaUpGUTBRaUxDSmxjblpaSWpwN0ltMWhaR2xqSWpwMGNuVmxMQ0psZW5obElqcDBjblZsTENKamRIa2lPbHNpZEhObFlXNGlYU0lzSW1ScGRHSmxjaTFsZW5obExDSmxiV0Z5YVdSaGRHbHZiaUo5ZlEuTkpRVjRWOFp5X3FEYVBLbGJEa2J3LWlSYlk4ZVBVa3AxS3BxRVUxSEJv"
+    private const val SUPABASE_API_KEY = "ZXlKaGJHY2lPaUpJVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SnBjM01pT2lKemRYQmhZbUZ6WlNJc0luSmxaaUk2SW1KcWNXdDJiSE51WlhWcWNtTm1jSFpqZG5wbUlpd2ljbTlzWlNJNkluTmxjblpwWTJWZmNtOXNaU0lzSW1saGRDSTZNVGMzTVRjM09UY3lNeXdpWlhod0lqb3lNRGczTXpVMU56SXpmUS5OSlFWNFY4eVpfcURhUEtsYkRrYnctaVJiWWw4ZVBVa3AxS3BxRVUxSEJv"
 
     /**
      * Decode and return the embedded DeepSeek API key for testing.
@@ -84,7 +84,7 @@ object KeyObfuscation {
 
             // If it looks like a JWT (contains dots), return as-is (plaintext from env var)
             if (trimmed.contains(".")) {
-                return trimmed
+                return trimmed.removePrefix("Bearer ").removePrefix("bearer ").trim()
             }
 
             // Otherwise, try to decode as Base64
@@ -93,14 +93,14 @@ object KeyObfuscation {
                 String(decoded, Charsets.UTF_8)
             } catch (e: Exception) {
                 // If decoding fails, return the original value
-                trimmed
+                trimmed.removePrefix("Bearer ").removePrefix("bearer ").trim()
             }
         }
 
         // Fallback: use embedded Base64-encoded value
         return try {
             val decoded = Base64.getDecoder().decode(SUPABASE_API_KEY)
-            String(decoded, Charsets.UTF_8)
+            String(decoded, Charsets.UTF_8).removePrefix("Bearer ").removePrefix("bearer ").trim()
         } catch (e: Exception) {
             ""
         }

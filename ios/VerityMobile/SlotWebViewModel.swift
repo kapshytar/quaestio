@@ -3,6 +3,14 @@ import os
 import Combine
 import WebKit
 
+struct SlotScrapeReply {
+    let text: String?
+    let error: String
+    let documentTitle: String
+    let promptCandidateText: String
+    let rawResult: String
+}
+
 @MainActor
 final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
     private static let logger = Logger(subsystem: "com.verity.mobile", category: "SlotWebView")
@@ -17,6 +25,12 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     @Published private(set) var popupLocationHref: String = ""
     @Published private(set) var popupNavigationState: String = "idle"
     @Published private(set) var popupNavigationError: String = ""
+    @Published private(set) var lastScrapeState: String = "idle"
+    @Published private(set) var lastScrapeError: String = ""
+    @Published private(set) var lastScrapeDocumentTitle: String = ""
+    @Published private(set) var lastScrapePromptCandidate: String = ""
+    @Published private(set) var lastScrapePreview: String = ""
+    @Published private(set) var lastScrapeCandidateTrace: String = ""
     @Published private(set) var debugEvents: [SlotDebugEvent] = []
     @Published private(set) var popupWebView: WKWebView?
     let webView: WKWebView
@@ -178,6 +192,12 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         popupLocationHref = ""
         popupNavigationState = "idle"
         popupNavigationError = ""
+        lastScrapeState = "idle"
+        lastScrapeError = ""
+        lastScrapeDocumentTitle = ""
+        lastScrapePromptCandidate = ""
+        lastScrapePreview = ""
+        lastScrapeCandidateTrace = ""
     }
 
     func closePopup() {
@@ -191,13 +211,105 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         recordEvent("popup-closed")
     }
 
-    func scrapeLatestReply(serviceId: String, sourcePrompt: String) async -> String? {
+    func scrapeLatestReply(serviceId: String, sourcePrompt: String) async -> SlotScrapeReply? {
         let payload: [String: Any] = [
             "serviceId": serviceId,
             "sourcePrompt": sourcePrompt,
         ]
         let script = SharedScriptBridge.buildInvocation(namespace: scrapeScript, payload: payload)
-        return try? await webView.evaluateJavaScript(script) as? String
+        guard let raw = try? await webView.evaluateJavaScript(script) as? String else {
+            lastScrapeState = "invoke-failed"
+            lastScrapeError = "Script invocation failed"
+            lastScrapeDocumentTitle = ""
+            lastScrapePromptCandidate = ""
+            lastScrapePreview = ""
+            lastScrapeCandidateTrace = ""
+            recordEvent("scrape-fail \(serviceId) invoke")
+            return nil
+        }
+
+        guard let response = decodeJSONResult(raw) else {
+            lastScrapeState = "parse-failed"
+            lastScrapeError = "Scrape JSON parse failed"
+            lastScrapeDocumentTitle = ""
+            lastScrapePromptCandidate = ""
+            lastScrapePreview = raw.prefix(180).description
+            lastScrapeCandidateTrace = ""
+            recordEvent("scrape-fail \(serviceId) parse")
+            return nil
+        }
+
+        let documentTitle = (response["document_title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let promptCandidateMap = response["prompt_candidate"] as? [String: Any]
+        let promptCandidateText = (promptCandidateMap?["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = (response["text"] as? String ?? response["replyText"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let error = (response["error"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectedReplyPreview = (response["selected_reply_preview"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidateTrace = Self.formatCandidateTrace(response["candidate_trace"])
+        let success = response["success"] as? Bool == true && !text.isEmpty
+
+        lastScrapeState = success ? "success" : "failed"
+        lastScrapeError = error
+        lastScrapeDocumentTitle = documentTitle
+        lastScrapePromptCandidate = promptCandidateText
+        lastScrapePreview = (success ? text : (selectedReplyPreview.isEmpty ? raw : selectedReplyPreview)).prefix(220).description
+        lastScrapeCandidateTrace = candidateTrace
+        let errorLabel = error.isEmpty ? "unknown" : error
+        recordEvent(success ? "scrape-success \(serviceId) chars=\(text.count)" : "scrape-fail \(serviceId) \(errorLabel)")
+
+        return SlotScrapeReply(
+            text: success ? text : nil,
+            error: error,
+            documentTitle: documentTitle,
+            promptCandidateText: promptCandidateText,
+            rawResult: raw
+        )
+    }
+
+    func isStillGenerating(serviceId: String) async -> Bool {
+        let sid = serviceId
+        let script = """
+        (function() {
+          try {
+            const sid = \(String(reflecting: sid));
+            const checks = [
+              '[aria-label="Stop generating"]',
+              '[aria-label="Stop streaming"]',
+              '[data-testid="stop-button"]',
+              'button[aria-label*="Stop" i]'
+            ];
+            if (sid === 'claude') checks.push('[aria-label="Stop Response"]');
+            if (sid === 'gemini') { checks.push('mat-icon[data-mat-icon-name="stop_circle"]', 'button[data-test-id="stop-button"]', '.stop-button'); }
+            if (sid === 'deepseek') checks.push('.stop-button');
+            if (sid === 'perplexity') checks.push('[aria-label*="stop" i]');
+            if (sid === 'grok') checks.push('[aria-label*="Stop" i]');
+
+            function hasLayout(el) {
+              const r = el.getBoundingClientRect();
+              return r.width > 0 && r.height > 0;
+            }
+
+            const found = checks.some((sel) => {
+              try {
+                return Array.from(document.querySelectorAll(sel)).some(hasLayout);
+              } catch (_) {
+                return false;
+              }
+            });
+            return JSON.stringify({ generating: found });
+          } catch (_) {
+            return JSON.stringify({ generating: false });
+          }
+        })()
+        """
+
+        guard let rawResult = try? await webView.evaluateJavaScript(script) as? String,
+              let response = decodeJSONResult(rawResult)
+        else {
+            return false
+        }
+
+        return response["generating"] as? Bool == true
     }
 
     func handleAppDidBecomeActive() {
@@ -276,6 +388,53 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         }
 
         return object
+    }
+
+    private static func formatCandidateTrace(_ rawTrace: Any?) -> String {
+        guard let items = rawTrace as? [[String: Any]], !items.isEmpty else {
+            return ""
+        }
+
+        return items.map { item in
+            let index = item["index"] as? Int ?? 0
+            let success = item["success"] as? Bool == true
+            let error = (item["error"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let preview = (item["preview"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let promptCandidate = (item["prompt_candidate"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let embeddedPrompt = (item["embedded_prompt"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let embeddedPromptScore = item["embedded_prompt_score"] as? Int ?? 0
+            let structure = item["structure"] as? Int ?? 0
+            let flatLength = item["flat_length"] as? Int ?? 0
+            let containsPeer = item["contains_peer"] as? Bool == true
+            let fragmentOnly = item["fragment_only"] as? Bool == true
+            let richerParent = item["richer_parent"] as? Bool == true
+            let richerChild = item["richer_child"] as? Bool == true
+
+            let status = success ? "success" : "fail"
+            var parts = ["#\(index) \(status)"]
+            if !error.isEmpty {
+                parts.append("error=\(error)")
+            }
+            parts.append("chars=\(flatLength)")
+            parts.append("structure=\(structure)")
+            if embeddedPromptScore > 0 {
+                parts.append("embeddedScore=\(embeddedPromptScore)")
+            }
+            if containsPeer { parts.append("containsPeer") }
+            if fragmentOnly { parts.append("fragmentOnly") }
+            if richerParent { parts.append("richerParent") }
+            if richerChild { parts.append("richerChild") }
+            if !promptCandidate.isEmpty {
+                parts.append("prompt=\(promptCandidate.prefix(120))")
+            } else if !embeddedPrompt.isEmpty {
+                parts.append("embeddedPrompt=\(embeddedPrompt.prefix(120))")
+            }
+            if !preview.isEmpty {
+                parts.append("preview=\(preview.prefix(160))")
+            }
+            return parts.joined(separator: " | ")
+        }
+        .joined(separator: "\n")
     }
 
     private func normalizedHost(for url: URL) -> String {

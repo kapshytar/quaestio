@@ -6,6 +6,12 @@ struct SettingsView: View {
     @State private var copiedMessage: String?
     @State private var sharePayload: SharePayload?
 
+    private var appVersionText: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "v\(short) (\(build))"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -19,6 +25,7 @@ struct SettingsView: View {
                     settingsCard(title: "Status") {
                         statusRow(label: "Runtime", value: appState.statusMessage)
                         statusRow(label: "Cookie Store", value: "default")
+                        statusRow(label: "Version", value: appVersionText)
                     }
 
                     settingsCard(title: "User Agent Experiment") {
@@ -276,6 +283,12 @@ private struct SlotDiagnosticsBlock: View {
                 value: model.currentHostCookieNames.isEmpty ? "none" : model.currentHostCookieNames.joined(separator: ", "),
                 multiline: true
             )
+            diagnosticsRow(label: "Scrape State", value: model.lastScrapeState)
+            diagnosticsRow(label: "Scrape Error", value: model.lastScrapeError.isEmpty ? "none" : model.lastScrapeError, multiline: true)
+            diagnosticsRow(label: "Scrape Title", value: model.lastScrapeDocumentTitle.isEmpty ? "none" : model.lastScrapeDocumentTitle, multiline: true)
+            diagnosticsRow(label: "Prompt Candidate", value: model.lastScrapePromptCandidate.isEmpty ? "none" : model.lastScrapePromptCandidate, multiline: true)
+            diagnosticsRow(label: "Scrape Preview", value: model.lastScrapePreview.isEmpty ? "none" : model.lastScrapePreview, multiline: true)
+            diagnosticsRow(label: "Candidate Trace", value: model.lastScrapeCandidateTrace.isEmpty ? "none" : model.lastScrapeCandidateTrace, multiline: true)
 
             if !model.popupLocationHref.isEmpty || model.popupNavigationState != "idle" || !model.popupNavigationError.isEmpty {
                 diagnosticsRow(label: "Popup State", value: model.popupNavigationState)
@@ -326,7 +339,13 @@ private struct SlotDiagnosticsBlock: View {
             "UA: \(model.currentUserAgent.isEmpty ? "pending" : model.currentUserAgent)",
             "Cookie Host: \(model.currentCookieHost.isEmpty ? "pending" : model.currentCookieHost)",
             "Host Cookies: \(model.currentHostCookieCount)",
-            "Cookie Names: \(model.currentHostCookieNames.isEmpty ? "none" : model.currentHostCookieNames.joined(separator: ", "))"
+            "Cookie Names: \(model.currentHostCookieNames.isEmpty ? "none" : model.currentHostCookieNames.joined(separator: ", "))",
+            "Scrape State: \(model.lastScrapeState)",
+            "Scrape Error: \(model.lastScrapeError.isEmpty ? "none" : model.lastScrapeError)",
+            "Scrape Title: \(model.lastScrapeDocumentTitle.isEmpty ? "none" : model.lastScrapeDocumentTitle)",
+            "Prompt Candidate: \(model.lastScrapePromptCandidate.isEmpty ? "none" : model.lastScrapePromptCandidate)",
+            "Scrape Preview: \(model.lastScrapePreview.isEmpty ? "none" : model.lastScrapePreview)",
+            "Candidate Trace: \(model.lastScrapeCandidateTrace.isEmpty ? "none" : model.lastScrapeCandidateTrace)"
         ]
 
         if !model.popupLocationHref.isEmpty || model.popupNavigationState != "idle" || !model.popupNavigationError.isEmpty {

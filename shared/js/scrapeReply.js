@@ -22,28 +22,86 @@
 
       function normalizeInlineText(t) {
         return String(t || '')
+          .replace(/\r/g, '')
+          .replace(/\u00a0/g, ' ')
+          .replace(/[ \t]+/g, ' ')
+          .trim();
+      }
+
+      function normalizeMathText(value) {
+        return String(value || '')
+          .replace(/\\text\{([^}]*)\}/g, '$1')
+          .replace(/\\circ/g, '°')
+          .replace(/\\pm/g, '±')
           .replace(/\s+/g, ' ')
           .trim();
+      }
+
+      function tableToMarkdown(tableEl) {
+        const rows = Array.from(tableEl.querySelectorAll('tr'))
+          .map((tr) => Array.from(tr.querySelectorAll('th,td')).map((cell) => normalizeInlineText(extractInlineText(cell))))
+          .filter((row) => row.some((cell) => cell.length > 0));
+        if (rows.length < 2) return '';
+        const colCount = rows.reduce((acc, row) => Math.max(acc, row.length), 0);
+        if (colCount < 2) return '';
+
+        const esc = (value) => String(value || '').replace(/\|/g, '\\|');
+        const pad = (row) => {
+          const out = row.slice(0, colCount);
+          while (out.length < colCount) out.push('');
+          return out;
+        };
+
+        const header = pad(rows[0]);
+        const body = rows.slice(1).map(pad);
+        const sep = Array(colCount).fill('---');
+
+        const lines = [];
+        lines.push('| ' + header.map(esc).join(' | ') + ' |');
+        lines.push('| ' + sep.join(' | ') + ' |');
+        body.forEach((row) => lines.push('| ' + row.map(esc).join(' | ') + ' |'));
+        return lines.join('\n');
+      }
+
+      function shouldSkipElement(el) {
+        if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+        const tag = (el.tagName || '').toUpperCase();
+        if (['BUTTON', 'SVG', 'PATH', 'STYLE', 'SCRIPT', 'NOSCRIPT', 'MAT-ICON'].includes(tag)) return true;
+        if (el.getAttribute('aria-hidden') === 'true') return true;
+        const className = String(el.className || '');
+        return /table-footer|action-button|copy-button|buttons-container|response-container-header|response-container-footer/i.test(className)
+          || !!el.closest('.table-footer, [hide-from-message-actions]');
       }
 
       function extractInlineText(node) {
         if (!node) return '';
         if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
         if (node.nodeType !== Node.ELEMENT_NODE) return '';
-        const tag = (node.tagName || '').toUpperCase();
+        const el = node;
+        if (shouldSkipElement(el)) return '';
+        if (el.classList?.contains('math-inline') || el.classList?.contains('katex') || (el.tagName || '').toUpperCase() === 'MATH') {
+          const math = el.getAttribute('data-math')
+            || el.querySelector?.('annotation[encoding="application/x-tex"]')?.textContent
+            || el.querySelector?.('annotation')?.textContent;
+          if (math) return normalizeMathText(math);
+        }
+        const tag = (el.tagName || '').toUpperCase();
         if (tag === 'BR') return '\n';
-        if (tag === 'CODE') return '`' + normalizeInlineText(node.textContent) + '`';
-        if (tag === 'A') return normalizeInlineText(node.textContent || node.href || '');
-        return Array.from(node.childNodes || []).map(extractInlineText).join('');
+        if (tag === 'STRONG' || tag === 'B') return '**' + Array.from(el.childNodes || []).map(extractInlineText).join('') + '**';
+        if (tag === 'EM' || tag === 'I') return '*' + Array.from(el.childNodes || []).map(extractInlineText).join('') + '*';
+        if (tag === 'CODE' && !el.closest('pre')) return '`' + Array.from(el.childNodes || []).map(extractInlineText).join('') + '`';
+        if (tag === 'A') return normalizeInlineText(el.textContent || el.href || '');
+        if (tag === 'P') return Array.from(el.childNodes || []).map(extractInlineText).join('');
+        return Array.from(el.childNodes || []).map(extractInlineText).join('');
       }
 
       function extractStructuredText(rootEl) {
         if (!rootEl) return '';
         const parts = [];
         const blockTags = new Set([
-          'P', 'DIV', 'SECTION', 'ARTICLE', 'MAIN', 'ASIDE', 'HEADER', 'FOOTER',
-          'UL', 'OL', 'LI', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH',
-          'PRE', 'BLOCKQUOTE', 'HR'
+          'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DIV', 'DL', 'FIELDSET', 'FIGCAPTION', 'FIGURE',
+          'FOOTER', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'LI', 'MAIN', 'NAV',
+          'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'TBODY', 'THEAD', 'TFOOT', 'TR', 'UL'
         ]);
 
         function pushNewline() {
@@ -63,12 +121,22 @@
 
           const el = node;
           const tag = (el.tagName || '').toUpperCase();
-          if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return;
+          if (shouldSkipElement(el)) return;
           if (!visible(el) && el !== rootEl) return;
 
           if (tag === 'BR') {
             parts.push('\n');
             return;
+          }
+
+          if (tag === 'TABLE') {
+            const md = tableToMarkdown(el);
+            if (md) {
+              pushNewline();
+              parts.push(md);
+              parts.push('\n');
+              return;
+            }
           }
 
           if (tag === 'HR') {
@@ -95,6 +163,27 @@
             if (!String(parts[parts.length - 1]).endsWith('\n')) parts.push('\n');
             parts.push('```');
             pushNewline();
+            return;
+          }
+
+          if (tag === 'STRONG' || tag === 'B') {
+            parts.push('**');
+            Array.from(el.childNodes || []).forEach(walk);
+            parts.push('**');
+            return;
+          }
+
+          if (tag === 'EM' || tag === 'I') {
+            parts.push('*');
+            Array.from(el.childNodes || []).forEach(walk);
+            parts.push('*');
+            return;
+          }
+
+          if (tag === 'CODE' && !el.closest('pre')) {
+            parts.push('`');
+            Array.from(el.childNodes || []).forEach(walk);
+            parts.push('`');
             return;
           }
 
@@ -165,6 +254,225 @@
         return flatText(t).toLowerCase();
       }
 
+      function promptFuzzyKey(value) {
+        return promptText(value)
+          .replace(/[`"'“”‘’«»]/g, '')
+          .replace(/[?!.,:;…]+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      function boundedLevenshtein(a, b, maxDistance) {
+        const left = String(a || '');
+        const right = String(b || '');
+        if (left === right) return 0;
+        if (!left.length) return right.length;
+        if (!right.length) return left.length;
+        if (Math.abs(left.length - right.length) > maxDistance) return maxDistance + 1;
+
+        let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+        for (let i = 1; i <= left.length; i += 1) {
+          const current = [i];
+          let minInRow = current[0];
+          for (let j = 1; j <= right.length; j += 1) {
+            const substitutionCost = left[i - 1] === right[j - 1] ? 0 : 1;
+            const value = Math.min(
+              previous[j] + 1,
+              current[j - 1] + 1,
+              previous[j - 1] + substitutionCost
+            );
+            current.push(value);
+            if (value < minInRow) minInRow = value;
+          }
+          if (minInRow > maxDistance) return maxDistance + 1;
+          previous = current;
+        }
+        return previous[right.length];
+      }
+
+      function fuzzyPromptMatchScore(targetRaw, candidateRaw) {
+        const target = promptFuzzyKey(targetRaw);
+        const candidate = promptFuzzyKey(candidateRaw);
+        if (!target || !candidate) return 0;
+        if (target === candidate) return 500 + candidate.length;
+
+        const maxLength = Math.max(target.length, candidate.length);
+        if (maxLength < 4 || maxLength > 64) return 0;
+
+        const maxDistance = maxLength <= 12 ? 2 : (maxLength <= 24 ? 3 : 4);
+        const distance = boundedLevenshtein(target, candidate, maxDistance);
+        if (distance > maxDistance) return 0;
+
+        const similarity = 1 - (distance / maxLength);
+        if (maxLength <= 16 && similarity >= 0.84) return 400 + Math.round(similarity * 100);
+        if (maxLength <= 32 && similarity >= 0.9) return 350 + Math.round(similarity * 100);
+        return 0;
+      }
+
+      function escapeRegex(value) {
+        return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+
+      function assistantHeaderPattern() {
+        if (serviceId === 'gemini') return '(?:gemini said)';
+        if (serviceId === 'grok') return '(?:grok said)';
+        if (serviceId === 'chatgpt') return '(?:chatgpt said)';
+        if (serviceId === 'claude') return '(?:claude said)';
+        return '(?:assistant said|chatgpt said|claude said|gemini said|grok said)';
+      }
+
+      function extractEmbeddedPromptText(value) {
+        const text = normalizeText(value);
+        if (!text) return '';
+        const assistantPattern = assistantHeaderPattern();
+        const patterns = [
+          new RegExp(
+            '(?:^|\\n)(?:#{1,6}\\s*)?(?:you said|вы сказали)\\s*:?\\s*\\n?([\\s\\S]*?)(?:\\n(?:#{1,6}\\s*)?'
+              + assistantPattern + '\\b[:\\s-]*)',
+            'i'
+          ),
+          new RegExp(
+            '^(?:#{1,6}\\s*)?(?:you said|вы сказали)\\s*:?\\s*([\\s\\S]*?)(?:\\n(?:#{1,6}\\s*)?'
+              + assistantPattern + '\\b[:\\s-]*)',
+            'i'
+          )
+        ];
+        for (const pattern of patterns) {
+          const match = text.match(pattern);
+          if (match?.[1]) {
+            return normalizeText(match[1]);
+          }
+        }
+        return '';
+      }
+
+      function promptComparableText(value) {
+        return extractEmbeddedPromptText(value) || String(value || '');
+      }
+
+      function promptScoreForCurrentSource(value) {
+        const target = promptText(sourcePrompt);
+        const candidate = promptText(promptComparableText(value));
+        if (!target || !candidate) return 0;
+        if (candidate === target) return 1000 + candidate.length;
+        if (candidate.includes(target)) return 800 + target.length;
+        if (target.includes(candidate) && candidate.length >= Math.min(80, target.length)) return 600 + candidate.length;
+        return fuzzyPromptMatchScore(sourcePrompt, promptComparableText(value));
+      }
+
+      function promptMatchesCurrentSource(value) {
+        const target = promptText(sourcePrompt);
+        const candidate = promptText(promptComparableText(value));
+        if (!target || !candidate) return false;
+        if (candidate === target) return true;
+        if (candidate.includes(target)) return true;
+        if (target.includes(candidate) && candidate.length >= Math.min(80, target.length)) return true;
+        return fuzzyPromptMatchScore(sourcePrompt, promptComparableText(value)) > 0;
+      }
+
+      function dropMetadataLine(line) {
+        const value = String(line || '').trim().toLowerCase();
+        if (!value) return false;
+        return (
+          value === 'source' ||
+          value === 'share' ||
+          value === 'edit' ||
+          value === 'retry' ||
+          value === 'copy' ||
+          value === 'regenerate' ||
+          value === 'open sidebar' ||
+          value === 'reply...' ||
+          value === 'temporary chat' ||
+          value === 'incognito chat' ||
+          value === 'tools' ||
+          value === 'fast' ||
+          value === 'open' ||
+          value.startsWith('model:') ||
+          value.includes('window.__') ||
+          value.includes('can make mistakes') ||
+          value.includes('please double-check responses') ||
+          value.includes('check important info') ||
+          value.includes('see cookie preferences') ||
+          value === 'opens in a new window' ||
+          /^www\.[^\s]+$/.test(value) ||
+          /^\d[\d,.]*\s*(?:s|sec|secs|second|seconds)$/.test(value) ||
+          /^\d+(?:[.,]\d+)?\s*s\s+fast\b.*$/.test(value) ||
+          /^\d+\s+sources?$/.test(value)
+        );
+      }
+
+      function sanitizeScrapedReply(raw) {
+        let text = normalizeText(raw);
+        if (!text) return '';
+
+        const prompt = normalizeInlineText(sourcePrompt);
+        const escapedPrompt = prompt ? escapeRegex(prompt) : '';
+        if (escapedPrompt) {
+          text = text.replace(new RegExp('^\\s*' + escapedPrompt + '[\\s:"\'\\-]*\\n?', 'i'), '').trim();
+          text = text.replace(new RegExp('^(?:#{1,6}\\s*)?you said\\s*:?\\s*' + escapedPrompt + '[\\s:"\'\\-]*\\n?', 'i'), '').trim();
+          text = text.replace(new RegExp('^you said\\s+' + escapedPrompt + '[\\s:"\'\\-]*', 'i'), '').trim();
+        }
+
+        text = text.replace(/^(?:#{1,6}\s*)?you said\s*:?\s*\n?/i, '').trim();
+
+        if (serviceId === 'gemini') {
+          text = text.replace(/^conversation with gemini\s*/i, '');
+          text = text.replace(/\byou said\b[\s\S]*?\bgemini said\b[:\s-]*/i, '');
+          text = text.replace(/^(?:#{1,6}\s*)?gemini said\b[:\s-]*/im, '');
+          text = text.replace(/^(?:you said|вы сказали)\s*$/im, '');
+          text = text.replace(/^(?:gemini said)\s*$/im, '');
+          text = text.replace(/opens in a new window[^\n]*/ig, '');
+          text = text.trim();
+        }
+
+        if (serviceId === 'grok' && escapedPrompt) {
+          text = text.replace(new RegExp('^\\s*' + escapedPrompt + '\\s*\\n?', 'i'), '').trim();
+          text = text.replace(/\n\d[\d,.]*\s*(?:s|sec|secs|second|seconds)?\s*$/im, '');
+          text = text.replace(/\n(?:thinking|reasoning)\s*$/im, '');
+          text = text.trim();
+        }
+
+        text = text.replace(/\s+\d+(?:[.,]\d+)?\s*s\s+fast\b[\s\S]*$/i, '').trim();
+
+        if (sourcePrompt) {
+          const lines = text.split('\n');
+          while (lines.length > 0 && !String(lines[0] || '').trim()) lines.shift();
+          const firstLine = normalizeInlineText(lines[0] || '');
+          const secondLine = normalizeInlineText(lines[1] || '');
+          const firstTwo = normalizeInlineText([lines[0], lines[1]].filter(Boolean).join(' '));
+          const secondIsPunctuation = /^[?!.,:;…-]+$/.test(secondLine);
+
+          if (promptMatchesCurrentSource(firstTwo)) {
+            lines.splice(0, secondIsPunctuation ? 2 : 1);
+          } else if (promptMatchesCurrentSource(firstLine)) {
+            lines.splice(0, secondIsPunctuation ? 2 : 1);
+          }
+          while (lines.length > 0 && !String(lines[0] || '').trim()) lines.shift();
+          text = normalizeText(lines.join('\n'));
+        }
+
+        const lines = text.split('\n');
+        const cleaned = [];
+        let pendingBlank = false;
+        for (const rawLine of lines) {
+          const line = String(rawLine || '').replace(/\t/g, '  ').replace(/[ \t]+$/g, '');
+          const compact = line.replace(/[ \t]+/g, ' ').trim();
+          if (dropMetadataLine(compact)) continue;
+          if (!compact) {
+            if (cleaned.length > 0) pendingBlank = true;
+            continue;
+          }
+          if (pendingBlank) {
+            cleaned.push('');
+            pendingBlank = false;
+          }
+          cleaned.push(line);
+        }
+
+        text = normalizeText(cleaned.join('\n'));
+        return text;
+      }
+
       function isComposerElement(el) {
         if (!el) return false;
         return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"]');
@@ -180,7 +488,10 @@
           t === 'copy' ||
           t === 'regenerate' ||
           t.startsWith('model:') ||
-          t.includes('window.__')
+          t.includes('window.__') ||
+          t.includes('can make mistakes') ||
+          t.includes('please double-check') ||
+          t.includes('check important info')
         );
       }
 
@@ -223,26 +534,24 @@
       }
 
       function findPromptAnchor() {
-        const target = promptText(sourcePrompt);
-        if (!target) return null;
+        if (!promptText(sourcePrompt)) return null;
         const selectors = [
           '[data-message-author-role="user"]',
           '[data-testid*="user"]',
+          '[data-testid*="prompt"]',
+          '[data-testid*="query"]',
+          '[class*="user-query"]',
+          '[class*="query-text"]',
+          '[class*="prompt"]',
           '[class*="user"]',
+          'user-query',
+          'query-entry',
+          'message-content',
           'article',
           'div'
         ];
         const seen = new Set();
         let best = null;
-
-        function scorePrompt(raw) {
-          const text = promptText(raw);
-          if (!text) return 0;
-          if (text === target) return 1000 + text.length;
-          if (text.includes(target)) return 800 + target.length;
-          if (target.includes(text) && text.length >= Math.min(80, target.length)) return 600 + text.length;
-          return 0;
-        }
 
         selectors.forEach((sel) => {
           try {
@@ -252,10 +561,11 @@
               if (!visible(el)) return;
               if (isComposerElement(el)) return;
               const raw = extractStructuredText(el);
-              const score = scorePrompt(raw);
+              const score = promptScoreForCurrentSource(raw);
               if (!score) return;
               const rect = el.getBoundingClientRect();
-              const candidate = { el, score, top: rect.top, bottom: rect.bottom };
+              const metrics = computeStructureMetrics(raw);
+              const candidate = { el, raw, flat: flatText(raw), score, top: rect.top, bottom: rect.bottom, metrics, structure: structureScore(metrics) };
               if (!best || candidate.score > best.score || (candidate.score === best.score && candidate.bottom > best.bottom)) {
                 best = candidate;
               }
@@ -313,7 +623,15 @@
         const selectors = [
           '[data-message-author-role="user"]',
           '[data-testid*="user"]',
+          '[data-testid*="prompt"]',
+          '[data-testid*="query"]',
+          '[class*="user-query"]',
+          '[class*="query-text"]',
+          '[class*="prompt"]',
           '[class*="user"]',
+          'user-query',
+          'query-entry',
+          'message-content',
           'article',
           'div'
         ];
@@ -334,12 +652,31 @@
               const flat = flatText(raw);
               if (flat.length < 6 || isMetadataLikeText(flat)) return;
               const rect = el.getBoundingClientRect();
-              candidates.push({ el, raw, flat, top: rect.top, bottom: rect.bottom });
+              candidates.push({
+                el,
+                raw,
+                flat,
+                top: rect.top,
+                bottom: rect.bottom,
+                score: sourcePrompt ? promptScoreForCurrentSource(raw) : 0
+              });
             });
           } catch (_) {}
         });
 
         if (candidates.length === 0) return null;
+        if (sourcePrompt) {
+          const matched = candidates.filter((candidate) => candidate.score > 0);
+          if (matched.length > 0) {
+            matched.sort((a, b) => {
+              if (b.score !== a.score) return b.score - a.score;
+              if (b.bottom !== a.bottom) return b.bottom - a.bottom;
+              if (b.top !== a.top) return b.top - a.top;
+              return b.flat.length - a.flat.length;
+            });
+            return matched[0];
+          }
+        }
         const latestBottom = candidates.reduce((best, candidate) => Math.max(best, candidate.bottom), Number.NEGATIVE_INFINITY);
         const recent = candidates.filter((candidate) => candidate.bottom >= latestBottom - 320);
         const pool = recent.length > 0 ? recent : candidates;
@@ -361,14 +698,134 @@
         };
       }
 
-      function buildSuccess(candidate) {
-        const promptCandidate = findPromptCandidateForReply(candidate?.el);
-        return JSON.stringify({
+      function summarizeReplyPreview(candidate) {
+        if (!candidate || !candidate.raw) return '';
+        return sanitizeScrapedReply(candidate.raw).slice(0, 260) || normalizeText(candidate.raw).slice(0, 260);
+      }
+
+      function summarizeCandidateDecision(entry, result, index) {
+        const candidate = entry?.candidate || entry;
+        const meta = entry?.meta || {};
+        const embeddedPrompt = extractEmbeddedPromptText(candidate?.raw || '');
+        const promptCandidate = result?.prompt_candidate || null;
+        const promptCandidateText = promptCandidate && typeof promptCandidate.text === 'string'
+          ? normalizeText(promptCandidate.text).slice(0, 160)
+          : '';
+        return {
+          index: index + 1,
+          success: !!result?.success,
+          error: String(result?.error || ''),
+          preview: summarizeReplyPreview(candidate),
+          top: Math.round(candidate?.top || 0),
+          bottom: Math.round(candidate?.bottom || 0),
+          structure: candidate?.structure || 0,
+          flat_length: String(candidate?.flat || '').length,
+          embedded_prompt: embeddedPrompt ? normalizeText(embeddedPrompt).slice(0, 160) : '',
+          embedded_prompt_score: promptScoreForCurrentSource(candidate?.raw || ''),
+          prompt_candidate: promptCandidateText,
+          contains_peer: !!meta.containsPeer,
+          fragment_only: !!meta.fragmentOnly,
+          richer_parent: !!meta.richerParent,
+          richer_child: !!meta.hasRicherChild
+        };
+      }
+
+      function attachCandidateTrace(result, traces) {
+        if (!result || !Array.isArray(traces) || traces.length === 0) return result;
+        return Object.assign({}, result, {
+          candidate_trace: traces.slice(0, 6)
+        });
+      }
+
+      function buildResult(candidate, requirePromptMatch) {
+        const embeddedPrompt = extractEmbeddedPromptText(candidate?.raw || '');
+        const promptCandidate = embeddedPrompt
+          ? {
+              el: candidate?.el,
+              raw: embeddedPrompt,
+              top: candidate?.top || 0,
+              bottom: candidate?.bottom || 0
+            }
+          : findPromptCandidateForReply(candidate?.el);
+        if (sourcePrompt && promptCandidate?.raw && !promptMatchesCurrentSource(promptCandidate.raw)) {
+          return {
+            success: false,
+            error: 'Selected reply belongs to a previous prompt',
+            document_title: document.title || '',
+            prompt_candidate: summarizePromptCandidate(promptCandidate),
+            selected_reply_preview: summarizeReplyPreview(candidate)
+          };
+        }
+        // Gemini removed from this list: conversation URL already scopes context (URL contains conversation ID).
+        // Requiring a DOM prompt candidate fails on Safari/WebKit where Angular custom elements (user-query)
+        // are not always accessible the same way as in Chromium.
+        const requireScopedPromptCandidate = requirePromptMatch || (sourcePrompt && ['chatgpt', 'grok'].includes(serviceId));
+        if (sourcePrompt && requireScopedPromptCandidate && !promptCandidate) {
+          return {
+            success: false,
+            error: 'No prompt candidate found for selected reply',
+            document_title: document.title || '',
+            selected_reply_preview: summarizeReplyPreview(candidate)
+          };
+        }
+        const cleanedText = sanitizeScrapedReply(candidate?.raw || '');
+        if (!cleanedText || flatText(cleanedText).length < 20 || isMetadataLikeText(cleanedText)) {
+          return {
+            success: false,
+            error: 'Sanitized reply is empty',
+            document_title: document.title || '',
+            prompt_candidate: summarizePromptCandidate(promptCandidate),
+            selected_reply_preview: summarizeReplyPreview(candidate)
+          };
+        }
+        return {
           success: true,
-          text: candidate?.raw || '',
+          text: cleanedText,
           document_title: document.title || '',
           prompt_candidate: summarizePromptCandidate(promptCandidate)
+        };
+      }
+
+      function buildSuccess(candidate, requirePromptMatch) {
+        return JSON.stringify(buildResult(candidate, requirePromptMatch));
+      }
+
+      function chooseSuccessfulCandidate(candidates, requirePromptMatch) {
+        const pool = Array.isArray(candidates) ? candidates : [];
+        let fallbackFailure = null;
+        const traces = [];
+        for (let index = 0; index < pool.length; index += 1) {
+          const entry = pool[index];
+          const candidate = entry?.candidate || entry;
+          const result = buildResult(candidate, requirePromptMatch);
+          traces.push(summarizeCandidateDecision(entry, result, index));
+          if (result?.success) return attachCandidateTrace(result, traces);
+          if (!fallbackFailure) fallbackFailure = result;
+        }
+        return attachCandidateTrace(fallbackFailure || {
+          success: false,
+          error: 'No valid reply candidate found',
+          document_title: document.title || ''
+        }, traces);
+      }
+
+      function findReplyAfterPromptFromCandidates(candidates, promptAnchor) {
+        if (!promptAnchor || !promptAnchor.el) return null;
+        const following = candidates.filter((candidate) => {
+          const relation = promptAnchor.el.compareDocumentPosition(candidate.el);
+          return !!(relation & Node.DOCUMENT_POSITION_FOLLOWING);
         });
+        if (following.length === 0) return null;
+        const firstTop = following.reduce((acc, candidate) => Math.min(acc, candidate.top), Infinity);
+        const scoped = following.filter((candidate) => candidate.top <= firstTop + 360);
+        const pool = scoped.length > 0 ? scoped : following;
+        pool.sort((a, b) => {
+          if (a.top !== b.top) return a.top - b.top;
+          if (b.structure !== a.structure) return b.structure - a.structure;
+          if (b.flat.length !== a.flat.length) return b.flat.length - a.flat.length;
+          return b.bottom - a.bottom;
+        });
+        return pool[0];
       }
 
       const selectors = [
@@ -420,25 +877,7 @@
       if (serviceId === 'chatgpt') {
         const exactReply = findChatGptReplyAfterPrompt();
         if (exactReply) {
-          return buildSuccess(exactReply);
-        }
-        const promptAnchor = findPromptAnchor();
-        if (promptAnchor) {
-          const following = candidates.filter((candidate) => {
-            const relation = promptAnchor.el.compareDocumentPosition(candidate.el);
-            return !!(relation & Node.DOCUMENT_POSITION_FOLLOWING);
-          });
-          if (following.length > 0) {
-            const firstTop = following.reduce((acc, c) => Math.min(acc, c.top), Infinity);
-            const scoped = following.filter((candidate) => candidate.top <= firstTop + 320);
-            const promptPool = scoped.length > 0 ? scoped : following;
-            promptPool.sort((a, b) => {
-              if (a.top !== b.top) return a.top - b.top;
-              if (a.bottom !== b.bottom) return a.bottom - b.bottom;
-              return b.flat.length - a.flat.length;
-            });
-            return buildSuccess(promptPool[0]);
-          }
+          return buildSuccess(exactReply, true);
         }
       }
 
@@ -453,6 +892,42 @@
       });
 
       const source = pruned.length > 0 ? pruned : candidates;
+      const promptAnchor = sourcePrompt ? findPromptAnchor() : null;
+      if (promptAnchor) {
+        const promptReply = findReplyAfterPromptFromCandidates(source, promptAnchor);
+        if (promptReply) {
+          const directResult = chooseSuccessfulCandidate([promptReply], true);
+          if (directResult?.success) {
+            return JSON.stringify(directResult);
+          }
+        }
+        const anchorEmbeddedPrompt = extractEmbeddedPromptText(promptAnchor.raw || '');
+        if (anchorEmbeddedPrompt && promptMatchesCurrentSource(anchorEmbeddedPrompt)) {
+          const anchorResult = chooseSuccessfulCandidate([promptAnchor], true);
+          if (anchorResult?.success) {
+            return JSON.stringify(anchorResult);
+          }
+        }
+      }
+
+      if (sourcePrompt) {
+        const promptMatchedCandidates = source.filter((candidate) => {
+          const embeddedPrompt = extractEmbeddedPromptText(candidate.raw);
+          if (embeddedPrompt && promptMatchesCurrentSource(embeddedPrompt)) return true;
+          const promptCandidate = findPromptCandidateForReply(candidate.el);
+          return !!(promptCandidate?.raw && promptMatchesCurrentSource(promptCandidate.raw));
+        });
+        if (promptMatchedCandidates.length > 0) {
+          promptMatchedCandidates.sort((a, b) => {
+            if (b.structure !== a.structure) return b.structure - a.structure;
+            if (b.flat.length !== a.flat.length) return b.flat.length - a.flat.length;
+            if (b.bottom !== a.bottom) return b.bottom - a.bottom;
+            return b.top - a.top;
+          });
+          return JSON.stringify(chooseSuccessfulCandidate(promptMatchedCandidates, true));
+        }
+      }
+
       const maxBottom = source.reduce((acc, c) => Math.max(acc, c.bottom), -Infinity);
       const nearBottom = source.filter((c) => c.bottom >= maxBottom - 260);
       const pool = nearBottom.length > 0 ? nearBottom : source;
@@ -490,14 +965,14 @@
           return 0;
         });
 
-        return buildSuccess(wrapped[0].candidate);
+        return JSON.stringify(chooseSuccessfulCandidate(wrapped, false));
       }
 
       pool.sort((a, b) => {
         if (b.flat.length !== a.flat.length) return b.flat.length - a.flat.length;
         return b.bottom - a.bottom;
       });
-      return buildSuccess(pool[0]);
+      return JSON.stringify(chooseSuccessfulCandidate(pool, false));
     } catch (error) {
       return JSON.stringify({
         success: false,

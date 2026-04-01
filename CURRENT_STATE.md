@@ -36,6 +36,8 @@
   - persistent `WKWebView` models per slot
   - `project.yml` for XcodeGen-driven project generation
   - `scripts/bootstrap-ios.sh` for local iOS project bootstrap
+  - `scripts/deploy-ios-device.sh` as the canonical real-device deploy path
+  - `scripts/ingest-smoke-check.sh` as the canonical DB-side smoke check for collect/ingest outcomes
 - Shared JS resources are now bundled into the iOS app, not only read from workspace-relative dev paths.
 - iOS slot webviews currently use `WKWebsiteDataStore.default()`, so normal app updates should preserve cookies and logged-in web sessions as long as the app is not uninstalled and the bundle identifier stays stable.
 - Shared-first architecture is the active source of truth:
@@ -81,6 +83,13 @@
   - billing
   - platform-specific cookie/file plumbing
 - Normal iOS app updates must not wipe cookies or login state. Do not change the bundle identifier, clear website data, or uninstall the app unless that destructive step is explicitly chosen.
+- Canonical iOS device deployment must be:
+  - regenerate `VerityMobile.xcodeproj` from `project.yml`
+  - build the `.app`
+  - install with `xcrun devicectl device install app`
+  - verify the installed device version matches the built version
+  - only then relaunch
+- Do not treat plain `xcodebuild install` as sufficient proof that the phone now runs the newest build.
 - Embedded social/OAuth login should be treated as provider-compatibility-sensitive, not assumed to work just because the page renders inside a webview.
 - Do not ship meaningful mobile client changes without updating this repo's `CHANGELOG.md`.
 

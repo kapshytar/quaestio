@@ -43,6 +43,21 @@ chat-aggregator-mobile/
 - `shared first as the target state`
 - `native only where necessary`
 
+## Canonical Local Commands
+
+- environment / device sanity check:
+  - `./scripts/mobile-doctor.sh`
+- iPhone deploy:
+  - `./scripts/deploy-ios-device.sh`
+- Android deploy:
+  - `./scripts/deploy-android-device.sh`
+- ingest / DB smoke check:
+  - `./scripts/ingest-smoke-check.sh <session_id> [platform_code]`
+  - example:
+    - `./scripts/ingest-smoke-check.sh 121 IOS`
+
+These are the canonical local device workflows for this repo. Prefer them over one-off manual `xcodebuild install`, ad-hoc `devicectl` sequences, or manually reconstructed `adb install` flows.
+
 ## Current Migration Direction
 
 1. Keep the migrated Android project in `android/` as the mobile Android home.
