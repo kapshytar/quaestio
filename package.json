@@ -1,6 +1,6 @@
 {
   "name": "verity",
-  "version": "1.102.0",
+  "version": "1.102.4",
   "description": "Verity - multi-AI chat aggregator",
   "main": "main.js",
   "scripts": {

@@ -142,7 +142,13 @@ const DREAM_RPC_NAMES = {
   clarification: 'ingest_clarification_v1'
 };
 const DREAM_DEBUG_RPC_PATH = '/rest/v1/rpc/log_ingest_debug_v1';
-const INGEST_DEBUG_PLATFORM = 'windows';
+const INGEST_DEBUG_SOURCE_PLATFORM_CODE = process.platform === 'win32'
+  ? 'WIN'
+  : process.platform === 'darwin'
+    ? 'MAC'
+    : process.platform === 'linux'
+      ? 'LNX'
+      : 'WEB';
 const INGEST_DEBUG_APP_NAME = 'chat-aggregator-windows';
 const DEFAULT_SUPABASE_URL = 'https://bjqkvlsneujrcfpvcvzf.supabase.co';
 const DEFAULT_SUPABASE_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJqcWt2bHNuZXVqcmNmcHZjdnpmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTc3OTcyMywiZXhwIjoyMDg3MzU1NzIzfQ.NJQV4V8yZ_qDaPKlbDkbw-iRbYl8ePUkp1KpqEU1HBo';
@@ -447,7 +453,7 @@ function appendDebugArtifact(traceId, eventPayload) {
     if (!artifact || typeof artifact !== 'object') {
       artifact = {
         trace_id: traceId,
-        platform: INGEST_DEBUG_PLATFORM,
+        source_platform_code: INGEST_DEBUG_SOURCE_PLATFORM_CODE,
         app_name: INGEST_DEBUG_APP_NAME,
           app_version: getRuntimeAppVersion(),
         created_at: nowIso,
@@ -472,7 +478,7 @@ function appendDebugArtifact(traceId, eventPayload) {
 async function emitIngestDebugEvent({ supabaseUrl, serviceRoleKey, eventPayload }) {
   const payload = {
     trace_id: eventPayload?.trace_id || sanitizeTraceId(),
-    platform: INGEST_DEBUG_PLATFORM,
+    source_platform_code: INGEST_DEBUG_SOURCE_PLATFORM_CODE,
     app_name: INGEST_DEBUG_APP_NAME,
       app_version: getRuntimeAppVersion(),
     session_id: Number.isInteger(eventPayload?.session_id) ? eventPayload.session_id : null,

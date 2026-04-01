@@ -923,6 +923,37 @@ function promptsReferToSameQuestion(currentPrompt, storedPrompt) {
   return current === stored;
 }
 
+function sessionSnapshotSortTimestamp(session) {
+  const updated = Date.parse(session?.updatedAt || session?.updated_at || '');
+  if (Number.isFinite(updated)) return updated;
+  const created = Date.parse(session?.createdAt || session?.created_at || '');
+  if (Number.isFinite(created)) return created;
+  const timestamp = Number(session?.timestamp || 0);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+async function findExistingAggregatedRootForQuestion(sessionId, prompt) {
+  const numericSessionId = Number(sessionId);
+  const normalizedPrompt = String(prompt || '').trim();
+  if (!Number.isInteger(numericSessionId) || numericSessionId <= 0 || !normalizedPrompt) {
+    return null;
+  }
+
+  const sessions = await loadSessionsList();
+  const matches = (Array.isArray(sessions) ? sessions : []).filter((session) => {
+    const rowSessionId = Number(session?.sessionId ?? session?.session_id ?? null);
+    if (!Number.isInteger(rowSessionId) || rowSessionId !== numericSessionId) return false;
+    const noteId = String(session?.noteId ?? session?.note_id ?? '').trim();
+    if (!noteId) return false;
+    const rowPrompt = String(session?.name || session?.title || '').trim();
+    return promptsReferToSameQuestion(normalizedPrompt, rowPrompt);
+  });
+
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => sessionSnapshotSortTimestamp(b) - sessionSnapshotSortTimestamp(a));
+  return matches[0];
+}
+
 function extractConversationKey(serviceId, rawUrl) {
   const sid = String(serviceId || 'unknown').toLowerCase();
   const fallback = `${sid}:no-url`;
@@ -4689,7 +4720,8 @@ async function collectNowAggregation(manual = true) {
   if (sourcePrompt) {
     rememberResolvedSourcePrompt(sourcePrompt);
   }
-  const storedPrompt = loadedQuestionPrompt;
+  let resolvedExistingAggregatedNoteId = existingAggregatedNoteId;
+  let storedPrompt = loadedQuestionPrompt;
   const forceNewRoot = !!pending?.forceNewRoot;
 
   enabledSlots.forEach((slot) => {
@@ -4708,27 +4740,53 @@ async function collectNowAggregation(manual = true) {
   // A numeric session can accumulate multiple user questions inside the same chat tabs.
   // We only overwrite the current aggregated root when the recovered prompt still points
   // to that exact question; matching session_id alone is not safe enough.
-  const sameQuestionAsCurrentRoot = hasLoadedQuestionContext
+  let sameQuestionAsCurrentRoot = hasLoadedQuestionContext
     ? promptsReferToSameQuestion(sourcePrompt, storedPrompt)
     : false;
+  if (
+    manual
+    && !forceNewRoot
+    && sourcePrompt
+    && Number.isInteger(ingestContext.sessionIdHint)
+    && ingestContext.sessionIdHint > 0
+    && (!resolvedExistingAggregatedNoteId || !sameQuestionAsCurrentRoot)
+  ) {
+    const existingRoot = await findExistingAggregatedRootForQuestion(ingestContext.sessionIdHint, sourcePrompt);
+    const recoveredNoteId = String(existingRoot?.noteId ?? existingRoot?.note_id ?? '').trim() || null;
+    const recoveredPrompt = String(existingRoot?.name || existingRoot?.title || '').trim();
+    if (recoveredNoteId) {
+      resolvedExistingAggregatedNoteId = recoveredNoteId;
+      if (recoveredPrompt) storedPrompt = recoveredPrompt;
+      sameQuestionAsCurrentRoot = promptsReferToSameQuestion(sourcePrompt, storedPrompt);
+      activeAggregatedNoteId = recoveredNoteId;
+      if (sameQuestionAsCurrentRoot) {
+        mergeLog('Recovered existing aggregated root for current question before Collect now overwrite', 'info', {
+          sessionIdHint: ingestContext.sessionIdHint,
+          recoveredAggregatedNoteId: recoveredNoteId,
+          sourcePrompt,
+          storedPrompt
+        });
+      }
+    }
+  }
   const replaceExisting = !forceNewRoot
     && manual
     && Number.isInteger(ingestContext.sessionIdHint)
     && ingestContext.sessionIdHint > 0
-    && !!existingAggregatedNoteId
+    && !!resolvedExistingAggregatedNoteId
     && sameQuestionAsCurrentRoot;
-  const targetAggregatedNoteId = replaceExisting ? existingAggregatedNoteId : null;
-  if (forceNewRoot && existingAggregatedNoteId) {
+  const targetAggregatedNoteId = replaceExisting ? resolvedExistingAggregatedNoteId : null;
+  if (forceNewRoot && resolvedExistingAggregatedNoteId) {
     mergeLog('Collect now is running for a freshly sent prompt; forcing creation of a new aggregated root instead of overwriting the previous one', 'info', {
       sessionIdHint: ingestContext.sessionIdHint || null,
-      previousAggregatedNoteId: existingAggregatedNoteId,
+      previousAggregatedNoteId: resolvedExistingAggregatedNoteId,
       sourcePrompt
     });
   }
   if (
     manual
     && hasLoadedQuestionContext
-    && existingAggregatedNoteId
+    && resolvedExistingAggregatedNoteId
     && sourcePrompt
     && storedPrompt
     && !sameQuestionAsCurrentRoot
@@ -4737,7 +4795,7 @@ async function collectNowAggregation(manual = true) {
       current_root_prompt: storedPrompt,
       collected_prompt: sourcePrompt,
       sessionIdHint: ingestContext.sessionIdHint || null,
-      previousAggregatedNoteId: existingAggregatedNoteId
+      previousAggregatedNoteId: resolvedExistingAggregatedNoteId
     });
   }
   const payloadBuild = buildAggregatedPayload({
