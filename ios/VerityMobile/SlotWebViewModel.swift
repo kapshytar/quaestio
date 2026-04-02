@@ -20,6 +20,12 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     @Published private(set) var currentCookieHost: String = ""
     @Published private(set) var currentHostCookieCount: Int = 0
     @Published private(set) var currentHostCookieNames: [String] = []
+    @Published private(set) var currentViewportContent: String = ""
+    @Published private(set) var currentVisualViewportScale: String = ""
+    @Published private(set) var currentWindowInnerWidth: String = ""
+    @Published private(set) var currentDocumentClientWidth: String = ""
+    @Published private(set) var currentConfiguredZoom: String = ""
+    @Published private(set) var currentScrollViewZoom: String = ""
     @Published private(set) var lastNavigationState: String = "idle"
     @Published private(set) var lastNavigationError: String = ""
     @Published private(set) var popupLocationHref: String = ""
@@ -33,16 +39,59 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     @Published private(set) var lastScrapeCandidateTrace: String = ""
     @Published private(set) var debugEvents: [SlotDebugEvent] = []
     @Published private(set) var popupWebView: WKWebView?
+    @Published private(set) var isDisplayReady: Bool = false
     let webView: WKWebView
     private let sendScript = SharedScriptLoader.loadScript(named: "sendMessage.js")
     private let attachScript = SharedScriptLoader.loadScript(named: "attachFile.js")
     private let scrapeScript = SharedScriptLoader.loadScript(named: "scrapeReply.js")
     private var loadedHost: String?
     private var lastClaudeVerificationRecoveryAt: Date?
+    private var lastClaudeBlankRecoveryAt: Date?
     private var lastAuthReturnRecoveryAt: Date?
     private var currentUserAgentPreset: UserAgentPreset = .systemDefault
     private var currentPageZoom: CGFloat = 0.9
+    private var displayReadyTask: Task<Void, Never>?
     var onURLChange: ((URL) -> Void)?
+
+    private func makeViewportBootstrapScript() -> WKUserScript {
+        let normalizedZoom = min(max(currentPageZoom, 0.7), 1.0)
+        let defaultScale = String(format: "%.3f", normalizedZoom)
+        let source = """
+        (function() {
+          try {
+            const scale = \(defaultScale);
+            const head = document.head || document.getElementsByTagName('head')[0];
+            if (!head) return;
+            let meta = document.querySelector('meta[name="viewport"]');
+            if (!meta) {
+              meta = document.createElement('meta');
+              meta.setAttribute('name', 'viewport');
+              head.appendChild(meta);
+            }
+            meta.setAttribute('content', 'width=device-width, initial-scale=' + scale + ', viewport-fit=cover');
+            let style = document.getElementById('verity-text-size-adjust');
+            if (!style) {
+              style = document.createElement('style');
+              style.id = 'verity-text-size-adjust';
+              head.appendChild(style);
+            }
+            style.textContent = 'html, body { -webkit-text-size-adjust: 100% !important; }';
+            document.documentElement.style.setProperty('-webkit-text-size-adjust', '100%');
+          } catch (_) {}
+        })();
+        """
+        return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+    }
+
+    private func effectiveViewportZoom(for webView: WKWebView) -> CGFloat {
+        min(max(currentPageZoom, 0.7), 1.0)
+    }
+
+    private func refreshViewportBootstrapScript(for webView: WKWebView) {
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        controller.addUserScript(makeViewportBootstrapScript())
+    }
 
     private func shortNavigationType(_ type: WKNavigationType) -> String {
         switch type {
@@ -63,6 +112,32 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         self.webView.navigationDelegate = self
         self.webView.uiDelegate = self
         self.webView.pageZoom = 1.0
+        refreshViewportBootstrapScript(for: self.webView)
+    }
+
+    private func setDisplayReady(_ ready: Bool) {
+        displayReadyTask?.cancel()
+        displayReadyTask = nil
+        isDisplayReady = ready
+    }
+
+    private var hasPendingNavigation: Bool {
+        switch lastNavigationState {
+        case "requested", "forced", "starting", "committed", "reload", "back-navigation":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func scheduleDisplayReady(after delayNs: UInt64, reason: String) {
+        displayReadyTask?.cancel()
+        displayReadyTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delayNs)
+            guard let self else { return }
+            self.isDisplayReady = true
+            self.recordEvent("display-ready \(reason)")
+        }
     }
 
     func load(url: String) {
@@ -74,6 +149,9 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             if currentHost == targetHost {
                 recordEvent("skip-load same-host \(currentURL.absoluteString)")
                 loadedHost = targetHost
+                if !hasPendingNavigation {
+                    isDisplayReady = true
+                }
                 Self.logger.debug("skip-load same-host current=\(currentURL.absoluteString, privacy: .public)")
                 return
             }
@@ -81,11 +159,15 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
 
         if loadedHost == targetHost {
             recordEvent("skip-load warmed-host \(targetURL.absoluteString)")
+            if !hasPendingNavigation {
+                isDisplayReady = true
+            }
             Self.logger.debug("skip-load warmed-host target=\(targetURL.absoluteString, privacy: .public)")
             return
         }
 
         loadedHost = targetHost
+        setDisplayReady(false)
         lastNavigationState = "requested"
         lastNavigationError = ""
         recordEvent("load \(targetURL.absoluteString)")
@@ -162,6 +244,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     func forceLoad(url: String) {
         guard let targetURL = URL(string: url) else { return }
         loadedHost = normalizedHost(for: targetURL)
+        setDisplayReady(false)
         lastNavigationState = "forced"
         lastNavigationError = ""
         recordEvent("force-load \(targetURL.absoluteString)")
@@ -185,18 +268,46 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     func applyPageZoom(_ zoom: CGFloat) {
         let normalizedZoom = min(max(zoom, 0.7), 1.0)
         currentPageZoom = normalizedZoom
+        currentConfiguredZoom = String(format: "%.2f", normalizedZoom)
         webView.pageZoom = 1.0
         popupWebView?.pageZoom = 1.0
+        refreshViewportBootstrapScript(for: webView)
+        if let popupWebView {
+            refreshViewportBootstrapScript(for: popupWebView)
+        }
         applyViewportScale(to: webView)
         if let popupWebView {
             applyViewportScale(to: popupWebView)
         }
         recordEvent("page-zoom \(String(format: "%.2f", normalizedZoom))")
+        scheduleRuntimeSnapshotRefreshAfterZoom()
+    }
+
+    private func scheduleRuntimeSnapshotRefreshAfterZoom() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard let self else { return }
+            self.refreshRuntimeSnapshot()
+            if let popup = self.popupWebView {
+                self.refreshPopupRuntimeSnapshot(for: popup)
+            }
+            self.recordEvent("runtime-snapshot zoom-refresh 200ms")
+        }
+    }
+
+    private func scheduleViewportScaleRefresh(for webView: WKWebView, reason: String, delaysNs: [UInt64] = [350_000_000, 1_200_000_000]) {
+        for delay in delaysNs {
+            Task { @MainActor [weak self, weak webView] in
+                try? await Task.sleep(nanoseconds: delay)
+                guard let self, let webView else { return }
+                self.applyViewportScale(to: webView)
+                self.recordEvent("page-zoom-refresh \(reason) \(Int(delay / 1_000_000))ms")
+            }
+        }
     }
 
     private func applyViewportScale(to webView: WKWebView) {
-        let normalizedZoom = min(max(currentPageZoom, 0.7), 1.0)
-        let scale = String(format: "%.3f", normalizedZoom)
+        let scale = String(format: "%.3f", effectiveViewportZoom(for: webView))
         let script = """
         (function() {
           try {
@@ -209,7 +320,17 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
               meta.setAttribute('name', 'viewport');
               head.appendChild(meta);
             }
-            meta.setAttribute('content', 'width=device-width, initial-scale=' + scale + ', viewport-fit=cover');
+            const desired = 'width=device-width, initial-scale=' + scale + ', viewport-fit=cover';
+            if (meta.getAttribute('content') !== desired) {
+              meta.setAttribute('content', desired);
+            }
+            let style = document.getElementById('verity-text-size-adjust');
+            if (!style) {
+              style = document.createElement('style');
+              style.id = 'verity-text-size-adjust';
+              head.appendChild(style);
+            }
+            style.textContent = 'html, body { -webkit-text-size-adjust: 100% !important; }';
             document.documentElement.style.setProperty('-webkit-text-size-adjust', '100%');
             if (document.body) {
               document.body.style.minHeight = '100vh';
@@ -230,6 +351,12 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         currentCookieHost = ""
         currentHostCookieCount = 0
         currentHostCookieNames = []
+        currentViewportContent = ""
+        currentVisualViewportScale = ""
+        currentWindowInnerWidth = ""
+        currentDocumentClientWidth = ""
+        currentConfiguredZoom = ""
+        currentScrollViewZoom = ""
         lastNavigationState = "idle"
         lastNavigationError = ""
         popupLocationHref = ""
@@ -321,7 +448,13 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
               '[data-testid="stop-button"]',
               'button[aria-label*="Stop" i]'
             ];
-            if (sid === 'claude') checks.push('[aria-label="Stop Response"]');
+            if (sid === 'claude') checks.push(
+              '[aria-label="Stop Response"]',
+              'button[aria-label*="Stop response" i]',
+              'button[aria-label*="Stop responding" i]',
+              'button[title*="Stop" i]',
+              '[aria-busy="true"]'
+            );
             if (sid === 'gemini') { checks.push('mat-icon[data-mat-icon-name="stop_circle"]', 'button[data-test-id="stop-button"]', '.stop-button'); }
             if (sid === 'deepseek') checks.push('.stop-button');
             if (sid === 'perplexity') checks.push('[aria-label*="stop" i]');
@@ -418,19 +551,33 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     }
 
     private func decodeJSONResult(_ rawResult: String) -> [String: Any]? {
-        let cleaned = rawResult
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = rawResult.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        func parseObject(_ candidate: String) -> [String: Any]? {
+            guard let data = candidate.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                return nil
+            }
+            return object
+        }
+
+        if let direct = parseObject(trimmed) {
+            return direct
+        }
+
+        if let quotedData = trimmed.data(using: .utf8),
+           let unboxed = try? JSONDecoder().decode(String.self, from: quotedData),
+           let parsed = parseObject(unboxed.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return parsed
+        }
+
+        let cleaned = trimmed
             .replacingOccurrences(of: "\\\"", with: "\"")
             .replacingOccurrences(of: "\\\\", with: "\\")
             .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
 
-        guard let data = cleaned.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            return nil
-        }
-
-        return object
+        return parseObject(cleaned)
     }
 
     private static func formatCandidateTrace(_ rawTrace: Any?) -> String {
@@ -502,6 +649,8 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             popupNavigationState = "finished"
             popupNavigationError = ""
             recordEvent("popup-finish \(url.absoluteString)")
+            applyViewportScale(to: webView)
+            scheduleViewportScaleRefresh(for: webView, reason: "popup-finish")
             refreshPopupRuntimeSnapshot(for: webView)
             maybeAdoptPopupURL(url)
             return
@@ -513,6 +662,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         Self.logger.info("did-finish url=\(url.absoluteString, privacy: .public)")
         onURLChange?(url)
         applyViewportScale(to: webView)
+        scheduleDisplayReady(after: 450_000_000, reason: "did-finish")
         refreshRuntimeSnapshot()
     }
 
@@ -529,7 +679,6 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         recordEvent("did-commit \(url.absoluteString)")
         Self.logger.debug("did-commit url=\(url.absoluteString, privacy: .public)")
         onURLChange?(url)
-        applyViewportScale(to: webView)
         refreshRuntimeSnapshot()
     }
 
@@ -543,6 +692,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         }
         lastNavigationState = "starting"
         lastNavigationError = ""
+        setDisplayReady(false)
         recordEvent("did-start provisional")
         refreshRuntimeSnapshot()
     }
@@ -585,6 +735,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         popupNavigationState = "created"
         popupNavigationError = ""
         popupLocationHref = navigationAction.request.url?.absoluteString ?? ""
+        refreshViewportBootstrapScript(for: popup)
         applyViewportScale(to: popup)
 
         return popup
@@ -615,6 +766,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         }
         lastNavigationState = "failed"
         lastNavigationError = error.localizedDescription
+        isDisplayReady = true
         recordEvent("did-fail \(error.localizedDescription)")
         Self.logger.error("did-fail error=\(error.localizedDescription, privacy: .public)")
         refreshRuntimeSnapshot()
@@ -630,6 +782,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         }
         lastNavigationState = "failed-provisional"
         lastNavigationError = error.localizedDescription
+        isDisplayReady = true
         recordEvent("did-fail provisional \(error.localizedDescription)")
         Self.logger.error("did-fail-provisional error=\(error.localizedDescription, privacy: .public)")
         refreshRuntimeSnapshot()
@@ -641,7 +794,11 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
           return JSON.stringify({
             href: String(window.location && window.location.href || ''),
             userAgent: String(navigator && navigator.userAgent || ''),
-            bodyText: String(document && document.body && document.body.innerText || '').slice(0, 4000)
+            bodyText: String(document && document.body && document.body.innerText || '').slice(0, 4000),
+            viewportContent: String((document.querySelector('meta[name="viewport"]') || {}).content || ''),
+            visualViewportScale: String(window.visualViewport && typeof window.visualViewport.scale === 'number' ? window.visualViewport.scale : ''),
+            innerWidth: String(typeof window.innerWidth === 'number' ? window.innerWidth : ''),
+            clientWidth: String(document && document.documentElement && typeof document.documentElement.clientWidth === 'number' ? document.documentElement.clientWidth : '')
           });
         })()
         """
@@ -653,16 +810,24 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             else {
                 self.currentLocationHref = webView.url?.absoluteString ?? ""
                 if self.currentUserAgent.isEmpty {
-                    self.currentUserAgent = "unavailable"
+                self.currentUserAgent = "unavailable"
                 }
+                self.currentScrollViewZoom = String(format: "%.2f", webView.scrollView.zoomScale)
                 await self.refreshCookieSnapshot(for: self.currentLocationHref)
                 return
             }
 
             self.currentLocationHref = (object["href"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? (webView.url?.absoluteString ?? "")
             self.currentUserAgent = (object["userAgent"] as? String) ?? "unavailable"
+            self.currentViewportContent = (object["viewportContent"] as? String) ?? ""
+            self.currentVisualViewportScale = (object["visualViewportScale"] as? String) ?? ""
+            self.currentWindowInnerWidth = (object["innerWidth"] as? String) ?? ""
+            self.currentDocumentClientWidth = (object["clientWidth"] as? String) ?? ""
+            self.currentConfiguredZoom = String(format: "%.2f", self.currentPageZoom)
+            self.currentScrollViewZoom = String(format: "%.2f", webView.scrollView.zoomScale)
             if let bodyText = object["bodyText"] as? String {
                 self.maybeRecoverClaudeVerificationHang(bodyText: bodyText)
+                self.maybeRecoverClaudeBlankScreen(bodyText: bodyText)
             }
             await self.refreshCookieSnapshot(for: self.currentLocationHref)
         }
@@ -721,6 +886,41 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             self.recordEvent("claude-cf-recovery force-load https://claude.ai/login")
             Self.logger.info("claude-cf-recovery force-load")
             self.forceLoad(url: "https://claude.ai/login")
+        }
+    }
+
+    private func maybeRecoverClaudeBlankScreen(bodyText: String) {
+        let normalizedURL = currentLocationHref.lowercased()
+        guard normalizedURL.contains("claude.ai") else { return }
+        guard !normalizedURL.contains("claude.ai/login") else { return }
+        guard lastNavigationState == "finished" else { return }
+
+        let trimmed = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count < 8 else { return }
+
+        let now = Date()
+        if let lastAttempt = lastClaudeBlankRecoveryAt, now.timeIntervalSince(lastAttempt) < 8 {
+            return
+        }
+
+        lastClaudeBlankRecoveryAt = now
+        recordEvent("claude-blank-recovery scheduled")
+        Self.logger.info("claude-blank-recovery scheduled")
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard self.lastNavigationState == "finished" else { return }
+            guard self.currentLocationHref.lowercased().contains("claude.ai"),
+                  !self.currentLocationHref.lowercased().contains("claude.ai/login")
+            else { return }
+
+            let currentBodyText = (try? await self.webView.evaluateJavaScript("String(document && document.body && document.body.innerText || '')") as? String) ?? ""
+            let currentTrimmed = currentBodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard currentTrimmed.count < 8 else { return }
+
+            self.recordEvent("claude-blank-recovery reload")
+            Self.logger.info("claude-blank-recovery reload")
+            self.reloadCurrentPage()
         }
     }
 
@@ -800,4 +1000,5 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             debugEvents.removeLast(debugEvents.count - Self.maxDebugEvents)
         }
     }
+
 }

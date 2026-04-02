@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ANDROID_DIR="$ROOT_DIR/android"
+ANDROID_GRADLE_PROPERTIES="$ANDROID_DIR/gradle.properties"
 IOS_PROJECT_YML="$ROOT_DIR/project.yml"
 IOS_PROJECT_PATH="$ROOT_DIR/VerityMobile.xcodeproj"
 IOS_SOURCE_DIR="$ROOT_DIR/ios/VerityMobile"
@@ -29,7 +30,7 @@ command_status python3
 echo
 
 echo "-- Repo scripts --"
-for path in "$IOS_DEPLOY_SCRIPT" "$ANDROID_DEPLOY_SCRIPT" "$ROOT_DIR/scripts/bootstrap-ios.sh"; do
+for path in "$IOS_DEPLOY_SCRIPT" "$ANDROID_DEPLOY_SCRIPT" "$ROOT_DIR/scripts/bootstrap-ios.sh" "$ROOT_DIR/scripts/android-gradlew.sh"; do
   if [ -x "$path" ]; then
     printf "ok   %s\n" "$path"
   else
@@ -105,13 +106,27 @@ fi
 echo
 
 echo "-- JDK pin --"
-if [ -f "$ANDROID_DIR/gradle.properties" ]; then
-  rg -n "^org\\.gradle\\.java\\.home=" "$ANDROID_DIR/gradle.properties" || echo "warn no org.gradle.java.home pin"
+if [ -f "$ANDROID_GRADLE_PROPERTIES" ]; then
+  rg -n "^org\\.gradle\\.java\\.home=" "$ANDROID_GRADLE_PROPERTIES" || echo "warn no org.gradle.java.home pin"
+  PINNED_JAVA_HOME="$(awk -F= '/^org\.gradle\.java\.home=/{print $2}' "$ANDROID_GRADLE_PROPERTIES" | tail -n 1)"
+  if [ -n "${PINNED_JAVA_HOME:-}" ]; then
+    printf "resolved org.gradle.java.home -> %s\n" "$PINNED_JAVA_HOME"
+    if [ -x "$PINNED_JAVA_HOME/bin/java" ]; then
+      printf "ok   pinned java -> %s\n" "$PINNED_JAVA_HOME/bin/java"
+    else
+      printf "warn pinned java missing executable -> %s/bin/java\n" "$PINNED_JAVA_HOME"
+    fi
+  fi
 else
-  echo "warn missing $ANDROID_DIR/gradle.properties"
+  echo "warn missing $ANDROID_GRADLE_PROPERTIES"
 fi
 echo
 
 echo "-- Canonical commands --"
 echo "iOS:     cd $ROOT_DIR && ./scripts/deploy-ios-device.sh"
 echo "Android: cd $ROOT_DIR && ./scripts/deploy-android-device.sh"
+echo "Gradle:  cd $ROOT_DIR && ./scripts/android-gradlew.sh :app:assembleDebug"
+echo
+echo "-- Android JDK rule --"
+echo "Do not run raw ./gradlew from memory on this Mac."
+echo "Use ./scripts/deploy-android-device.sh, or export JAVA_HOME from android/gradle.properties first."

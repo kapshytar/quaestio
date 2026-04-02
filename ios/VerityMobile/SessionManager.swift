@@ -9,6 +9,8 @@ struct SessionSnapshot: Codable, Identifiable, Hashable {
     let slotConfig: [String: String]
     let slotURLs: [String: String]
     let slotEnabled: [String: Bool]
+    // Live chat URLs captured from the web view at snapshot time
+    let slotLiveURLs: [String: String]
     let createdAt: String
     let updatedAt: String
 
@@ -21,6 +23,7 @@ struct SessionSnapshot: Codable, Identifiable, Hashable {
         case slotConfig = "slot_config"
         case slotURLs = "slot_urls"
         case slotEnabled = "slot_enabled"
+        case slotLiveURLs = "slot_live_urls"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -151,7 +154,9 @@ final class SessionManager {
         name: String,
         dreamSessionId: Int?,
         slotStates: [SlotState],
-        noteId: String? = nil
+        slotURLs: [String: String]? = nil,
+        noteId: String? = nil,
+        slotLiveURLs: [String: String]? = nil
     ) -> SessionSnapshot {
         let timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         let iso = ISO8601DateFormatter().string(from: Date())
@@ -168,8 +173,9 @@ final class SessionManager {
             noteId: noteId?.nilIfEmpty,
             name: name.isEmpty ? "Session" : name,
             slotConfig: Dictionary(uniqueKeysWithValues: slotStates.map { ("slot-\($0.id)", $0.serviceId) }),
-            slotURLs: Dictionary(uniqueKeysWithValues: slotStates.map { ("slot-\($0.id)", $0.url) }),
+            slotURLs: slotURLs ?? Dictionary(uniqueKeysWithValues: slotStates.map { ("slot-\($0.id)", $0.url) }),
             slotEnabled: Dictionary(uniqueKeysWithValues: slotStates.map { ("slot-\($0.id)", $0.isEnabled) }),
+            slotLiveURLs: slotLiveURLs ?? [:],
             createdAt: existing?.createdAt ?? iso,
             updatedAt: iso
         )
@@ -399,6 +405,7 @@ final class SessionManager {
                 slotConfig: matchingSnapshot?.slotConfig ?? [:],
                 slotURLs: matchingSnapshot?.slotURLs ?? [:],
                 slotEnabled: matchingSnapshot?.slotEnabled ?? [:],
+                slotLiveURLs: matchingSnapshot?.slotLiveURLs ?? [:],
                 createdAt: matchingSnapshot?.createdAt ?? "",
                 updatedAt: updatedAt.ifEmpty(matchingSnapshot?.updatedAt ?? "")
             )
@@ -436,6 +443,7 @@ final class SessionManager {
         let slotConfig = (row["slot_config"] as? [String: String]) ?? (row["slotConfig"] as? [String: String]) ?? [:]
         let slotURLs = (row["slot_urls"] as? [String: String]) ?? (row["slotUrls"] as? [String: String]) ?? (row["slots"] as? [String: String]) ?? [:]
         let slotEnabled = (row["slot_enabled"] as? [String: Bool]) ?? (row["slotEnabled"] as? [String: Bool]) ?? [:]
+        let slotLiveURLs = (row["slot_live_urls"] as? [String: String]) ?? (row["slotLiveURLs"] as? [String: String]) ?? [:]
         let sessionId = (row["session_id"] as? NSNumber)?.intValue
             ?? (row["sessionId"] as? NSNumber)?.intValue
             ?? Int((row["session_id"] as? String) ?? "")
@@ -451,6 +459,7 @@ final class SessionManager {
             slotConfig: slotConfig,
             slotURLs: slotURLs,
             slotEnabled: slotEnabled,
+            slotLiveURLs: slotLiveURLs,
             createdAt: createdAt,
             updatedAt: updatedAt
         )

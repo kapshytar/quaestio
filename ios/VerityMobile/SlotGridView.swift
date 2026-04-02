@@ -135,12 +135,23 @@ struct SlotGridView: View {
                     WebViewSlot(slot: slot, model: model)
                         .id(slot.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .opacity(model.isDisplayReady ? 1 : 0.001)
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
                                 .stroke(AppTheme.border, lineWidth: 1)
                         )
                         .shadow(color: Color.black.opacity(0.16), radius: 10, x: 0, y: 6)
+
+                    if !model.isDisplayReady {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(AppTheme.panel)
+                            .overlay(
+                                ProgressView()
+                                    .tint(AppTheme.textSecondary)
+                            )
+                            .allowsHitTesting(false)
+                    }
 
                     if let popupWebView = model.popupWebView {
                         popupOverlay(webView: popupWebView) {

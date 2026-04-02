@@ -836,9 +836,11 @@
         '[class*="assistant"]',
         '[class*="response"]',
         '[class*="answer"]',
-        '[class*="message"]'
+        '[class*="message"]',
+        'article'
       ];
       if (serviceId === 'perplexity') selectors.unshift('div[class*="prose"]');
+      if (serviceId === 'claude') selectors.unshift('article', '[class*="prose"]');
       if (serviceId === 'gemini') selectors.unshift('model-response', 'response-container');
       if (serviceId === 'grok') selectors.unshift('div[id^="response-"]', '[class*="message-bubble"]');
 

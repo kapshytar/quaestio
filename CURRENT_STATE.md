@@ -73,6 +73,7 @@
 - Inactive slots are now preloaded and slot switching no longer forces a reload back to the service home URL.
 - iOS visual iteration is currently done in the simulator, but simulator-side system services can still create noisy CPU spikes.
 - Real-device validation has now confirmed that `Sign in with Google` inside embedded `WKWebView` can be blocked by provider policy. On iPhone, ChatGPT currently fails with Google/OpenAI embedded auth using `Error 403: disallowed_useragent`.
+- iPhone ChatGPT currently uses the shared mobile zoom path without extra service-specific compensation. Earlier ChatGPT-only viewport/scroll compensation experiments were rolled back after they created contradictory sizing behavior across cold start, 100%, and runtime zoom changes. If this is revisited later, treat it as a cold-start layout investigation rather than adding more live zoom overrides.
 
 ## Current Contracts
 
@@ -95,6 +96,10 @@
   - verify the installed device version matches the built version
   - only then relaunch
 - Do not treat plain `xcodebuild install` as sufficient proof that the phone now runs the newest build.
+- Canonical Android deployment/build on this Mac must respect the pinned JDK in `android/gradle.properties`.
+- Do not run raw `./gradlew` from memory and assume the shell has the right Java.
+- Default to `./scripts/deploy-android-device.sh`; if a manual Gradle run is truly needed, export `JAVA_HOME` from `org.gradle.java.home` first.
+- Canonical manual Gradle path in this repo is `./scripts/android-gradlew.sh`.
 - Embedded social/OAuth login should be treated as provider-compatibility-sensitive, not assumed to work just because the page renders inside a webview.
 - Do not ship meaningful mobile client changes without updating this repo's `CHANGELOG.md`.
 

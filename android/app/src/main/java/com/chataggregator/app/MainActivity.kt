@@ -1683,7 +1683,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
     private fun updateCheckboxLabel(slotIndex: Int, name: String) {
         if (slotIndex < checkboxes.size) {
-            checkboxes[slotIndex].text = name
+            checkboxes[slotIndex].text = ""
+            checkboxes[slotIndex].contentDescription = name
         }
     }
 

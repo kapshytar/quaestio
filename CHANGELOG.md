@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.30
+
+- stabilize iPhone mobile zoom behavior by keeping the shared pre-load viewport path, expanding viewport diagnostics, and rolling back the extra ChatGPT-only compensation layers after they created contradictory sizing behavior
+- improve iPhone Claude resilience with a blank-screen recovery path and broader scrape/state hardening while keeping live chat URLs in new session snapshots
+- document the canonical pinned-JDK Android path on this Mac and add `scripts/android-gradlew.sh` as the safe manual Gradle wrapper
+
+## 2.0.29
+
+- keep Android bottom slot chips icon-only even after session restore/load paths, instead of reintroducing LLM names into the mobile selector row
+- add `scripts/android-gradlew.sh` as the canonical pinned-JDK wrapper for manual Android Gradle runs on this Mac
+
+## 2.0.28
+- save live iPhone chat URLs into session snapshots when available instead of persisting project preset URLs
+- improve iPhone Claude scrape reliability with broader stop-state detection and desktop-aligned shared candidate selectors
+
 ## 2.0.27
 - tighten the iPhone settings reveal so opening keeps chats underneath until expansion completes and closing collapses the settings screen back into the same button
 
@@ -262,3 +277,4 @@ Versioning policy:
 
 ### Fixed
 - iOS merge build path is now reproducible from `project.yml` + `xcodegen` instead of depending only on Xcode GUI state.
+- roll back the extra ChatGPT-only iPhone zoom compensation layers and return it to the shared mobile viewport path, while keeping the newer diagnostics so future cold-start investigation can start from evidence instead of stacked runtime overrides

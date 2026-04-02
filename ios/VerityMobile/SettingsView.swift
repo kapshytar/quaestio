@@ -357,6 +357,12 @@ private struct SlotDiagnosticsBlock: View {
             diagnosticsRow(label: "Error", value: model.lastNavigationError.isEmpty ? "none" : model.lastNavigationError)
             diagnosticsRow(label: "href", value: model.currentLocationHref.isEmpty ? slot.url : model.currentLocationHref, multiline: true)
             diagnosticsRow(label: "UA", value: model.currentUserAgent.isEmpty ? "pending" : model.currentUserAgent, multiline: true)
+            diagnosticsRow(label: "Configured Zoom", value: model.currentConfiguredZoom.isEmpty ? "pending" : model.currentConfiguredZoom)
+            diagnosticsRow(label: "Viewport Content", value: model.currentViewportContent.isEmpty ? "none" : model.currentViewportContent, multiline: true)
+            diagnosticsRow(label: "VisualViewport Scale", value: model.currentVisualViewportScale.isEmpty ? "none" : model.currentVisualViewportScale)
+            diagnosticsRow(label: "ScrollView Zoom", value: model.currentScrollViewZoom.isEmpty ? "none" : model.currentScrollViewZoom)
+            diagnosticsRow(label: "Window Inner Width", value: model.currentWindowInnerWidth.isEmpty ? "none" : model.currentWindowInnerWidth)
+            diagnosticsRow(label: "Document Client Width", value: model.currentDocumentClientWidth.isEmpty ? "none" : model.currentDocumentClientWidth)
             diagnosticsRow(label: "Cookie Host", value: model.currentCookieHost.isEmpty ? "pending" : model.currentCookieHost)
             diagnosticsRow(label: "Host Cookies", value: "\(model.currentHostCookieCount)")
             diagnosticsRow(
@@ -418,6 +424,12 @@ private struct SlotDiagnosticsBlock: View {
             "Error: \(model.lastNavigationError.isEmpty ? "none" : model.lastNavigationError)",
             "href: \(model.currentLocationHref.isEmpty ? slot.url : model.currentLocationHref)",
             "UA: \(model.currentUserAgent.isEmpty ? "pending" : model.currentUserAgent)",
+            "Configured Zoom: \(model.currentConfiguredZoom.isEmpty ? "pending" : model.currentConfiguredZoom)",
+            "Viewport Content: \(model.currentViewportContent.isEmpty ? "none" : model.currentViewportContent)",
+            "VisualViewport Scale: \(model.currentVisualViewportScale.isEmpty ? "none" : model.currentVisualViewportScale)",
+            "ScrollView Zoom: \(model.currentScrollViewZoom.isEmpty ? "none" : model.currentScrollViewZoom)",
+            "Window Inner Width: \(model.currentWindowInnerWidth.isEmpty ? "none" : model.currentWindowInnerWidth)",
+            "Document Client Width: \(model.currentDocumentClientWidth.isEmpty ? "none" : model.currentDocumentClientWidth)",
             "Cookie Host: \(model.currentCookieHost.isEmpty ? "pending" : model.currentCookieHost)",
             "Host Cookies: \(model.currentHostCookieCount)",
             "Cookie Names: \(model.currentHostCookieNames.isEmpty ? "none" : model.currentHostCookieNames.joined(separator: ", "))",

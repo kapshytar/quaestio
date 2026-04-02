@@ -273,7 +273,10 @@ final class MobileAppState: ObservableObject {
             let slotKey = "slot-\(fallback.id)"
             let targetServiceId = session.slotConfig[slotKey] ?? fallback.serviceId
             let preset = presets[targetServiceId] ?? presets[fallback.serviceId]
-            let resolvedURL = session.slotURLs[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+            // Prefer live chat URL from snapshot, then stored URL, then preset, then fallback
+            let liveURL = session.slotLiveURLs[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+            let resolvedURL = liveURL
+                ?? session.slotURLs[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
                 ?? preset?.url
                 ?? fallback.url
             let targetEnabled = session.slotEnabled[slotKey] ?? fallback.isEnabled
@@ -656,7 +659,9 @@ final class MobileAppState: ObservableObject {
                 name: String(prompt.prefix(60)).ifEmpty("Session"),
                 dreamSessionId: sessionId,
                 slotStates: slots,
-                noteId: result.noteId
+                slotURLs: currentSessionSnapshotSlotURLs(),
+                noteId: result.noteId,
+                slotLiveURLs: currentSessionSnapshotSlotURLs()
             )
             Task.detached {
                 _ = await SessionManager().syncSessionToDatabase(snapshot)
@@ -874,6 +879,15 @@ final class MobileAppState: ObservableObject {
             normalized.url = preset.url
             return normalized
         }
+    }
+
+    private func currentSessionSnapshotSlotURLs() -> [String: String] {
+        Dictionary(uniqueKeysWithValues: slots.map { slot in
+            let liveURL = webModel(for: slot.id)
+                .currentLocationHref
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return ("slot-\(slot.id)", liveURL.isEmpty ? slot.url : liveURL)
+        })
     }
 
     private func normalizeURL(_ value: String) -> String {
