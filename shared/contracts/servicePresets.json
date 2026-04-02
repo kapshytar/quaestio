@@ -5,6 +5,7 @@
       "id": "chatgpt",
       "name": "ChatGPT",
       "url": "https://chatgpt.com",
+      "phoneZoomPercent": 90,
       "selectors": {
         "textarea": ["textarea[id*=\"prompt\"]"],
         "contenteditable": [],
@@ -15,6 +16,7 @@
       "id": "claude",
       "name": "Claude",
       "url": "https://claude.ai",
+      "phoneZoomPercent": 90,
       "selectors": {
         "textarea": [],
         "contenteditable": ["div[contenteditable=\"true\"][enterkeyhint=\"enter\"]"],
@@ -25,6 +27,7 @@
       "id": "gemini",
       "name": "Gemini",
       "url": "https://gemini.google.com",
+      "phoneZoomPercent": 90,
       "selectors": {
         "textarea": [],
         "contenteditable": ["div.ql-editor[contenteditable=\"true\"]"],
@@ -35,6 +38,7 @@
       "id": "grok",
       "name": "Grok",
       "url": "https://grok.com",
+      "phoneZoomPercent": 90,
       "selectors": {
         "textarea": [],
         "contenteditable": ["div[contenteditable=\"true\"]"],
@@ -45,6 +49,7 @@
       "id": "deepseek",
       "name": "DeepSeek",
       "url": "https://chat.deepseek.com",
+      "phoneZoomPercent": 90,
       "selectors": {
         "textarea": [
           "textarea#chat-input",
@@ -64,6 +69,7 @@
       "id": "perplexity",
       "name": "Perplexity",
       "url": "https://www.perplexity.ai",
+      "phoneZoomPercent": 90,
       "selectors": {
         "textarea": [
           "textarea[placeholder*=\"Ask\"]",

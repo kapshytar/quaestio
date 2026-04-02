@@ -13,7 +13,7 @@
         android:layout_height="0dp"
         android:background="@color/bg_surface"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="@id/tabLayout"
+        app:layout_constraintBottom_toBottomOf="@id/findBarContainer"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
@@ -158,7 +158,7 @@
 
     <View
         android:id="@+id/edgeSwipeLeft"
-        android:layout_width="28dp"
+        android:layout_width="36dp"
         android:layout_height="0dp"
         android:background="@android:color/transparent"
         android:importantForAccessibility="no"
@@ -168,7 +168,7 @@
 
     <View
         android:id="@+id/edgeSwipeRight"
-        android:layout_width="28dp"
+        android:layout_width="36dp"
         android:layout_height="0dp"
         android:background="@android:color/transparent"
         android:importantForAccessibility="no"

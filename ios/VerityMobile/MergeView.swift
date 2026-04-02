@@ -11,6 +11,14 @@ struct MergeView: View {
     @State private var selectedProviderId: String = ""
     @State private var usePreinstalledKey = true
     @State private var showAdvancedConfig = false
+    @State private var showInstructionConfig = false
+    @State private var showActivityDetails = false
+    @State private var showAggregationDetails = false
+    @State private var showProviderSection = false
+    @State private var showAggregationSection = true
+    @State private var showInstructionsSection = false
+    @State private var showClarifySection = true
+    @State private var showOutputSection = true
     @State private var isRunning = false
 
     private let catalog = MergeCatalogLoader.loadCatalog()
@@ -28,193 +36,51 @@ struct MergeView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: AppTheme.blockSpacing) {
-                    ScreenHeader(
-                        eyebrow: "Merge",
-                        title: "Shape one final answer",
-                        subtitle: "Collect outputs from multiple models and turn them into one focused response."
-                    )
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                mergeHeader
 
-                    statusCard
+                if !appState.statusMessage.isEmpty || !appState.recentIngestEvents.isEmpty {
+                    activityCard
+                }
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        SectionLabel(text: "Provider")
+                collapsibleSection(title: "Provider", isExpanded: $showProviderSection) {
+                    mergeProviderCardContent
+                }
 
-                        if let selectedProvider {
-                            Picker("Provider", selection: $selectedProviderId) {
-                                ForEach(providers) { provider in
-                                    Text(provider.title).tag(provider.id)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .onChange(of: selectedProviderId) { _, _ in
-                                syncProviderDefaults()
-                            }
+                collapsibleSection(title: "Aggregation", isExpanded: $showAggregationSection) {
+                    aggregationCardContent
+                }
 
-                            if selectedProvider.supportsPreinstalledKey {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("API Key Source")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(AppTheme.textSecondary)
+                collapsibleSection(title: "Instructions", isExpanded: $showInstructionsSection) {
+                    instructionsCardContent
+                }
 
-                                    Picker("API Key Source", selection: $usePreinstalledKey) {
-                                        Text("Use Preinstalled Key").tag(true)
-                                        Text("Enter Custom Key").tag(false)
-                                    }
-                                    .pickerStyle(.segmented)
-                                }
-                            }
+                Button {
+                    Task {
+                        await runMerge()
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Text(isRunning ? "Running..." : "Run Merge")
+                        Spacer()
+                        Image(systemName: "sparkles.rectangle.stack")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                }
+                .buttonStyle(PrimaryActionButtonStyle())
+                .disabled(isRunning)
 
-                            if !selectedProvider.supportsPreinstalledKey || !usePreinstalledKey {
-                                TextField("API key", text: $apiKey)
-                                    .textContentType(.password)
-                                    .autocorrectionDisabled()
-                                    .textInputAutocapitalization(.never)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(AppTheme.textPrimary)
-                                    .padding(14)
-                                    .glassCard(padding: 0, radius: AppTheme.compactRadius)
-                            }
-
-                            if shouldShowAdvancedConfig(for: selectedProvider) {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Button {
-                                        withAnimation(.easeInOut(duration: 0.16)) {
-                                            showAdvancedConfig.toggle()
-                                        }
-                                    } label: {
-                                        HStack {
-                                            Text(showAdvancedConfig ? "Hide advanced config" : "Show advanced config")
-                                            Spacer()
-                                            Image(systemName: showAdvancedConfig ? "chevron.up" : "chevron.down")
-                                                .font(.system(size: 12, weight: .semibold))
-                                        }
-                                    }
-                                    .buttonStyle(SecondaryCapsuleButtonStyle())
-
-                                    if showAdvancedConfig {
-                                        if selectedProvider.supportsCustomEndpoint {
-                                            TextField("Endpoint", text: $customEndpoint, axis: .vertical)
-                                                .font(.system(size: 14, weight: .medium))
-                                                .foregroundStyle(AppTheme.textPrimary)
-                                                .padding(14)
-                                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
-                                        }
-
-                                        if selectedProvider.supportsCustomModel {
-                                            TextField("Model", text: $customModel)
-                                                .font(.system(size: 14, weight: .medium))
-                                                .foregroundStyle(AppTheme.textPrimary)
-                                                .padding(14)
-                                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
-                                        }
-
-                                        if supportsFallbackModels(selectedProvider) {
-                                            TextField("Fallback models (comma or newline separated)", text: $fallbackModels, axis: .vertical)
-                                                .font(.system(size: 14, weight: .medium))
-                                                .foregroundStyle(AppTheme.textPrimary)
-                                                .padding(14)
-                                                .glassCard(padding: 0, radius: AppTheme.compactRadius)
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                if !appState.mergeOutput.isEmpty {
+                    collapsibleSection(title: "Output", isExpanded: $showOutputSection) {
+                        MergeMarkdownView(markdown: appState.mergeOutput)
+                            .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
+                            .padding(16)
+                            .glassCard(padding: 0)
                     }
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        SectionLabel(text: "Aggregation")
-
-                        HStack(spacing: 10) {
-                            Button {
-                                Task {
-                                    await appState.refreshMergeAggregationStatuses(sourcePrompt: sourcePrompt)
-                                }
-                            } label: {
-                                Text("Refresh statuses")
-                            }
-                            .buttonStyle(SecondaryCapsuleButtonStyle())
-
-                            Button {
-                                Task {
-                                    _ = await appState.manualCollectCurrentQuestion()
-                                }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    if appState.isManualCollecting {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    }
-                                    Text(appState.isManualCollecting ? "Collecting..." : "Collect now")
-                                }
-                            }
-                            .buttonStyle(SecondaryCapsuleButtonStyle())
-                            .disabled(appState.isManualCollecting)
-                        }
-
-                        Text(appState.mergeAggregationSummary)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(AppTheme.textSecondary)
-
-                        if !appState.mergeAggregationSnapshots.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(appState.mergeAggregationSnapshots) { snapshot in
-                                    HStack(spacing: 10) {
-                                        Circle()
-                                            .fill(color(for: snapshot.status))
-                                            .frame(width: 8, height: 8)
-                                        Text(snapshot.title)
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundStyle(AppTheme.textPrimary)
-                                        Spacer()
-                                        Text(label(for: snapshot.status))
-                                            .font(.system(size: 12, weight: .medium))
-                                            .foregroundStyle(AppTheme.textSecondary)
-                                    }
-                                }
-                            }
-                            .padding(14)
-                            .glassCard(padding: 0, radius: AppTheme.compactRadius)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        SectionLabel(text: "Instructions")
-
-                        TextField("Merge instructions", text: $mergeInstructions, axis: .vertical)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(AppTheme.textPrimary)
-                            .padding(14)
-                            .glassCard(padding: 0, radius: AppTheme.compactRadius)
-
-                        TextField("Clarification instructions", text: $clarificationInstructions, axis: .vertical)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(AppTheme.textPrimary)
-                            .padding(14)
-                            .glassCard(padding: 0, radius: AppTheme.compactRadius)
-                    }
-
-                    Button {
-                        Task {
-                            await runMerge()
-                        }
-                    } label: {
-                        HStack {
-                            Text(isRunning ? "Running..." : "Run Merge")
-                            Spacer()
-                            Image(systemName: "sparkles.rectangle.stack")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                    }
-                    .buttonStyle(PrimaryActionButtonStyle())
-                    .disabled(isRunning)
-
-                    if !appState.mergeOutput.isEmpty {
+                    collapsibleSection(title: "Clarify", isExpanded: $showClarifySection) {
                         VStack(alignment: .leading, spacing: 12) {
-                            SectionLabel(text: "Clarify")
-
                             TextField("Ask a follow-up about the merged answer", text: $appState.mergeClarificationText, axis: .vertical)
                                 .font(.system(size: 15, weight: .medium))
                                 .foregroundStyle(AppTheme.textPrimary)
@@ -226,7 +92,7 @@ struct MergeView: View {
                                     await runClarificationMerge()
                                 }
                             } label: {
-                                HStack {
+                                HStack(spacing: 10) {
                                     Text(isRunning ? "Running..." : "Run Clarification")
                                     Spacer()
                                     Image(systemName: "text.append")
@@ -237,26 +103,218 @@ struct MergeView: View {
                             .disabled(isRunning)
                         }
                     }
+                }
+            }
+            .padding(.horizontal, AppTheme.pagePadding)
+            .padding(.top, AppTheme.pagePadding)
+            .padding(.bottom, 28)
+        }
+        .shellBackground()
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            bootstrapDefaults()
+        }
+    }
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        SectionLabel(text: "Output")
+    private var mergeHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("MERGE")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1.2)
+                .foregroundStyle(AppTheme.textMuted)
 
-                        MergeMarkdownView(markdown: appState.mergeOutput)
-                            .frame(maxWidth: .infinity, minHeight: 260, alignment: .topLeading)
-                            .padding(16)
-                            .glassCard(padding: 0)
+            Text("One final answer")
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(AppTheme.textPrimary)
+
+            Text("Collect model replies, then synthesize one focused response.")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+    }
+
+    @ViewBuilder
+    private func collapsibleSection<Content: View>(
+        title: String,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DisclosureGroup(isExpanded: isExpanded) {
+                content()
+                    .padding(.top, 10)
+            } label: {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.textPrimary)
+        }
+        .glassCard()
+    }
+
+    private var mergeProviderCardContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let selectedProvider {
+                Picker("Provider", selection: $selectedProviderId) {
+                    ForEach(providers) { provider in
+                        Text(provider.title).tag(provider.id)
                     }
                 }
-                .padding(.horizontal, AppTheme.pagePadding)
-                .padding(.top, AppTheme.pagePadding)
-                .padding(.bottom, 28)
+                .pickerStyle(.menu)
+                .onChange(of: selectedProviderId) { _, _ in
+                    syncProviderDefaults()
+                }
+
+                if selectedProvider.supportsPreinstalledKey {
+                    Picker("API Key Source", selection: $usePreinstalledKey) {
+                        Text("Use Preinstalled Key").tag(true)
+                        Text("Enter Custom Key").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                if !selectedProvider.supportsPreinstalledKey || !usePreinstalledKey {
+                    compactField("API key", text: $apiKey, secure: true)
+                }
+
+                if shouldShowAdvancedConfig(for: selectedProvider) {
+                    DisclosureGroup(isExpanded: $showAdvancedConfig) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if selectedProvider.supportsCustomEndpoint {
+                                compactField("Endpoint", text: $customEndpoint)
+                            }
+
+                            if selectedProvider.supportsCustomModel {
+                                compactField("Model", text: $customModel)
+                            }
+
+                            if supportsFallbackModels(selectedProvider) {
+                                compactField("Fallback models", text: $fallbackModels, axis: .vertical)
+                            }
+                        }
+                        .padding(.top, 10)
+                    } label: {
+                        Text("Advanced config")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                    .tint(AppTheme.textPrimary)
+                }
             }
-            .shellBackground()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.hidden, for: .navigationBar)
-            .onAppear {
-                bootstrapDefaults()
+        }
+    }
+
+    private var aggregationCardContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Button {
+                    Task {
+                        await appState.refreshMergeAggregationStatuses(sourcePrompt: sourcePrompt)
+                    }
+                } label: {
+                    Text("Refresh")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryCapsuleButtonStyle())
+                .frame(maxWidth: .infinity)
+
+                Button {
+                    Task {
+                        _ = await appState.manualCollectCurrentQuestion()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        if appState.isManualCollecting {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(appState.isManualCollecting ? "Collecting..." : "Collect")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryCapsuleButtonStyle())
+                .disabled(appState.isManualCollecting)
+                .frame(maxWidth: .infinity)
             }
+
+            Text(appState.mergeAggregationSummary)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppTheme.textSecondary)
+
+            if !appState.mergeAggregationSnapshots.isEmpty {
+                DisclosureGroup(isExpanded: $showAggregationDetails) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(appState.mergeAggregationSnapshots) { snapshot in
+                            HStack(spacing: 10) {
+                                Circle()
+                                    .fill(color(for: snapshot.status))
+                                    .frame(width: 8, height: 8)
+                                Text(snapshot.title)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(AppTheme.textPrimary)
+                                Spacer()
+                                Text(label(for: snapshot.status))
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(AppTheme.textSecondary)
+                            }
+                        }
+                    }
+                    .padding(.top, 10)
+                } label: {
+                    Text("Show per-slot status")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                }
+                .tint(AppTheme.textPrimary)
+            }
+        }
+    }
+
+    private var instructionsCardContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            compactField("Merge instructions", text: $mergeInstructions, axis: .vertical)
+
+            DisclosureGroup(isExpanded: $showInstructionConfig) {
+                VStack(alignment: .leading, spacing: 10) {
+                    compactField("Clarification instructions", text: $clarificationInstructions, axis: .vertical)
+                }
+                .padding(.top, 10)
+            } label: {
+                Text("Clarification settings")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+            .tint(AppTheme.textPrimary)
+        }
+    }
+
+    @ViewBuilder
+    private func compactField(
+        _ placeholder: String,
+        text: Binding<String>,
+        axis: Axis = .horizontal,
+        secure: Bool = false
+    ) -> some View {
+        if secure && axis == .horizontal {
+            SecureField(placeholder, text: text)
+                .textContentType(.password)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AppTheme.textPrimary)
+                .padding(14)
+                .glassCard(padding: 0, radius: AppTheme.compactRadius)
+        } else {
+            TextField(placeholder, text: text, axis: axis)
+                .autocorrectionDisabled(secure)
+                .textInputAutocapitalization(secure ? .never : .sentences)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AppTheme.textPrimary)
+                .padding(14)
+                .glassCard(padding: 0, radius: AppTheme.compactRadius)
         }
     }
 
@@ -292,45 +350,31 @@ struct MergeView: View {
         }
     }
 
-    private var statusCard: some View {
+    private var activityCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(appState.sessionIndicatorText == nil ? Color.red.opacity(0.9) : Color.green.opacity(0.9))
-                    .frame(width: 8, height: 8)
-
-                Text(appState.sessionIndicatorText ?? "No session")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(appState.sessionIndicatorText == nil ? AppTheme.textSecondary : AppTheme.textPrimary)
-
-                if let activeProjectId = appState.activeProjectId {
-                    Text("•")
-                        .foregroundStyle(AppTheme.textMuted)
-                    Text(activeProjectId)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(AppTheme.textSecondary)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-            }
-
             Text(appState.statusMessage)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(AppTheme.textSecondary)
                 .lineLimit(3)
 
             if !appState.recentIngestEvents.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(appState.recentIngestEvents, id: \.self) { event in
-                        Text(event)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(AppTheme.textMuted)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                DisclosureGroup(isExpanded: $showActivityDetails) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(appState.recentIngestEvents, id: \.self) { event in
+                            Text(event)
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundStyle(AppTheme.textMuted)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
+                    .padding(.top, 8)
+                } label: {
+                    Text("Recent activity")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppTheme.textPrimary)
                 }
-                .padding(.top, 4)
+                .tint(AppTheme.textPrimary)
             }
         }
         .padding(14)

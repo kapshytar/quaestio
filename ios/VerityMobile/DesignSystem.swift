@@ -1,8 +1,8 @@
 import SwiftUI
 
 enum AppTheme {
-    static let backgroundTop = Color(red: 0.06, green: 0.07, blue: 0.09)
-    static let backgroundBottom = Color(red: 0.03, green: 0.04, blue: 0.05)
+    static let backgroundTop = Color.black
+    static let backgroundBottom = Color.black
     static let panel = Color.white.opacity(0.06)
     static let panelStrong = Color.white.opacity(0.1)
     static let border = Color.white.opacity(0.08)
@@ -17,6 +17,8 @@ enum AppTheme {
     static let blockSpacing: CGFloat = 18
     static let cardRadius: CGFloat = 22
     static let compactRadius: CGFloat = 18
+    static let chromeBand = Color.black.opacity(0.14)
+    static let chromePanel = Color.black.opacity(0.20)
 }
 
 enum RootSection: String, CaseIterable, Identifiable {

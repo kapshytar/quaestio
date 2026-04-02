@@ -14,6 +14,10 @@
     <string name="settings_about">About</string>
     <string name="settings_changelog">Changelog</string>
     <string name="settings_saved">Settings updated</string>
+    <string name="settings_status">Status</string>
+    <string name="settings_runtime">Runtime</string>
+    <string name="settings_info">Info</string>
+    <string name="settings_changelog_unavailable">Changelog unavailable</string>
     <string name="btn_import_cookies">Import Cookies</string>
     <string name="action_change_service">Change Service</string>
     <string name="action_reload">Reload</string>

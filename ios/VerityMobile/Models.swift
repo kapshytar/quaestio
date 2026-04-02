@@ -1,5 +1,40 @@
 import Foundation
 
+indirect enum JSONValue: Sendable, Decodable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case array([JSONValue])
+    case object([String: JSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode([String: JSONValue].self) {
+            self = .object(value)
+        } else if let value = try? container.decode([JSONValue].self) {
+            self = .array(value)
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value")
+        }
+    }
+
+    var stringValue: String? {
+        if case let .string(value) = self {
+            return value
+        }
+        return nil
+    }
+}
+
 struct ServiceSelectors: Codable, Hashable {
     let textarea: [String]
     let contenteditable: [String]
@@ -10,6 +45,7 @@ struct ServicePreset: Codable, Hashable, Identifiable {
     let id: String
     let name: String
     let url: String
+    let phoneZoomPercent: Int?
     let selectors: ServiceSelectors
 }
 

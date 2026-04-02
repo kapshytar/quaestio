@@ -13,6 +13,16 @@ struct MergeAggregationSlotSnapshot: Identifiable {
     let status: MergeAggregationSlotStatus
 }
 
+private struct ProjectSlotURLsTagRow: Decodable, Sendable {
+    let id: String?
+    let slotURLs: [String: JSONValue]?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case slotURLs = "slot_urls"
+    }
+}
+
 @MainActor
 final class MobileAppState: ObservableObject {
     @Published var slots: [SlotState] = [] {
@@ -38,11 +48,13 @@ final class MobileAppState: ObservableObject {
     @Published var recentIngestEvents: [String] = []
     @Published private(set) var slotUserAgentPresets: [Int: UserAgentPreset] = [:]
     @Published private(set) var lastUserPrompt: String = ""
+    @Published private(set) var globalPhoneZoomPercent: Int = 90
 
     private static let slotsDefaultsKey = "verity.mobile.slots"
     private static let selectedSlotDefaultsKey = "verity.mobile.selectedSlotId"
     private static let slotUserAgentPresetsDefaultsKey = "verity.mobile.slotUserAgentPresets"
     private static let lastUserPromptDefaultsKey = "verity.mobile.lastUserPrompt"
+    private static let globalPhoneZoomPercentDefaultsKey = "verity.mobile.globalPhoneZoomPercent"
     private static let defaultMergeAggregationPolicy = MergeAggregationPolicy(
         maxChecks: 12,
         waitIntervalMs: 2500,
@@ -56,6 +68,7 @@ final class MobileAppState: ObservableObject {
     private let mergeAggregationPolicy: MergeAggregationPolicy
     private let sessionManager = SessionManager()
     private(set) var lastOriginalResponses: [String: String] = [:]
+    private var projectSlotURLLoadGeneration: Int = 0
 
     init() {
         let catalog = ServicePresetLoader.loadCatalog()
@@ -87,6 +100,7 @@ final class MobileAppState: ObservableObject {
         self.slotUserAgentPresets = Self.loadPersistedUserAgentPresets(validSlots: slots)
         Self.applyServiceDefaultUserAgentPresets(to: &self.slotUserAgentPresets, validSlots: slots)
         self.lastUserPrompt = Self.loadPersistedLastUserPrompt()
+        self.globalPhoneZoomPercent = Self.loadPersistedGlobalPhoneZoomPercent()
         let parallelState = sessionManager.getParallelIngestState()
         if self.lastUserPrompt.isEmpty, !parallelState.sourcePrompt.isEmpty {
             self.lastUserPrompt = parallelState.sourcePrompt
@@ -98,7 +112,7 @@ final class MobileAppState: ObservableObject {
             self.slots = Self.slotsResetToPresetURLs(slots: self.slots, presets: presets)
         }
 
-        applyAllSlotUserAgentPresets()
+        applyAllSlotPresentationPresets()
 
         for slot in slots {
             webModels[slot.id]?.onURLChange = { [weak self] url in
@@ -169,9 +183,24 @@ final class MobileAppState: ObservableObject {
         persistWorkspaceState()
         sessionManager.setActiveProjectId(activeProjectId)
         updateSessionIndicator()
-        statusMessage = activeProjectId == nil
-            ? "Project cleared; session reset"
-            : "Project changed; session reset"
+        let loadGeneration = projectSlotURLLoadGeneration + 1
+        projectSlotURLLoadGeneration = loadGeneration
+
+        if let resolvedProjectId {
+            statusMessage = "Project changed; loading slot URLs…"
+            Task {
+                let serviceUrls = await loadProjectSlotURLsByService(projectId: resolvedProjectId)
+                await MainActor.run {
+                    guard self.projectSlotURLLoadGeneration == loadGeneration, self.activeProjectId == resolvedProjectId else { return }
+                    self.applyProjectSlotURLs(serviceUrls)
+                    self.statusMessage = "Project changed; session reset"
+                }
+            }
+            return
+        }
+
+        applyProjectSlotURLs([:])
+        statusMessage = "Project cleared; session reset"
     }
 
     func clearActiveSessionSelection() {
@@ -210,7 +239,7 @@ final class MobileAppState: ObservableObject {
         let rpcBaseURL = KeyObfuscation.getSupabaseRPCURL(nil)
         let apiKey = KeyObfuscation.getSupabaseAPIKey(nil)
         guard !rpcBaseURL.isEmpty, !apiKey.isEmpty else {
-            statusMessage = localSessions.isEmpty ? "No saved sessions" : "Loaded \(localSessions.count) local session(s)"
+            statusMessage = localSessions.isEmpty ? "No saved sessions" : ""
             return
         }
 
@@ -231,7 +260,7 @@ final class MobileAppState: ObservableObject {
         }
 
         availableSessions = sortSessionsForDisplay(sessions)
-        statusMessage = sessions.isEmpty ? "No saved sessions" : "Loaded \(sessions.count) session(s)"
+        statusMessage = sessions.isEmpty ? "No saved sessions" : ""
     }
 
     func loadSessionsIfNeeded() async {
@@ -258,6 +287,7 @@ final class MobileAppState: ObservableObject {
         }
 
         slots = updatedSlots
+        applyAllSlotPresentationPresets()
         if let firstEnabledSlot = updatedSlots.first(where: \.isEnabled)?.id {
             selectedSlotId = firstEnabledSlot
         }
@@ -275,7 +305,7 @@ final class MobileAppState: ObservableObject {
             webModel(for: slot.id).forceLoad(url: slot.url)
         }
 
-        statusMessage = "Loaded: \(displaySessionName(session))"
+        statusMessage = ""
     }
 
     func resolvedMergeSourcePrompt() -> String {
@@ -462,6 +492,7 @@ final class MobileAppState: ObservableObject {
         slotUserAgentPresets[selectedSlotId] = defaultPreset
         persistUserAgentPresets()
         webModel(for: selectedSlotId).applyUserAgentPreset(defaultPreset)
+        webModel(for: selectedSlotId).applyPageZoom(Self.phoneZoomScale(percent: globalPhoneZoomPercent))
         webModel(for: selectedSlotId).forceLoad(url: preset.url)
         statusMessage = "Switched to \(preset.name) • UA: \(defaultPreset.title)"
     }
@@ -490,6 +521,15 @@ final class MobileAppState: ObservableObject {
         }
         let serviceId = slots.first(where: { $0.id == slotId })?.serviceId
         return Self.defaultUserAgentPreset(for: serviceId)
+    }
+
+    func setGlobalPhoneZoomPercent(_ percent: Int) {
+        let normalized = min(max(percent, 70), 100)
+        guard globalPhoneZoomPercent != normalized else { return }
+        globalPhoneZoomPercent = normalized
+        UserDefaults.standard.set(normalized, forKey: Self.globalPhoneZoomPercentDefaultsKey)
+        applyAllSlotPresentationPresets()
+        statusMessage = "Phone zoom: \(normalized)%"
     }
 
     func applyUserAgentPreset(_ preset: UserAgentPreset, to slotId: Int) {
@@ -846,10 +886,28 @@ final class MobileAppState: ObservableObject {
         return "https://\(value)"
     }
 
-    private func applyAllSlotUserAgentPresets() {
+    private func applyAllSlotPresentationPresets() {
         for slot in slots {
             webModel(for: slot.id).applyUserAgentPreset(userAgentPreset(for: slot.id))
+            webModel(for: slot.id).applyPageZoom(Self.phoneZoomScale(percent: globalPhoneZoomPercent))
         }
+    }
+
+    private static let defaultPhoneZoomScale: CGFloat = 0.9
+
+    private static func loadPersistedGlobalPhoneZoomPercent() -> Int {
+        let raw = UserDefaults.standard.integer(forKey: globalPhoneZoomPercentDefaultsKey)
+        if raw == 0 { return 90 }
+        return min(max(raw, 70), 100)
+    }
+
+    private static func phoneZoomScale(percent: Int) -> CGFloat {
+        CGFloat(min(max(percent, 70), 100)) / 100
+    }
+
+    private static func defaultPageZoomScale(for preset: ServicePreset) -> CGFloat {
+        let percent = preset.phoneZoomPercent ?? 90
+        return phoneZoomScale(percent: percent)
     }
 
     private func fetchProjectTree(rpcBaseURL: String, apiKey: String) async throws -> [ProjectTreeNode] {
@@ -936,6 +994,89 @@ final class MobileAppState: ObservableObject {
             return String(base[..<range.lowerBound]) + restMarker
         }
         return base + restMarker
+    }
+
+    private func loadProjectSlotURLsByService(projectId: String) async -> [String: String] {
+        let rpcBaseURL = KeyObfuscation.getSupabaseRPCURL(nil)
+        let apiKey = KeyObfuscation.getSupabaseAPIKey(nil)
+        guard !rpcBaseURL.isEmpty, !apiKey.isEmpty else { return [:] }
+
+        let restBase = normalizeRestEndpoint(rpcBaseURL)
+        let encodedProjectId = projectId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? projectId
+        let endpoint = "\(restBase)/tags?select=id,slot_urls&id=eq.\(encodedProjectId)&limit=1"
+
+        guard let url = URL(string: endpoint) else { return [:] }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 8
+        request.setValue(apiKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        do {
+            let rows: [ProjectSlotURLsTagRow] = try await getJSONArray(
+                endpoint: endpoint,
+                apiKey: apiKey,
+                allow404: false
+            )
+            guard let slotObject = rows.first?.slotURLs else { return [:] }
+
+            var result: [String: String] = [:]
+            for (key, value) in slotObject {
+                let parsed = parseProjectSlotURL(value)
+                if !parsed.isEmpty {
+                    let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                    result[normalizedKey] = parsed
+                    result[normalizedKey.lowercased()] = parsed
+                }
+            }
+            return result
+        } catch {
+            return [:]
+        }
+    }
+
+    private func parseProjectSlotURL(_ value: JSONValue) -> String {
+        if let string = value.stringValue {
+            return string.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if case let .object(object) = value {
+            if let direct = object["url"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !direct.isEmpty {
+                return direct
+            }
+            if let fallback = object["value"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !fallback.isEmpty {
+                return fallback
+            }
+        }
+        return ""
+    }
+
+    private func buildProjectURLLookupKeys(slotIndex: Int, serviceId: String) -> [String] {
+        let normalizedServiceId = serviceId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let slotKey = "slot-\(slotIndex + 1)"
+        return Array(Set([slotKey, normalizedServiceId]))
+    }
+
+    private func applyProjectSlotURLs(_ projectURLs: [String: String]) {
+        let updatedSlots = slots.enumerated().map { index, slot -> SlotState in
+            let overrideURL = buildProjectURLLookupKeys(slotIndex: index, serviceId: slot.serviceId)
+                .lazy
+                .compactMap { key -> String? in
+                    let candidate = projectURLs[key]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    return candidate.isEmpty ? nil : candidate
+                }
+                .first
+
+            let targetURL = overrideURL ?? presets[slot.serviceId]?.url ?? slot.url
+            var updated = slot
+            updated.url = targetURL
+            return updated
+        }
+
+        slots = updatedSlots
+        for slot in updatedSlots {
+            webModel(for: slot.id).forceLoad(url: slot.url)
+        }
     }
 
     private func getJSONArray<T: Decodable & Sendable>(endpoint: String, apiKey: String, allow404: Bool) async throws -> [T] {

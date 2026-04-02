@@ -130,14 +130,14 @@ struct SlotGridView: View {
                     let model = appState.webModel(for: slot.id)
 
                     WebViewSlot(slot: slot, model: model)
-                    .id(slot.id)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(AppTheme.border, lineWidth: 1)
-                    )
-                    .shadow(color: Color.black.opacity(0.16), radius: 10, x: 0, y: 6)
+                        .id(slot.id)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(AppTheme.border, lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.16), radius: 10, x: 0, y: 6)
 
                     if let popupWebView = model.popupWebView {
                         popupOverlay(webView: popupWebView) {
@@ -765,10 +765,35 @@ struct SlotGridView: View {
     private func utilityButton(kind: UtilityKind, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(red: 0.09, green: 0.10, blue: 0.12))
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.10),
+                                Color(red: 0.10, green: 0.11, blue: 0.13).opacity(0.96),
+                                Color.black.opacity(0.86)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                Circle()
+                    .stroke(Color.white.opacity(0.09), lineWidth: 1)
+
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.18),
+                                Color.white.opacity(0.02)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.8
+                    )
+                    .padding(0.5)
 
                 switch kind {
                 case .merge:
@@ -777,11 +802,12 @@ struct SlotGridView: View {
                 case .settings:
                     Image(systemName: "ellipsis")
                         .rotationEffect(.degrees(90))
-                        .font(.system(size: 11.5, weight: .bold))
+                        .font(.system(size: 11, weight: .black))
                         .foregroundStyle(AppTheme.textSecondary)
                 }
             }
-            .frame(width: 26, height: 26)
+            .frame(width: 30, height: 30)
+            .shadow(color: Color.black.opacity(0.18), radius: 10, x: 0, y: 4)
         }
         .buttonStyle(.plain)
     }
@@ -805,7 +831,7 @@ struct SlotGridView: View {
         Image(systemName: systemName)
             .font(.system(size: 12, weight: .bold))
             .foregroundStyle(AppTheme.textPrimary)
-            .frame(width: 34, height: 34)
+            .frame(width: 30, height: 30)
             .background(Color.white.opacity(0.06))
             .clipShape(Circle())
     }

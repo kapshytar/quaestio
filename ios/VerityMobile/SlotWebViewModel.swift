@@ -41,6 +41,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     private var lastClaudeVerificationRecoveryAt: Date?
     private var lastAuthReturnRecoveryAt: Date?
     private var currentUserAgentPreset: UserAgentPreset = .systemDefault
+    private var currentPageZoom: CGFloat = 0.9
     var onURLChange: ((URL) -> Void)?
 
     private func shortNavigationType(_ type: WKNavigationType) -> String {
@@ -61,6 +62,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         super.init()
         self.webView.navigationDelegate = self
         self.webView.uiDelegate = self
+        self.webView.pageZoom = 1.0
     }
 
     func load(url: String) {
@@ -178,6 +180,47 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         popupWebView?.customUserAgent = preset.customUserAgent
         currentUserAgent = preset.customUserAgent ?? "pending"
         recordEvent("ua-preset \(preset.rawValue)")
+    }
+
+    func applyPageZoom(_ zoom: CGFloat) {
+        let normalizedZoom = min(max(zoom, 0.7), 1.0)
+        currentPageZoom = normalizedZoom
+        webView.pageZoom = 1.0
+        popupWebView?.pageZoom = 1.0
+        applyViewportScale(to: webView)
+        if let popupWebView {
+            applyViewportScale(to: popupWebView)
+        }
+        recordEvent("page-zoom \(String(format: "%.2f", normalizedZoom))")
+    }
+
+    private func applyViewportScale(to webView: WKWebView) {
+        let normalizedZoom = min(max(currentPageZoom, 0.7), 1.0)
+        let scale = String(format: "%.3f", normalizedZoom)
+        let script = """
+        (function() {
+          try {
+            const scale = \(scale);
+            const head = document.head || document.getElementsByTagName('head')[0];
+            if (!head) return 'no-head';
+            let meta = document.querySelector('meta[name="viewport"]');
+            if (!meta) {
+              meta = document.createElement('meta');
+              meta.setAttribute('name', 'viewport');
+              head.appendChild(meta);
+            }
+            meta.setAttribute('content', 'width=device-width, initial-scale=' + scale + ', viewport-fit=cover');
+            document.documentElement.style.setProperty('-webkit-text-size-adjust', '100%');
+            if (document.body) {
+              document.body.style.minHeight = '100vh';
+            }
+            return 'ok';
+          } catch (error) {
+            return String(error);
+          }
+        })();
+        """
+        webView.evaluateJavaScript(script, completionHandler: nil)
     }
 
     func clearDiagnostics() {
@@ -469,6 +512,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         recordEvent("did-finish \(url.absoluteString)")
         Self.logger.info("did-finish url=\(url.absoluteString, privacy: .public)")
         onURLChange?(url)
+        applyViewportScale(to: webView)
         refreshRuntimeSnapshot()
     }
 
@@ -485,6 +529,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         recordEvent("did-commit \(url.absoluteString)")
         Self.logger.debug("did-commit url=\(url.absoluteString, privacy: .public)")
         onURLChange?(url)
+        applyViewportScale(to: webView)
         refreshRuntimeSnapshot()
     }
 
@@ -535,10 +580,12 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         popup.allowsBackForwardNavigationGestures = true
         popup.scrollView.keyboardDismissMode = .interactive
         popup.customUserAgent = currentUserAgentPreset.customUserAgent
+        popup.pageZoom = 1.0
         popupWebView = popup
         popupNavigationState = "created"
         popupNavigationError = ""
         popupLocationHref = navigationAction.request.url?.absoluteString ?? ""
+        applyViewportScale(to: popup)
 
         return popup
     }

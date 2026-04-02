@@ -1,5 +1,55 @@
 # Changelog
 
+## 2.0.20
+- reduce the iPhone top utility controls so they align more closely with the tab pill height
+
+## 2.0.19
+- restyle the iPhone top-right utility button as a compact circular glass control aligned to the tab height
+
+## 2.0.18
+- restore the Android gear menu flow instead of the separate settings page so Find in page and the other quick actions stay one tap away in the same place as before
+
+## 2.0.17
+- add a global phone zoom control in iPhone Settings and turn per-slot diagnostics into a default-collapsed tabbed inspector so debugging stays available without flooding the whole screen
+
+## 2.0.16
+- move the iPhone clarification section below merged output so follow-up questions come after the generated answer instead of above it
+
+## 2.0.15
+- make the iPhone Merge screen much calmer by turning provider, aggregation, instructions, clarify, and output blocks into collapsible sections, while also removing noisy session-load status text and restoring the Android lavender divider before Merge as a visible foreground element again
+
+## 2.0.14
+- remove session-specific noise from the iPhone Merge screen, make recent ingest/status details collapsible, and stretch the aggregation action area across the full card width so the screen reads cleaner and more calmly
+
+## 2.0.13
+- clean up the iPhone Merge screen into a tighter Android-like structure by removing the oversized hero treatment, compacting provider and aggregation controls, and hiding secondary merge settings behind disclosure rows instead of leaving the whole screen expanded
+
+## 2.0.12
+- make the iPhone shell background fully black as a stable fallback so the top and bottom safe-area bands no longer fight a mismatched dark tint around the preserved framed chat area
+
+## 2.0.11
+- restore the iPhone chat shell visuals back toward the `2.0.0` baseline by bringing back the framed working area, the original top-tab shape, and the denser neutral bottom surfaces while keeping the newer native swipe pager and shared 90% phone zoom
+
+## 2.0.10
+- roll back the phone shell backdrop color experiments while keeping the useful structural wins: native iPhone swipe paging, normal top/content/bottom content geometry, the Settings close action, and the shared 90% phone zoom rule
+
+## 2.0.6
+- switch iPhone `Chats <-> Merge` back to a native interactive pager so swipe follows the finger instead of a custom drag approximation
+- apply the shared 90% phone zoom through viewport semantics instead of raw `WKWebView.pageZoom`
+- keep Android content constrained cleanly between the top bar and the bottom controls so tabs and composer no longer overlap page content
+
+## 2.0.4
+- restore the shared `90%` mobile zoom rule for every provider instead of keeping provider-specific zoom exceptions
+- tighten the iPhone primary-section transition so `Chats <-> Merge` no longer feels like a hard cut
+
+## 2.0.3
+- add the shared mobile navigation rule that `Chats` and `Merge` must be reachable with horizontal swipe gestures, wire iPhone to that edge-swipe flow, and widen Android's existing edge swipe affordance so the gesture is easier to discover
+- simplify the iPhone Merge screen structure by removing the extra nested navigation shell and tightening it into one cleaner primary section container
+
+## 2.0.1
+- make iPhone project selection actually pull `tags.slot_urls` from Dream Tracker and rewire slot links the same way Android already does, instead of only resetting session state
+- set the default phone zoom to 90% on both iPhone and Android so mobile pages render slightly denser without per-service manual zooming
+
 ## 2.0.0
 - ship the first full iPhone client milestone with Supabase-backed sessions, project selection, collect/merge flows, shared scrape fixes, deploy tooling, and cross-platform UI parity work across iPhone and Android
 - promote mobile to a major release marker after the multi-pass iOS client buildout and Android parity/polish work completed in this cycle

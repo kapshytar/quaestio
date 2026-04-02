@@ -117,6 +117,7 @@ class ChatFragment : Fragment(), Findable {
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
+            settings.textZoom = 90
             settings.setSupportZoom(true)
             settings.builtInZoomControls = true
             settings.displayZoomControls = false
@@ -667,4 +668,3 @@ $shared
         super.onDestroy()
     }
 }
-

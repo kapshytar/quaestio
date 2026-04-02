@@ -3,13 +3,13 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_dark">
+    android:background="@android:color/transparent">
 
     <FrameLayout
         android:id="@+id/webViewContainer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@color/bg_surface" />
+        android:background="@android:color/transparent" />
 
     <!-- Loading overlay -->
     <ProgressBar

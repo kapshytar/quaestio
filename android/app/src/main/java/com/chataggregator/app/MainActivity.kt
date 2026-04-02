@@ -152,6 +152,15 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.viewPager.post {
+            binding.topBarBg.bringToFront()
+            binding.projectTabContainer.bringToFront()
+            binding.tabLayout.bringToFront()
+            binding.tabSeparator.bringToFront()
+            binding.btnSettings.bringToFront()
+            binding.findBarContainer.bringToFront()
+            binding.bottomPanel.bringToFront()
+        }
         if (savedInstanceState == null) {
             SettingsManager.clearParallelIngestState(this)
         }
@@ -302,6 +311,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 params.marginStart = targetStart
                 binding.tabSeparator.layoutParams = params
             }
+            binding.tabSeparator.bringToFront()
         }
     }
 
@@ -2493,7 +2503,6 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             val autoCacheCleanupEnabled = SettingsManager.isAutoCacheCleanupEnabled(this)
             val incognitoEnabled = SettingsManager.isIncognitoModeEnabled(this)
 
-            // Show debug-related features only when debug mode is enabled
             popup.menu.findItem(R.id.action_debug_mode)?.apply {
                 isVisible = debugEnabled
                 isChecked = debugEnabled
@@ -2513,11 +2522,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 isVisible = debugEnabled
             }
 
-            // Always visible for testing
             popup.menu.findItem(R.id.action_auto_cache_cleanup)?.isChecked = autoCacheCleanupEnabled
-            popup.menu.findItem(R.id.action_find_in_page)?.apply {
-                // Always visible
-            }
 
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
@@ -2888,7 +2893,6 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 Log.i(TAG, "[SESSION] pendingUrls after stage: ${synchronized(pendingSessionUrls) { pendingSessionUrls.toMap() }}")
                 scheduleSlotLoading(forceReload = true)
                 updateSessionIndicator()
-                Toast.makeText(this, "Loaded: ${session.name}", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
             }
         }
