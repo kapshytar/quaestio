@@ -67,6 +67,50 @@ extension View {
         modifier(ShellBackground())
     }
 
+    func utilityCircleChrome(showsShadow: Bool = true) -> some View {
+        self
+            .frame(width: 30, height: 30)
+            .background(
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.10),
+                                Color(red: 0.10, green: 0.11, blue: 0.13).opacity(0.96),
+                                Color.black.opacity(0.86)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .overlay(
+                Circle()
+                    .stroke(Color.white.opacity(0.09), lineWidth: 1)
+            )
+            .overlay(
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.18),
+                                Color.white.opacity(0.02)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.8
+                    )
+                    .padding(0.5)
+            )
+            .shadow(
+                color: showsShadow ? Color.black.opacity(0.18) : .clear,
+                radius: showsShadow ? 10 : 0,
+                x: 0,
+                y: showsShadow ? 4 : 0
+            )
+    }
+
     func glassCard(padding: CGFloat = 16, radius: CGFloat = AppTheme.cardRadius) -> some View {
         self
             .padding(padding)

@@ -38,6 +38,11 @@
   - `scripts/bootstrap-ios.sh` for local iOS project bootstrap
   - `scripts/deploy-ios-device.sh` as the canonical real-device deploy path
   - `scripts/ingest-smoke-check.sh` as the canonical DB-side smoke check for collect/ingest outcomes
+- Canonical iOS path rule in this repo is:
+  - source of truth: `project.yml`
+  - generated project: `VerityMobile.xcodeproj` at the repo root
+  - source files: `ios/VerityMobile/`
+- Do not hand-guess the project path as `ios/VerityMobile.xcodeproj`; that path is wrong for this repo layout.
 - Shared JS resources are now bundled into the iOS app, not only read from workspace-relative dev paths.
 - iOS slot webviews currently use `WKWebsiteDataStore.default()`, so normal app updates should preserve cookies and logged-in web sessions as long as the app is not uninstalled and the bundle identifier stays stable.
 - Shared-first architecture is the active source of truth:

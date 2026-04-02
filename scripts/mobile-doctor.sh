@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ANDROID_DIR="$ROOT_DIR/android"
 IOS_PROJECT_YML="$ROOT_DIR/project.yml"
+IOS_PROJECT_PATH="$ROOT_DIR/VerityMobile.xcodeproj"
+IOS_SOURCE_DIR="$ROOT_DIR/ios/VerityMobile"
 IOS_DEPLOY_SCRIPT="$ROOT_DIR/scripts/deploy-ios-device.sh"
 ANDROID_DEPLOY_SCRIPT="$ROOT_DIR/scripts/deploy-android-device.sh"
 
@@ -34,6 +36,17 @@ for path in "$IOS_DEPLOY_SCRIPT" "$ANDROID_DEPLOY_SCRIPT" "$ROOT_DIR/scripts/boo
     printf "warn %s (not executable)\n" "$path"
   fi
 done
+echo
+
+echo "-- Canonical iOS paths --"
+printf "source of truth -> %s\n" "$IOS_PROJECT_YML"
+printf "generated xcodeproj -> %s\n" "$IOS_PROJECT_PATH"
+printf "ios sources -> %s\n" "$IOS_SOURCE_DIR"
+if [ -d "$IOS_PROJECT_PATH" ]; then
+  echo "ok   xcodeproj exists"
+else
+  echo "warn xcodeproj missing (run ./scripts/bootstrap-ios.sh or deploy script)"
+fi
 echo
 
 echo "-- iOS version source --"

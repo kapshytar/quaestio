@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.0.27
+- tighten the iPhone settings reveal so opening keeps chats underneath until expansion completes and closing collapses the settings screen back into the same button
+
+## 2.0.26
+- fix the iPhone settings reveal by separating opening and closing overlay content so the animation keeps the correct screen underneath and avoids the double-render flicker
+
+## 2.0.25
+- fix the iPhone settings reveal flicker by keeping the destination screen under the opening reveal and the chats screen under the closing collapse
+
+## 2.0.24
+- remove the flicker from the iPhone settings reveal, add a reverse collapse back into the same button, and replace the short settings sheet with a contextual popover beside the button
+
+## 2.0.23
+- slow down the iPhone long-press settings reveal and render the settings screen inside the expanding circle instead of a delayed shell fill
+
+## 2.0.22
+- make a normal tap on the iPhone settings button open a quick actions popup and keep the long-press circular reveal for full settings
+
+## 2.0.21
+- add a long-press circular reveal animation from the iPhone settings button while keeping normal tap behavior unchanged
+
 ## 2.0.20
 - reduce the iPhone top utility controls so they align more closely with the tab pill height
 

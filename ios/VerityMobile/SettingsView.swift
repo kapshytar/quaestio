@@ -207,12 +207,11 @@ struct SettingsView: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(AppTheme.textPrimary)
-                            .frame(width: 34, height: 34)
-                            .background(Color.white.opacity(0.08), in: Circle())
+                            .utilityCircleChrome(showsShadow: false)
                     }
                     .buttonStyle(.plain)
-                    .padding(.top, 10)
-                    .padding(.trailing, 14)
+                    .padding(.top, 6)
+                    .padding(.trailing, 10)
                 }
             }
         }

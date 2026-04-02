@@ -106,11 +106,14 @@ private struct MergeConvergeIcon: View {
 struct SlotGridView: View {
     @EnvironmentObject private var appState: MobileAppState
     @Binding var selectedSection: RootSection
+    var onSettingsLongPress: (() -> Void)? = nil
+    var onSettingsFrameChange: ((CGRect) -> Void)? = nil
     @State private var showsSlotControlStrip = false
     @State private var slotAddressDraft = ""
     @StateObject private var systemAuth = SystemAuthCoordinator()
     @State private var showsProjectSheet = false
     @State private var showsSessionSheet = false
+    @State private var showsSettingsQuickMenu = false
     @State private var sessionSearchText = ""
     @State private var composerHeight: CGFloat = 22
 
@@ -275,7 +278,13 @@ struct SlotGridView: View {
                 }
 
                 utilityButton(kind: .settings) {
-                    selectedSection = .settings
+                    showsSettingsQuickMenu = true
+                }
+                onLongPress: {
+                    onSettingsLongPress?()
+                }
+                onFrameChange: { frame in
+                    onSettingsFrameChange?(frame)
                 }
             }
             .padding(.bottom, 1)
@@ -762,54 +771,109 @@ struct SlotGridView: View {
         case settings
     }
 
-    private func utilityButton(kind: UtilityKind, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.10),
-                                Color(red: 0.10, green: 0.11, blue: 0.13).opacity(0.96),
-                                Color.black.opacity(0.86)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-
-                Circle()
-                    .stroke(Color.white.opacity(0.09), lineWidth: 1)
-
-                Circle()
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.18),
-                                Color.white.opacity(0.02)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.8
-                    )
-                    .padding(0.5)
-
-                switch kind {
-                case .merge:
-                    MergeConvergeIcon()
-                        .foregroundStyle(AppTheme.textSecondary)
-                case .settings:
-                    Image(systemName: "ellipsis")
-                        .rotationEffect(.degrees(90))
-                        .font(.system(size: 11, weight: .black))
-                        .foregroundStyle(AppTheme.textSecondary)
-                }
+    private func utilityButton(
+        kind: UtilityKind,
+        action: @escaping () -> Void,
+        onLongPress: (() -> Void)? = nil,
+        onFrameChange: ((CGRect) -> Void)? = nil
+    ) -> some View {
+        let control = ZStack {
+            switch kind {
+            case .merge:
+                MergeConvergeIcon()
+                    .foregroundStyle(AppTheme.textSecondary)
+            case .settings:
+                Image(systemName: "ellipsis")
+                    .rotationEffect(.degrees(90))
+                    .font(.system(size: 11, weight: .black))
+                    .foregroundStyle(AppTheme.textSecondary)
             }
-            .frame(width: 30, height: 30)
-            .shadow(color: Color.black.opacity(0.18), radius: 10, x: 0, y: 4)
         }
-        .buttonStyle(.plain)
+        .utilityCircleChrome()
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear {
+                        guard let onFrameChange else { return }
+                        DispatchQueue.main.async {
+                            onFrameChange(proxy.frame(in: .named("rootShell")))
+                        }
+                    }
+                    .onChange(of: proxy.frame(in: .named("rootShell"))) { _, frame in
+                        onFrameChange?(frame)
+                    }
+            }
+        )
+
+        let interactiveControl: AnyView
+
+        if let onLongPress {
+            interactiveControl = AnyView(
+                control
+                    .contentShape(Circle())
+                    .gesture(
+                        LongPressGesture(minimumDuration: 0.35)
+                            .onEnded { _ in onLongPress() }
+                            .exclusively(before: TapGesture().onEnded { action() })
+                    )
+            )
+        } else {
+            interactiveControl = AnyView(
+                Button(action: action) {
+                    control
+                }
+                .buttonStyle(.plain)
+            )
+        }
+
+        if kind == .settings {
+            return AnyView(
+                interactiveControl
+                    .popover(isPresented: $showsSettingsQuickMenu, attachmentAnchor: .point(.bottom), arrowEdge: .top) {
+                        settingsQuickActionsPopover
+                            .presentationCompactAdaptation(.popover)
+                    }
+            )
+        }
+
+        return interactiveControl
+    }
+
+    private var settingsQuickActionsPopover: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                showsSettingsQuickMenu = false
+                appState.statusMessage = "Find in Page is coming here next."
+            } label: {
+                Label("Find in Page", systemImage: "text.magnifyingglass")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(AppTheme.textPrimary)
+
+            Divider()
+                .overlay(Color.white.opacity(0.08))
+
+            HStack(spacing: 8) {
+                Image(systemName: "hand.point.up.left.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppTheme.textMuted)
+                Text("Long-press this button for the full settings screen.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(width: 240, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(red: 0.10, green: 0.11, blue: 0.13))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
     }
 
     private func stripPillLabel(systemName: String, text: String) -> some View {
