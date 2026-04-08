@@ -106,3 +106,7 @@
   - aggregation collect
   - merge
 - If scrape quality regresses, inspect latest `debug-runs` traces before adding provider-specific patches.
+- Manual root-note renames should not break desktop `same question vs new question` detection:
+  - a human-edited note title must not be treated as the canonical question prompt
+  - desktop should prefer fresh scrape prompt metadata or stored canonical source prompt before falling back to `title`
+  - if this bug appears again, inspect `storedPrompt` vs scraped `sourcePrompt` before changing overwrite semantics
