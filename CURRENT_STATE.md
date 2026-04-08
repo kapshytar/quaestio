@@ -59,9 +59,9 @@
   - native only where necessary
 - Versioning/changelog rule for this repo is now explicit:
   - meaningful mobile milestones must be recorded in `CHANGELOG.md`
-  - this repo currently ships on the `2.0.x` line
-  - every code change increments `y`
-  - every commit/push milestone increments `x`
+  - this repo currently ships on the `2.x.y` line
+  - ordinary code changes increment `y`
+  - git push / release milestones increment `x`
   - after incrementing `x`, `y` resets to `0`
 
 ## In Progress
