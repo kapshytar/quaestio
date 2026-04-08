@@ -1,5 +1,10 @@
 # Versioning
 
+Parent / entry point:
+- Start from [../VERITY_MAP.md](../VERITY_MAP.md)
+- Cross-repo parent rule: [../docs/domains/CLIENT_VERSIONING_AND_RELEASE_RULES.md](../docs/domains/CLIENT_VERSIONING_AND_RELEASE_RULES.md)
+- This file is the repo-local child doc for `chat-aggregator-mobile` version bumps and validation commands.
+
 This file is the canonical versioning contract for `chat-aggregator-mobile`.
 
 Related files:
