@@ -126,7 +126,12 @@ echo "-- Canonical commands --"
 echo "iOS:     cd $ROOT_DIR && ./scripts/deploy-ios-device.sh"
 echo "Android: cd $ROOT_DIR && ./scripts/deploy-android-device.sh"
 echo "Gradle:  cd $ROOT_DIR && ./scripts/android-gradlew.sh :app:assembleDebug"
+echo "Bump:    cd $ROOT_DIR && ./scripts/bump-version.sh patch|push"
+echo "Check:   cd $ROOT_DIR && ./scripts/check-versioning.sh"
 echo
 echo "-- Android JDK rule --"
 echo "Do not run raw ./gradlew from memory on this Mac."
 echo "Use ./scripts/deploy-android-device.sh, or export JAVA_HOME from android/gradle.properties first."
+echo
+echo "-- Versioning rule --"
+echo "See $ROOT_DIR/VERSIONING.md"

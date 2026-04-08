@@ -6,6 +6,7 @@
 - Root docs in `Verity/` still win for workspace-wide or cross-repo rules.
 - `README.md` explains repo purpose and directory layout.
 - `CHANGELOG.md` is the required running history for meaningful mobile milestones.
+- `VERSIONING.md` is the canonical versioning contract and points to the required bump/check scripts.
 - Migration notes under `docs/` explain the move into this repo and should reflect actual migration status.
 
 ## Stable
@@ -58,6 +59,10 @@
   - shared first as the target state
   - native only where necessary
 - Versioning/changelog rule for this repo is now explicit:
+  - canonical doc: `VERSIONING.md`
+  - canonical scripts:
+    - `./scripts/bump-version.sh`
+    - `./scripts/check-versioning.sh`
   - meaningful mobile milestones must be recorded in `CHANGELOG.md`
   - this repo currently ships on the `2.x.y` line
   - ordinary code changes increment `y`
@@ -104,6 +109,10 @@
 - Do not run raw `./gradlew` from memory and assume the shell has the right Java.
 - Default to `./scripts/deploy-android-device.sh`; if a manual Gradle run is truly needed, export `JAVA_HOME` from `org.gradle.java.home` first.
 - Canonical manual Gradle path in this repo is `./scripts/android-gradlew.sh`.
+- Canonical versioning workflow in this repo is:
+  - read `VERSIONING.md`
+  - bump with `./scripts/bump-version.sh patch` or `./scripts/bump-version.sh push`
+  - validate with `./scripts/check-versioning.sh`
 - Embedded social/OAuth login should be treated as provider-compatibility-sensitive, not assumed to work just because the page renders inside a webview.
 - Do not ship meaningful mobile client changes without updating this repo's `CHANGELOG.md`.
 
