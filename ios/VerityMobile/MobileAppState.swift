@@ -13,6 +13,13 @@ struct MergeAggregationSlotSnapshot: Identifiable {
     let status: MergeAggregationSlotStatus
 }
 
+private struct SlotScrapeAttempt {
+    let slot: SlotState
+    let serviceId: String
+    let result: SlotScrapeReply?
+    let status: MergeAggregationSlotStatus
+}
+
 private struct ProjectSlotURLsTagRow: Decodable, Sendable {
     let id: String?
     let slotURLs: [String: JSONValue]?
@@ -136,7 +143,14 @@ final class MobileAppState: ObservableObject {
     func sendComposerToActiveSlots() async {
         let message = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty else { return }
+        // Question identity semantics are documented centrally in
+        // Verity/docs/domains/SESSION_AND_INGEST_RULES.md.
+        // Keep iOS behavior aligned with Android there; do not invent local rules here.
         let hadCurrentQuestionContext = currentQuestionSessionId() != nil && currentQuestionAggregatedNoteId() != nil
+        let loadedQuestionPrompt = sessionManager.getParallelIngestState().sourcePrompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .ifEmpty(lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines))
+        let shouldResetQuestionContext = hadCurrentQuestionContext && !promptsReferToSameQuestion(message, loadedQuestionPrompt)
 
         isSendingComposer = true
         defer { isSendingComposer = false }
@@ -159,11 +173,10 @@ final class MobileAppState: ObservableObject {
         if successCount > 0 {
             lastUserPrompt = message
             persistLastUserPrompt(message)
-            sessionManager.rememberSourcePrompt(message)
-            if !hadCurrentQuestionContext {
+            if shouldResetQuestionContext || !hadCurrentQuestionContext {
                 sessionManager.clearParallelIngestState()
-                sessionManager.rememberSourcePrompt(message)
             }
+            sessionManager.rememberSourcePrompt(message)
             updateSessionIndicator()
             composerText = ""
             let expectedSlots = activeSlots.count
@@ -273,10 +286,10 @@ final class MobileAppState: ObservableObject {
             let slotKey = "slot-\(fallback.id)"
             let targetServiceId = session.slotConfig[slotKey] ?? fallback.serviceId
             let preset = presets[targetServiceId] ?? presets[fallback.serviceId]
-            // Prefer live chat URL from snapshot, then stored URL, then preset, then fallback
+            let storedURL = session.slotURLs[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
             let liveURL = session.slotLiveURLs[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
             let resolvedURL = liveURL
-                ?? session.slotURLs[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+                ?? storedURL
                 ?? preset?.url
                 ?? fallback.url
             let targetEnabled = session.slotEnabled[slotKey] ?? fallback.isEnabled
@@ -330,7 +343,7 @@ final class MobileAppState: ObservableObject {
     }
 
     func refreshMergeAggregationStatuses(sourcePrompt: String) async {
-        let result = await scrapeReplies(sourcePrompt: sourcePrompt)
+        let result = await scrapeRepliesRecoveringPromptIfNeeded(sourcePrompt: sourcePrompt)
         mergeAggregationSnapshots = result.snapshots
         mergeAggregationSummary = formatAggregationSummary(result.snapshots)
     }
@@ -362,6 +375,11 @@ final class MobileAppState: ObservableObject {
             ""
         }
         let sameQuestionAsCurrentRoot = hasLoadedQuestionContext && promptsReferToSameQuestion(prompt, loadedQuestionPrompt)
+        if hasLoadedQuestionContext && !sameQuestionAsCurrentRoot {
+            sessionManager.clearParallelIngestState()
+            sessionManager.rememberSourcePrompt(prompt)
+            updateSessionIndicator()
+        }
         let replaceExisting = existingAggregatedNoteId != nil && sameQuestionAsCurrentRoot
         let targetAggregatedNoteId = replaceExisting ? existingAggregatedNoteId : nil
 
@@ -400,26 +418,31 @@ final class MobileAppState: ObservableObject {
         guard !enabledSlots.isEmpty else {
             mergeAggregationSnapshots = []
             mergeAggregationSummary = "No enabled slots for merge."
+            appendIngestEvent("collect-abort no-enabled-slots")
             return [:]
         }
+
+        appendIngestEvent("collect-start enabledSlots=\(enabledSlots.count)")
 
         let maxChecks = max(1, mergeAggregationPolicy.maxChecks)
         let waitIntervalNs = UInt64(max(0, mergeAggregationPolicy.waitIntervalMs)) * 1_000_000
         let settleDelayNs = UInt64(max(0, mergeAggregationPolicy.settleDelayMs)) * 1_000_000
         let minimumRepliesRequired = max(1, mergeAggregationPolicy.minimumRepliesRequired)
-        var lastResult = await scrapeReplies(sourcePrompt: sourcePrompt)
+        var lastResult = await scrapeRepliesRecoveringPromptIfNeeded(sourcePrompt: sourcePrompt)
         mergeAggregationSnapshots = lastResult.snapshots
         mergeAggregationSummary = formatAggregationSummary(lastResult.snapshots)
+        appendIngestEvent("collect-after-scrape responses=\(lastResult.responses.count) snapshots=\(lastResult.snapshots.map { "\($0.id):\($0.status.rawValue)" }.joined(separator: ", "))")
 
         for attempt in 1..<maxChecks {
             if lastResult.responses.count >= enabledSlots.count {
                 if settleDelayNs > 0 {
                     try? await Task.sleep(nanoseconds: settleDelayNs)
-                    lastResult = await scrapeReplies(sourcePrompt: sourcePrompt)
+                    lastResult = await scrapeRepliesRecoveringPromptIfNeeded(sourcePrompt: sourcePrompt)
                     mergeAggregationSnapshots = lastResult.snapshots
                 }
                 if lastResult.responses.count >= enabledSlots.count {
                     mergeAggregationSummary = "All \(enabledSlots.count) slot(s) ready. Collecting now..."
+                    appendIngestEvent("collect-success all-ready responses=\(lastResult.responses.count)")
                     return lastResult.responses
                 }
                 mergeAggregationSummary = formatAggregationSummary(lastResult.snapshots)
@@ -430,7 +453,7 @@ final class MobileAppState: ObservableObject {
             statusMessage = "Waiting for replies: \(readyCount)/\(enabledSlots.count) ready"
             try? await Task.sleep(nanoseconds: waitIntervalNs)
 
-            lastResult = await scrapeReplies(sourcePrompt: sourcePrompt)
+            lastResult = await scrapeRepliesRecoveringPromptIfNeeded(sourcePrompt: sourcePrompt)
             mergeAggregationSnapshots = lastResult.snapshots
             mergeAggregationSummary = formatAggregationSummary(lastResult.snapshots)
 
@@ -441,8 +464,10 @@ final class MobileAppState: ObservableObject {
 
         if mergeAggregationPolicy.allowPartialResults && lastResult.responses.count >= minimumRepliesRequired {
             mergeAggregationSummary = "Collected \(lastResult.responses.count)/\(enabledSlots.count) source reply(s)"
+            appendIngestEvent("collect-partial responses=\(lastResult.responses.count)/\(enabledSlots.count)")
         } else {
             mergeAggregationSummary = "Aggregation still waiting. Use Collect now or refresh statuses."
+            appendIngestEvent("collect-incomplete responses=\(lastResult.responses.count)/\(enabledSlots.count)")
         }
 
         return mergeAggregationPolicy.allowPartialResults && lastResult.responses.count >= minimumRepliesRequired
@@ -570,13 +595,20 @@ final class MobileAppState: ObservableObject {
     }
 
     private func currentQuestionSessionId() -> Int? {
+        // Shared semantics reference:
+        // Verity/docs/domains/SESSION_AND_INGEST_RULES.md
         let state = sessionManager.getParallelIngestState()
-        guard !currentQuestionAggregatedNoteId().isNilOrBlank else { return nil }
-        return state.sessionId
+        let activeRootId = currentQuestionAggregatedNoteId()
+        if !activeRootId.isNilOrBlank, let sessionId = state.sessionId {
+            return sessionId
+        }
+        return !activeRootId.isNilOrBlank ? restoreStoredQuestionContextForCurrentSlots()?.sessionId : nil
     }
 
     private func currentQuestionAggregatedNoteId() -> String? {
-        sessionManager.getParallelIngestState().activeNoteId.nilIfBlank
+        let direct = sessionManager.getParallelIngestState().activeNoteId.nilIfBlank
+        if !direct.isNilOrBlank { return direct }
+        return restoreStoredQuestionContextForCurrentSlots()?.noteId.nilIfBlank
     }
 
     private func updateSessionIndicator() {
@@ -586,8 +618,8 @@ final class MobileAppState: ObservableObject {
     private func appendIngestEvent(_ message: String) {
         let stamp = Self.ingestEventTimeFormatter.string(from: Date())
         recentIngestEvents.insert("[\(stamp)] \(message)", at: 0)
-        if recentIngestEvents.count > 6 {
-            recentIngestEvents = Array(recentIngestEvents.prefix(6))
+        if recentIngestEvents.count > 40 {
+            recentIngestEvents = Array(recentIngestEvents.prefix(40))
         }
     }
 
@@ -614,6 +646,9 @@ final class MobileAppState: ObservableObject {
             traceId: traceId
         )
 
+        // DEBUG: Log ingest details
+        appendIngestEvent("ingest-start seq=\(sequence) session=\(existingSessionId ?? -1) responses=\(responses.count) replace=\(replaceExisting)")
+
         let scrapeMeta = slots
             .filter(\.isEnabled)
             .compactMap { slot -> IngestScrapeMetaRow? in
@@ -636,14 +671,21 @@ final class MobileAppState: ObservableObject {
             replaceExisting: replaceExisting
         )
 
+        // DEBUG: Log payload info
+        appendIngestEvent("ingest-payload responses=\(responses.count) sessionId=\(existingSessionId ?? -1)")
+
         let result = try await AggregatedIngestClient.sendAggregated(
             rpcBaseURL: rpcBaseURL,
             apiKey: apiKey,
             payload: payload,
             traceId: traceId,
             idempotencyKey: idempotencyKey,
-            scrapeMeta: scrapeMeta
+            scrapeMeta: scrapeMeta,
+            detailedLogging: true
         )
+
+        // DEBUG: Log result
+        appendIngestEvent("ingest-result sessionId=\(result.sessionId ?? -1) noteId=\(result.noteId ?? "nil") replay=\(result.idempotentReplay)")
 
         sessionManager.updateSessionLink(
             sessionId: result.sessionId,
@@ -699,36 +741,114 @@ final class MobileAppState: ObservableObject {
         }
     }
 
+    private func scrapeRepliesRecoveringPromptIfNeeded(sourcePrompt: String) async -> (responses: [String: String], snapshots: [MergeAggregationSlotSnapshot]) {
+        // Prompt recovery priority is shared product semantics.
+        // See Verity/docs/domains/SESSION_AND_INGEST_RULES.md before changing this flow.
+        let initial = await scrapeRepliesDetailed(sourcePrompt: sourcePrompt)
+        guard shouldRetryScrapeWithRecoveredPrompt(initial.attempts, currentPrompt: sourcePrompt) else {
+            return (initial.responses, initial.snapshots)
+        }
+
+        let recoveredPrompt = resolveSourcePromptFromScrapeAttempts(initial.attempts)
+        guard !recoveredPrompt.isEmpty, !promptsReferToSameQuestion(recoveredPrompt, sourcePrompt) else {
+            return (initial.responses, initial.snapshots)
+        }
+
+        sessionManager.rememberSourcePrompt(recoveredPrompt)
+        lastUserPrompt = recoveredPrompt
+        persistLastUserPrompt(recoveredPrompt)
+
+        let retried = await scrapeRepliesDetailed(sourcePrompt: recoveredPrompt)
+        return (retried.responses, retried.snapshots)
+    }
+
     private func scrapeReplies(sourcePrompt: String) async -> (responses: [String: String], snapshots: [MergeAggregationSlotSnapshot]) {
+        let detailed = await scrapeRepliesDetailed(sourcePrompt: sourcePrompt)
+        return (detailed.responses, detailed.snapshots)
+    }
+
+    private func scrapeRepliesDetailed(sourcePrompt: String) async -> (responses: [String: String], snapshots: [MergeAggregationSlotSnapshot], attempts: [SlotScrapeAttempt]) {
         var collected: [String: String] = [:]
         var snapshots: [MergeAggregationSlotSnapshot] = []
+        var attempts: [SlotScrapeAttempt] = []
 
         for slot in slots where slot.isEnabled {
             guard let preset = presets[slot.serviceId] else { continue }
             let model = webModel(for: slot.id)
-            let scrapedText = await scrapeReplyText(from: model, serviceId: preset.id, sourcePrompt: sourcePrompt)
+            let scrapeResult = await model.collectLatestReply(serviceId: preset.id, sourcePrompt: sourcePrompt)
+            let scrapedText = scrapeResult?.text?.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if let scrapedText, !scrapedText.isEmpty {
                 collected[slot.title] = scrapedText
-                snapshots.append(MergeAggregationSlotSnapshot(id: slot.id, title: slot.title, status: .ready))
+                let status: MergeAggregationSlotStatus = .ready
+                snapshots.append(MergeAggregationSlotSnapshot(id: slot.id, title: slot.title, status: status))
+                let attempt = SlotScrapeAttempt(slot: slot, serviceId: preset.id, result: scrapeResult, status: status)
+                attempts.append(attempt)
+                appendIngestEvent(formatScrapeAttemptLog(attempt))
             } else if await model.isStillGenerating(serviceId: preset.id) || isSlotLikelyStillWorking(model) {
-                snapshots.append(MergeAggregationSlotSnapshot(id: slot.id, title: slot.title, status: .waiting))
+                let status: MergeAggregationSlotStatus = .waiting
+                snapshots.append(MergeAggregationSlotSnapshot(id: slot.id, title: slot.title, status: status))
+                let attempt = SlotScrapeAttempt(slot: slot, serviceId: preset.id, result: scrapeResult, status: status)
+                attempts.append(attempt)
+                appendIngestEvent(formatScrapeAttemptLog(attempt))
             } else {
-                snapshots.append(MergeAggregationSlotSnapshot(id: slot.id, title: slot.title, status: .error))
+                let status: MergeAggregationSlotStatus = .error
+                snapshots.append(MergeAggregationSlotSnapshot(id: slot.id, title: slot.title, status: status))
+                let attempt = SlotScrapeAttempt(slot: slot, serviceId: preset.id, result: scrapeResult, status: status)
+                attempts.append(attempt)
+                appendIngestEvent(formatScrapeAttemptLog(attempt))
             }
         }
 
-        return (collected, snapshots)
+        return (collected, snapshots, attempts)
     }
 
-    private func scrapeReplyText(from model: SlotWebViewModel, serviceId: String, sourcePrompt: String) async -> String? {
-        guard let result = await model.scrapeLatestReply(serviceId: serviceId, sourcePrompt: sourcePrompt),
-              let text = result.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !text.isEmpty
-        else {
-            return nil
+    private func formatScrapeAttemptLog(_ attempt: SlotScrapeAttempt) -> String {
+        let result = attempt.result
+        let textLen = result?.text?.trimmingCharacters(in: .whitespacesAndNewlines).count ?? 0
+        let method = (result?.method ?? "none").trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("none")
+        let error = (result?.error ?? "").trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("none")
+        let promptCandidate = (result?.promptCandidateText ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+            .ifEmpty("none")
+        let debugTrace = (result?.debugTrace ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " | ")
+            .ifEmpty("none")
+        let collectorTrace = (result?.collectorTrace ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " | ")
+            .ifEmpty("none")
+        let debugSnippet = String(debugTrace.prefix(120))
+        let collectorSnippet = String(collectorTrace.prefix(140))
+        let promptSnippet = String(promptCandidate.prefix(80))
+
+        var parts: [String] = [
+            "slot=\(attempt.slot.id)",
+            "provider=\(attempt.serviceId)",
+            "method=\(method)",
+            "status=\(attempt.status.rawValue)",
+            "textLen=\(textLen)"
+        ]
+
+        if error != "none" {
+            parts.append("error=\(error)")
         }
-        return text
+
+        if collectorTrace != "none" {
+            parts.append("collector=\(collectorSnippet)")
+        }
+
+        if error != "none" && promptCandidate != "none" {
+            parts.append("prompt=\(promptSnippet)")
+        }
+
+        if error != "none" && debugTrace != "none" {
+            parts.append("debug=\(debugSnippet)")
+        }
+
+        return parts.joined(separator: " ")
     }
 
     private func isSlotLikelyStillWorking(_ model: SlotWebViewModel) -> Bool {
@@ -888,6 +1008,109 @@ final class MobileAppState: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             return ("slot-\(slot.id)", liveURL.isEmpty ? slot.url : liveURL)
         })
+    }
+
+    private func restoreStoredQuestionContextForCurrentSlots() -> SessionSnapshot? {
+        let enabledSlotKeys = Set(slots.filter(\.isEnabled).map { "slot-\($0.id)" })
+        if enabledSlotKeys.isEmpty { return nil }
+
+        let currentFingerprint = buildSessionFingerprint(slotURLs: currentSessionSnapshotSlotURLs(), slotKeys: enabledSlotKeys)
+        if currentFingerprint.isEmpty { return nil }
+
+        let currentSourcePrompt = sessionManager.getParallelIngestState().sourcePrompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let matching = sessionManager.getAllSessions().first { snapshot in
+            guard snapshot.sessionId != nil, !(snapshot.noteId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return false
+            }
+            guard buildSessionFingerprint(slotURLs: snapshot.slotURLs, slotKeys: enabledSlotKeys) == currentFingerprint else {
+                return false
+            }
+            return currentSourcePrompt.isEmpty || promptsReferToSameQuestion(currentSourcePrompt, snapshot.name)
+        }
+
+        guard let matching else { return nil }
+        sessionManager.updateSessionLink(
+            sessionId: matching.sessionId,
+            noteId: matching.noteId,
+            sourcePrompt: matching.name
+        )
+        updateSessionIndicator()
+        return matching
+    }
+
+    private func buildSessionFingerprint(slotURLs: [String: String], slotKeys: Set<String>) -> String {
+        let parts = slotKeys.sorted().compactMap { slotKey -> String? in
+            let rawURL = slotURLs[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if rawURL.isEmpty { return nil }
+            let slotIndex = Int(slotKey.replacingOccurrences(of: "slot-", with: ""))
+            let serviceId = slots.first(where: { $0.id == slotIndex })?.serviceId ?? "unknown"
+            return "\(slotKey):\(extractConversationKey(serviceId: serviceId, rawURL: rawURL))"
+        }
+        return parts.isEmpty ? "" : parts.joined(separator: "|")
+    }
+
+    private func extractConversationKey(serviceId: String?, rawURL: String?) -> String {
+        let sid = serviceId?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "unknown"
+        let fallback = "\(sid):no-url"
+        let trimmedURL = rawURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmedURL.isEmpty { return fallback }
+
+        guard let url = URL(string: trimmedURL), let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return "\(sid):\(trimmedURL.lowercased())"
+        }
+
+        let segments = url.pathComponents
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty && $0 != "/" }
+
+        func firstAfter(_ label: String) -> String? {
+            guard let index = segments.firstIndex(of: label), index + 1 < segments.count else { return nil }
+            return segments[index + 1]
+        }
+
+        func looksLikeID(_ value: String?) -> Bool {
+            let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            guard normalized.count >= 6 else { return false }
+            return normalized.range(of: #"^[a-z0-9][a-z0-9_-]*$"#, options: .regularExpression) != nil
+        }
+
+        var chatID: String?
+        switch sid {
+        case "chatgpt":
+            chatID = firstAfter("c") ?? firstAfter("chat")
+            if chatID == nil,
+               components.queryItems?.contains(where: { $0.name.lowercased() == "temporary-chat" }) == true {
+                chatID = "temporary"
+            }
+        case "claude":
+            chatID = firstAfter("chat")
+        case "deepseek":
+            chatID = firstAfter("s") ?? firstAfter("chat")
+        case "perplexity":
+            chatID = firstAfter("search")
+        case "grok":
+            chatID = firstAfter("c") ?? firstAfter("chat")
+        case "gemini":
+            chatID = firstAfter("app") ?? firstAfter("chat")
+        default:
+            chatID = nil
+        }
+
+        if chatID == nil, looksLikeID(segments.last) {
+            chatID = segments.last
+        }
+
+        if let chatID, !chatID.isEmpty {
+            return "\(sid):\(chatID)"
+        }
+
+        if !segments.isEmpty {
+            return "\(sid):\(segments.joined(separator: "/"))"
+        }
+
+        return "\(sid):\(components.host?.lowercased() ?? "")"
     }
 
     private func normalizeURL(_ value: String) -> String {
@@ -1243,6 +1466,89 @@ final class MobileAppState: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    private func normalizeCollectedPromptCandidate(_ value: String) -> String {
+        value
+            .replacingOccurrences(
+                of: #"^\s*(?:you said|you asked|user(?: asked| said)?|вы сказали|ты спросил[аи]?|ты сказал[аи]?)\s*[:\-]?\s*"#,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+            .replacingOccurrences(
+                of: #"\s*##\s*(?:chatgpt|gemini|claude|grok|perplexity)\s+said\b[\s\S]*$"#,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+            .replacingOccurrences(
+                of: #"\s*(?:chatgpt|gemini|claude|grok|perplexity)\s+said\b[\s\S]*$"#,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+            .replacingOccurrences(of: #"^[#>*\s"'`]+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[\s"'`]+$"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func shouldRetryScrapeWithRecoveredPrompt(_ attempts: [SlotScrapeAttempt], currentPrompt: String) -> Bool {
+        let promptMismatchAttempts = attempts.filter {
+            $0.status == .error && $0.result?.error == "Selected reply belongs to a previous prompt"
+        }
+        guard promptMismatchAttempts.count >= max(2, attempts.count / 2) else { return false }
+        let recoveredPrompt = resolveSourcePromptFromScrapeAttempts(attempts)
+        guard !recoveredPrompt.isEmpty else { return false }
+        return !promptsReferToSameQuestion(recoveredPrompt, currentPrompt)
+    }
+
+    private func resolveSourcePromptFromScrapeAttempts(_ attempts: [SlotScrapeAttempt]) -> String {
+        struct PromptAggregate {
+            var prompt: String
+            var count: Int
+            var totalScore: Double
+        }
+
+        var aggregates: [String: PromptAggregate] = [:]
+
+        for attempt in attempts {
+            guard let result = attempt.result else { continue }
+            let rawPrompt = result.promptCandidateText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let prompt = normalizeCollectedPromptCandidate(rawPrompt)
+            guard !prompt.isEmpty else { continue }
+
+            let normalizedKey = normalizePromptForComparison(prompt)
+            guard !normalizedKey.isEmpty else { continue }
+
+            let preview = result.rawResult.lowercased()
+            let normalizedPrompt = prompt.lowercased()
+            var score = 100.0
+            if preview.contains(normalizedPrompt) { score += 80.0 }
+            if rawPrompt.range(of: #"^\s*(?:you said|you asked|вы сказали)"#, options: [.regularExpression, .caseInsensitive]) != nil {
+                score += 30.0
+            }
+            if prompt.count >= 20 { score += 20.0 }
+            if prompt.count <= 8 { score -= 40.0 }
+            score += Double(min(prompt.count, 120)) / 10.0
+
+            if var existing = aggregates[normalizedKey] {
+                existing.count += 1
+                existing.totalScore += score
+                if prompt.count > existing.prompt.count {
+                    existing.prompt = prompt
+                }
+                aggregates[normalizedKey] = existing
+            } else {
+                aggregates[normalizedKey] = PromptAggregate(prompt: prompt, count: 1, totalScore: score)
+            }
+        }
+
+        return aggregates.values
+            .sorted {
+                if $0.count != $1.count { return $0.count > $1.count }
+                if $0.totalScore != $1.totalScore { return $0.totalScore > $1.totalScore }
+                return $0.prompt.count > $1.prompt.count
+            }
+            .first?.prompt ?? ""
     }
 
     private func promptsReferToSameQuestion(_ currentPrompt: String, _ storedPrompt: String) -> Bool {

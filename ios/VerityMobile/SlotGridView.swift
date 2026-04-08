@@ -426,6 +426,20 @@ struct SlotGridView: View {
                     }
                 }
 
+                Section {
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppTheme.textMuted)
+
+                        TextField("Search by session id or title", text: $sessionSearchText)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .foregroundStyle(AppTheme.textPrimary)
+                    }
+                    .padding(.vertical, 4)
+                }
+
                 Section("Saved Sessions") {
                     if appState.isLoadingSessions {
                         HStack(spacing: 12) {
@@ -433,10 +447,17 @@ struct SlotGridView: View {
                             Text("Loading sessions…")
                                 .foregroundStyle(AppTheme.textSecondary)
                         }
-                    } else if filteredSessions.isEmpty {
+                    } else if appState.availableSessions.isEmpty {
                         Button("Load Sessions") {
                             Task { await appState.loadSessions() }
                         }
+                    } else if filteredSessions.isEmpty {
+                        ContentUnavailableView(
+                            "No Matching Sessions",
+                            systemImage: "magnifyingglass",
+                            description: Text("Try a different session id or title.")
+                        )
+                        .foregroundStyle(AppTheme.textSecondary)
                     } else {
                         ForEach(filteredSessions) { session in
                             Button {
@@ -464,7 +485,6 @@ struct SlotGridView: View {
                     }
                 }
             }
-            .searchable(text: $sessionSearchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search by session id or title")
             .navigationTitle("Sessions")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -479,6 +499,9 @@ struct SlotGridView: View {
             }
             .task {
                 await appState.loadSessionsIfNeeded()
+            }
+            .onDisappear {
+                sessionSearchText = ""
             }
         }
     }

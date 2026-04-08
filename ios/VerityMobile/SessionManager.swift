@@ -377,8 +377,10 @@ final class SessionManager {
             }
         }
 
-        return rows.compactMap { row in
-            guard let noteId = (row["id"] as? String)?.nilIfEmpty else { return nil }
+        return rows.compactMap { (row: [String: Any]) -> SessionSnapshot? in
+            guard let rawId = row["id"] as? String else { return nil }
+            let noteId = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !noteId.isEmpty else { return nil }
 
             let rowSessionId =
                 (row["note_session_id"] as? NSNumber)?.intValue
@@ -388,8 +390,19 @@ final class SessionManager {
             guard let rowSessionId else { return nil }
 
             let updatedAt = (row["updated_at"] as? String) ?? ""
-            let matchingSnapshot = snapshotByNote[noteId] ?? latestSnapshotBySession[rowSessionId]
+            let exactNoteSnapshot = snapshotByNote[noteId]
+            let matchingSnapshot = exactNoteSnapshot ?? latestSnapshotBySession[rowSessionId]
             let title = ((row["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Notes table doesn't store slot URLs — fall back to the RPC snapshot.
+            let exactURLs = exactNoteSnapshot?.slotURLs
+            let exactLive = exactNoteSnapshot?.slotLiveURLs
+            let resolvedSlotURLs = (exactURLs?.isEmpty == false ? exactURLs : nil)
+                ?? matchingSnapshot?.slotURLs
+                ?? [:]
+            let resolvedLiveURLs = (exactLive?.isEmpty == false ? exactLive : nil)
+                ?? matchingSnapshot?.slotLiveURLs
+                ?? [:]
 
             return SessionSnapshot(
                 id: matchingSnapshot?.id ?? "note:\(noteId)",
@@ -403,9 +416,9 @@ final class SessionManager {
                     ?? "Session #\(rowSessionId)"
                 ),
                 slotConfig: matchingSnapshot?.slotConfig ?? [:],
-                slotURLs: matchingSnapshot?.slotURLs ?? [:],
+                slotURLs: resolvedSlotURLs,
                 slotEnabled: matchingSnapshot?.slotEnabled ?? [:],
-                slotLiveURLs: matchingSnapshot?.slotLiveURLs ?? [:],
+                slotLiveURLs: resolvedLiveURLs,
                 createdAt: matchingSnapshot?.createdAt ?? "",
                 updatedAt: updatedAt.ifEmpty(matchingSnapshot?.updatedAt ?? "")
             )
@@ -490,4 +503,8 @@ private extension String {
     func ifEmpty(_ fallback: String) -> String {
         isEmpty ? fallback : self
     }
+}
+
+extension Dictionary {
+    var nilIfEmptyDict: Self? { isEmpty ? nil : self }
 }

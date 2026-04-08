@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.38
+
+- bundle `shared/js/extractLatestAssistantRaw.js` into the iPhone app so the on-device raw DOM extractor is actually available at runtime instead of silently falling back because the script was missing from app resources
+- harden iPhone collect diagnostics with per-slot method/collector logging, a `Recent activity` copy action, and compact error output so Gemini/Grok/WebKit scrape failures can be debugged on-device without relying on backend payload inspection first
+- align the iPhone collector closer to desktop behavior for `Gemini` and `Grok` by restoring the raw DOM extraction path on device while keeping copy-based fallback for providers that still need it
+
 ## 2.0.30
 
 - stabilize iPhone mobile zoom behavior by keeping the shared pre-load viewport path, expanding viewport diagnostics, and rolling back the extra ChatGPT-only compensation layers after they created contradictory sizing behavior

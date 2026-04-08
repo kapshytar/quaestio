@@ -10,8 +10,8 @@ settings:
   base:
     PRODUCT_BUNDLE_IDENTIFIER: com.verity.mobile
     SWIFT_VERSION: 6.0
-    CURRENT_PROJECT_VERSION: 230
-    MARKETING_VERSION: 2.0.30
+    CURRENT_PROJECT_VERSION: 238
+    MARKETING_VERSION: 2.0.38
     DEVELOPMENT_TEAM: "Y7643GTM35"
 targets:
   VerityMobile:
@@ -33,6 +33,8 @@ targets:
       - path: shared/js/attachFile.js
         buildPhase: resources
       - path: shared/js/scrapeReply.js
+        buildPhase: resources
+      - path: shared/js/extractLatestAssistantRaw.js
         buildPhase: resources
       - path: shared/js/mergeStreamParser.js
         buildPhase: resources

@@ -3,6 +3,7 @@
     try {
       const serviceId = String(payload?.serviceId || '');
       const sourcePrompt = String(payload?.sourcePrompt || '');
+      const rawReplyOverride = String(payload?.rawReplyOverride || '');
 
       function visible(el) {
         if (!el) return false;
@@ -328,12 +329,12 @@
         const patterns = [
           new RegExp(
             '(?:^|\\n)(?:#{1,6}\\s*)?(?:you said|вы сказали)\\s*:?\\s*\\n?([\\s\\S]*?)(?:\\n(?:#{1,6}\\s*)?'
-              + assistantPattern + '\\b[:\\s-]*)',
+            + assistantPattern + '\\b[:\\s-]*)',
             'i'
           ),
           new RegExp(
             '^(?:#{1,6}\\s*)?(?:you said|вы сказали)\\s*:?\\s*([\\s\\S]*?)(?:\\n(?:#{1,6}\\s*)?'
-              + assistantPattern + '\\b[:\\s-]*)',
+            + assistantPattern + '\\b[:\\s-]*)',
             'i'
           )
         ];
@@ -401,9 +402,83 @@
         );
       }
 
+      function stripPromptEchoWrapper(raw) {
+        // Detect and remove combined prompt+response wrapper.
+        // Structure: ⸻ (U+2E3B) → prompt text → (⸻) → actual response
+        const trimmed = String(raw || '').trim();
+        if (!trimmed) return raw;
+
+        // Only trigger on ⸻ (Gemini/ChatGPT combined container)
+        if (!/^\u2E3B/.test(trimmed)) return raw;
+
+        // Split on ⸻ characters
+        const parts = trimmed.split('\u2E3B').map(s => s.trim()).filter(Boolean);
+        if (parts.length < 2) return raw;
+
+        // Last part may contain prompt section headers + actual response
+        const lastPart = parts[parts.length - 1];
+        const lines = lastPart.split('\n');
+
+        if (!sourcePrompt || sourcePrompt.length < 30) {
+          // No prompt to compare against — can't safely strip
+          // Return empty so quality check fails and fallback kicks in
+          return '';
+        }
+
+        const promptFlat = flatText(sourcePrompt).toLowerCase();
+        let responseStartIdx = -1;
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = normalizeInlineText(lines[i] || '').trim();
+          if (!line || line.length < 10) continue;
+          const lineFlat = line.toLowerCase();
+
+          // Skip lines that look like prompt content
+          if (promptFlat.length >= 40) {
+            // Check if this line is contained in the prompt
+            const maxLineLen = Math.min(lineFlat.length, 150);
+            const lineSnippet = lineFlat.slice(0, maxLineLen);
+            if (promptFlat.includes(lineSnippet) && lineFlat.length < 200) continue;
+          }
+
+          // Skip prompt section headers
+          if (/^(что я хочу|вопрос|хочу получить|схема,|проблема|хочу построить|как вообще|вопрос\s*$)/i.test(line)) continue;
+          if (/^\s*[•\-\*]\s*(codex|qwen|claude|openclaw|opencode)\s/i.test(line)) continue;
+
+          // Found a line that doesn't match prompt — this is the response
+          responseStartIdx = i;
+          break;
+        }
+
+        if (responseStartIdx >= 0) {
+          const response = normalizeText(lines.slice(responseStartIdx).join('\n'));
+          if (response.length > 60) return response;
+        }
+
+        // No response found — entire text was prompt. Return empty so
+        // quality check fails and the collector falls back to copy extraction.
+        return '';
+      }
+
+      function hasPromptEchoShape(text) {
+        const normalized = normalizeText(text);
+        if (!normalized || normalized.length < 80) return false;
+        if (!/^\u2E3B/.test(normalized)) return false;
+        return /(у меня сейчас такой сетап|но сейчас есть несколько проблем|что я хочу получить|схема, которую я пытаюсь построить|вопрос)/i.test(normalized);
+      }
+
       function sanitizeScrapedReply(raw) {
         let text = normalizeText(raw);
         if (!text) return '';
+        const isIOSWebKit = /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+
+        // Strip prompt-echo wrapper BEFORE any other cleanup.
+        // The ⸻ wrapper appears for Gemini and ChatGPT when the DOM picks the
+        // combined prompt+response container. Only trigger when text actually starts
+        // with the ⸻ divider (U+2E3B).
+        if (/^\u2E3B/.test(text)) {
+          text = normalizeText(stripPromptEchoWrapper(text));
+        }
 
         const prompt = normalizeInlineText(sourcePrompt);
         const escapedPrompt = prompt ? escapeRegex(prompt) : '';
@@ -451,6 +526,33 @@
           text = normalizeText(lines.join('\n'));
         }
 
+        if (isIOSWebKit && ['claude', 'gemini', 'grok'].includes(serviceId) && sourcePrompt) {
+          const promptFlat = flatText(sourcePrompt).toLowerCase();
+          const rawLines = text.split('\n');
+          let removedChars = 0;
+
+          function lineLooksLikePromptEcho(value) {
+            const normalized = normalizeInlineText(value).toLowerCase();
+            if (!normalized || normalized.length < 12) return false;
+            if (normalized === '---' || normalized === '⸻') return true;
+            if (normalized.startsWith('#### you said')) return true;
+            if (normalized.startsWith('you said')) return true;
+            if (normalized.startsWith('вы сказали')) return true;
+            return promptFlat.includes(normalized);
+          }
+
+          while (rawLines.length > 0) {
+            const line = String(rawLines[0] || '');
+            if (!lineLooksLikePromptEcho(line)) break;
+            removedChars += line.length;
+            rawLines.shift();
+          }
+
+          if (removedChars >= 80) {
+            text = normalizeText(rawLines.join('\n'));
+          }
+        }
+
         const lines = text.split('\n');
         const cleaned = [];
         let pendingBlank = false;
@@ -471,6 +573,58 @@
 
         text = normalizeText(cleaned.join('\n'));
         return text;
+      }
+
+      function isQualityReply(text) {
+        const normalized = normalizeText(text);
+        if (!normalized || flatText(normalized).length < 20) return false;
+        if (hasPromptEchoShape(normalized)) return false;
+
+        const flat = flatText(normalized).toLowerCase();
+        const promptFlat = flatText(sourcePrompt).toLowerCase();
+        if (promptFlat) {
+          if (flat === promptFlat) return false;
+          if (flat.length < promptFlat.length * 1.5 && flat.includes(promptFlat)) return false;
+          if (flat.length >= 120 && promptFlat.includes(flat)) return false;
+          const head = flat.slice(0, Math.min(flat.length, 240));
+          if (head.length >= 120 && promptFlat.startsWith(head)) return false;
+
+          // Reject if text starts with prompt content (surviving sanitization)
+          // Check first ~200 chars of text against start of prompt
+          const textStart = flat.slice(0, Math.min(flat.length, 200));
+          const promptStart = promptFlat.slice(0, Math.min(promptFlat.length, 200));
+          if (textStart.length >= 80 && promptStart.includes(textStart)) return false;
+          if (textStart.length >= 80 && textStart.includes(promptStart)) return false;
+
+          // Fuzzy check: does the text start with the prompt's first few words?
+          const promptWords = promptFlat.split(/\s+/).slice(0, 12).join(' ');
+          const textWords = flat.split(/\s+/).slice(0, 12).join(' ');
+          if (promptWords.length >= 40 && textWords === promptWords) return false;
+        }
+
+        // Fragment-only detection: reject single table/list/code that's too short
+        const lines = normalized.split('\n').filter((l) => l.trim().length > 0);
+        const tableLines = lines.filter((l) => /^\|.*\|$/.test(l.trim()));
+        const listLines = lines.filter((l) => /^\s*[-*+]\s+\S/.test(l.trim()) || /^\s*\d+[.)]\s+\S/.test(l.trim()));
+        const codeFences = normalized.match(/^```/gm) || [];
+        const flatLength = flat.length;
+
+        const isSingleTable = tableLines.length >= 2 && lines.length <= tableLines.length + 1 && flatLength < 1200;
+        const isSingleList = listLines.length > 0 && lines.length <= listLines.length + 1 && flatLength < 1200;
+        const isSingleCode = codeFences.length >= 2 && lines.length <= 4 && flatLength < 1200;
+        const isShortCsvFragment = serviceId === 'grok'
+          && flatLength < 1500
+          && lines.length >= 2
+          && lines.length <= 12
+          && lines.every((line) => line.includes(','))
+          && !lines.some((line) => /[.!?]$/.test(line.trim()));
+
+        // Note: CSV-only (raw comma-separated) is NOT treated as fragment —
+        // Grok legitimately sends comparison tables as CSV, and they ARE valid replies.
+
+        if (isSingleTable || isSingleList || isSingleCode || isShortCsvFragment) return false;
+
+        return true;
       }
 
       function isComposerElement(el) {
@@ -570,7 +724,7 @@
                 best = candidate;
               }
             });
-          } catch (_) {}
+          } catch (_) { }
         });
 
         return best;
@@ -606,7 +760,7 @@
               const metrics = computeStructureMetrics(raw);
               candidates.push({ el, raw, flat, top: rect.top, bottom: rect.bottom, structure: structureScore(metrics) });
             });
-          } catch (_) {}
+          } catch (_) { }
         });
 
         if (candidates.length === 0) return null;
@@ -620,6 +774,7 @@
 
       function findPromptCandidateForReply(selectedEl) {
         if (!selectedEl) return null;
+        const selectedRect = selectedEl.getBoundingClientRect ? selectedEl.getBoundingClientRect() : null;
         const selectors = [
           '[data-message-author-role="user"]',
           '[data-testid*="user"]',
@@ -658,10 +813,11 @@
                 flat,
                 top: rect.top,
                 bottom: rect.bottom,
-                score: sourcePrompt ? promptScoreForCurrentSource(raw) : 0
+                score: sourcePrompt ? promptScoreForCurrentSource(raw) : 0,
+                distance: selectedRect ? Math.abs((selectedRect.top || 0) - rect.bottom) : Number.POSITIVE_INFINITY
               });
             });
-          } catch (_) {}
+          } catch (_) { }
         });
 
         if (candidates.length === 0) return null;
@@ -670,6 +826,7 @@
           if (matched.length > 0) {
             matched.sort((a, b) => {
               if (b.score !== a.score) return b.score - a.score;
+              if (a.distance !== b.distance) return a.distance - b.distance;
               if (b.bottom !== a.bottom) return b.bottom - a.bottom;
               if (b.top !== a.top) return b.top - a.top;
               return b.flat.length - a.flat.length;
@@ -677,10 +834,15 @@
             return matched[0];
           }
         }
-        const latestBottom = candidates.reduce((best, candidate) => Math.max(best, candidate.bottom), Number.NEGATIVE_INFINITY);
-        const recent = candidates.filter((candidate) => candidate.bottom >= latestBottom - 320);
-        const pool = recent.length > 0 ? recent : candidates;
+        const nearestDistance = candidates.reduce((best, candidate) => Math.min(best, candidate.distance), Number.POSITIVE_INFINITY);
+        const nearby = Number.isFinite(nearestDistance)
+          ? candidates.filter((candidate) => candidate.distance <= nearestDistance + 240)
+          : candidates;
+        const latestBottom = nearby.reduce((best, candidate) => Math.max(best, candidate.bottom), Number.NEGATIVE_INFINITY);
+        const recent = nearby.filter((candidate) => candidate.bottom >= latestBottom - 320);
+        const pool = recent.length > 0 ? recent : nearby;
         pool.sort((a, b) => {
+          if (a.distance !== b.distance) return a.distance - b.distance;
           if (b.bottom !== a.bottom) return b.bottom - a.bottom;
           if (b.top !== a.top) return b.top - a.top;
           return b.flat.length - a.flat.length;
@@ -738,41 +900,64 @@
       }
 
       function buildResult(candidate, requirePromptMatch) {
+        const isIOSWebKit = /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+        const debug = {
+          raw_preview: (candidate?.raw || '').slice(0, 80),
+          raw_len: (candidate?.raw || '').length,
+          raw_starts_dash: /^\u2E3B/.test((candidate?.raw || '').trim())
+        };
         const embeddedPrompt = extractEmbeddedPromptText(candidate?.raw || '');
         const promptCandidate = embeddedPrompt
           ? {
-              el: candidate?.el,
-              raw: embeddedPrompt,
-              top: candidate?.top || 0,
-              bottom: candidate?.bottom || 0
-            }
+            el: candidate?.el,
+            raw: embeddedPrompt,
+            top: candidate?.top || 0,
+            bottom: candidate?.bottom || 0
+          }
           : findPromptCandidateForReply(candidate?.el);
-        if (sourcePrompt && promptCandidate?.raw && !promptMatchesCurrentSource(promptCandidate.raw)) {
+        const allowWebKitPromptMismatch = isIOSWebKit && ['chatgpt', 'gemini'].includes(serviceId);
+        if (sourcePrompt && promptCandidate?.raw && !promptMatchesCurrentSource(promptCandidate.raw) && !allowWebKitPromptMismatch) {
           return {
             success: false,
             error: 'Selected reply belongs to a previous prompt',
             document_title: document.title || '',
             prompt_candidate: summarizePromptCandidate(promptCandidate),
-            selected_reply_preview: summarizeReplyPreview(candidate)
+            selected_reply_preview: summarizeReplyPreview(candidate),
+            debug_trace: debug
           };
         }
         // Gemini removed from this list: conversation URL already scopes context (URL contains conversation ID).
         // Requiring a DOM prompt candidate fails on Safari/WebKit where Angular custom elements (user-query)
         // are not always accessible the same way as in Chromium.
-        const requireScopedPromptCandidate = requirePromptMatch || (sourcePrompt && ['chatgpt', 'grok'].includes(serviceId));
+        // ChatGPT/Gemini on iPhone/WebKit can expose a stale "You said" block as the nearest user node
+        // even when the selected reply is current, so do not hard-require DOM prompt scope there.
+        const requireScopedPromptCandidate = requirePromptMatch || (sourcePrompt && ['chatgpt', 'grok'].includes(serviceId) && !allowWebKitPromptMismatch);
         if (sourcePrompt && requireScopedPromptCandidate && !promptCandidate) {
           return {
             success: false,
             error: 'No prompt candidate found for selected reply',
             document_title: document.title || '',
-            selected_reply_preview: summarizeReplyPreview(candidate)
+            selected_reply_preview: summarizeReplyPreview(candidate),
+            debug_trace: debug
           };
         }
         const cleanedText = sanitizeScrapedReply(candidate?.raw || '');
+        debug.after_sanitize_len = cleanedText.length;
+        debug.after_sanitize_preview = cleanedText.slice(0, 80);
         if (!cleanedText || flatText(cleanedText).length < 20 || isMetadataLikeText(cleanedText)) {
           return {
             success: false,
             error: 'Sanitized reply is empty',
+            document_title: document.title || '',
+            prompt_candidate: summarizePromptCandidate(promptCandidate),
+            selected_reply_preview: summarizeReplyPreview(candidate),
+            debug_trace: debug
+          };
+        }
+        if (!isQualityReply(cleanedText)) {
+          return {
+            success: false,
+            error: 'Sanitized reply echoes prompt',
             document_title: document.title || '',
             prompt_candidate: summarizePromptCandidate(promptCandidate),
             selected_reply_preview: summarizeReplyPreview(candidate)
@@ -788,6 +973,46 @@
 
       function buildSuccess(candidate, requirePromptMatch) {
         return JSON.stringify(buildResult(candidate, requirePromptMatch));
+      }
+
+      function buildOverrideResult(rawReply) {
+        const debugTrace = {
+          raw_override_preview: (rawReply || '').slice(0, 120),
+          raw_override_len: (rawReply || '').length,
+          raw_starts_dash: /^\u2E3B/.test((rawReply || '').trim()),
+          source_prompt_preview: (sourcePrompt || '').slice(0, 80),
+        };
+        const cleanedText = sanitizeScrapedReply(rawReply);
+        debugTrace.after_sanitize_len = cleanedText.length;
+        debugTrace.after_sanitize_preview = cleanedText.slice(0, 120);
+        if (!cleanedText || flatText(cleanedText).length < 20 || isMetadataLikeText(cleanedText)) {
+          return JSON.stringify({
+            success: false,
+            error: 'Sanitized reply is empty',
+            document_title: document.title || '',
+            selected_reply_preview: normalizeText(rawReply).slice(0, 260),
+            debug_trace: debugTrace
+          });
+        }
+        debugTrace.quality_result = isQualityReply(cleanedText);
+        if (!isQualityReply(cleanedText)) {
+          return JSON.stringify({
+            success: false,
+            error: 'Sanitized reply echoes prompt',
+            document_title: document.title || '',
+            selected_reply_preview: normalizeText(rawReply).slice(0, 260),
+            debug_trace: debugTrace
+          });
+        }
+        debugTrace.final_len = cleanedText.length;
+        debugTrace.final_preview = cleanedText.slice(0, 120);
+        return JSON.stringify({
+          success: true,
+          text: cleanedText,
+          document_title: document.title || '',
+          prompt_candidate: null,
+          debug_trace: debugTrace
+        });
       }
 
       function chooseSuccessfulCandidate(candidates, requirePromptMatch) {
@@ -845,6 +1070,9 @@
       if (serviceId === 'grok') selectors.unshift('div[id^="response-"]', '[class*="message-bubble"]');
 
       const candidates = [];
+      if (rawReplyOverride.trim()) {
+        return buildOverrideResult(rawReplyOverride);
+      }
       selectors.forEach((sel) => {
         try {
           document.querySelectorAll(sel).forEach((el) => {
@@ -857,7 +1085,7 @@
             const metrics = computeStructureMetrics(raw);
             candidates.push({ el, raw, flat, bottom: rect.bottom, top: rect.top, metrics, structure: structureScore(metrics) });
           });
-        } catch (_) {}
+        } catch (_) { }
       });
 
       if (candidates.length === 0) {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct MergeView: View {
     @EnvironmentObject private var appState: MobileAppState
@@ -366,19 +367,37 @@ struct MergeView: View {
                                 .foregroundStyle(AppTheme.textMuted)
                                 .multilineTextAlignment(.leading)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
                         }
                     }
                     .padding(.top, 8)
                 } label: {
-                    Text("Recent activity")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(AppTheme.textPrimary)
+                    HStack(spacing: 10) {
+                        Text("Recent activity")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppTheme.textPrimary)
+                        Spacer(minLength: 0)
+                        Button {
+                            copyRecentActivity()
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(AppTheme.textSecondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 .tint(AppTheme.textPrimary)
             }
         }
         .padding(14)
         .glassCard(padding: 0, radius: AppTheme.compactRadius)
+    }
+
+    private func copyRecentActivity() {
+        let payload = appState.recentIngestEvents.reversed().joined(separator: "\n")
+        UIPasteboard.general.string = payload
+        appState.statusMessage = "Recent activity copied"
     }
 
     private func runMerge() async {

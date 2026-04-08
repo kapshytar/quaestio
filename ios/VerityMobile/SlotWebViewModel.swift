@@ -8,7 +8,17 @@ struct SlotScrapeReply {
     let error: String
     let documentTitle: String
     let promptCandidateText: String
+    let debugTrace: String
     let rawResult: String
+    let method: String
+    let collectorTrace: String
+}
+
+private struct DesktopDOMExtraction {
+    let raw: String
+    let fragmentOnly: Bool
+    let reason: String
+    let selectedPreview: String
 }
 
 @MainActor
@@ -44,7 +54,9 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     private let sendScript = SharedScriptLoader.loadScript(named: "sendMessage.js")
     private let attachScript = SharedScriptLoader.loadScript(named: "attachFile.js")
     private let scrapeScript = SharedScriptLoader.loadScript(named: "scrapeReply.js")
+    private let rawExtractorScript = SharedScriptLoader.loadScript(named: "extractLatestAssistantRaw.js")
     private var loadedHost: String?
+    private var loadedNavigationTarget: String?
     private var lastClaudeVerificationRecoveryAt: Date?
     private var lastClaudeBlankRecoveryAt: Date?
     private var lastAuthReturnRecoveryAt: Date?
@@ -143,30 +155,33 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     func load(url: String) {
         guard let targetURL = URL(string: url) else { return }
         let targetHost = normalizedHost(for: targetURL)
+        let targetNavigationTarget = normalizedNavigationTarget(for: targetURL)
 
         if let currentURL = webView.url {
-            let currentHost = normalizedHost(for: currentURL)
-            if currentHost == targetHost {
-                recordEvent("skip-load same-host \(currentURL.absoluteString)")
+            let currentNavigationTarget = normalizedNavigationTarget(for: currentURL)
+            if currentNavigationTarget == targetNavigationTarget {
+                recordEvent("skip-load same-target \(currentURL.absoluteString)")
                 loadedHost = targetHost
+                loadedNavigationTarget = targetNavigationTarget
                 if !hasPendingNavigation {
                     isDisplayReady = true
                 }
-                Self.logger.debug("skip-load same-host current=\(currentURL.absoluteString, privacy: .public)")
+                Self.logger.debug("skip-load same-target current=\(currentURL.absoluteString, privacy: .public)")
                 return
             }
         }
 
-        if loadedHost == targetHost {
-            recordEvent("skip-load warmed-host \(targetURL.absoluteString)")
+        if loadedNavigationTarget == targetNavigationTarget {
+            recordEvent("skip-load warmed-target \(targetURL.absoluteString)")
             if !hasPendingNavigation {
                 isDisplayReady = true
             }
-            Self.logger.debug("skip-load warmed-host target=\(targetURL.absoluteString, privacy: .public)")
+            Self.logger.debug("skip-load warmed-target target=\(targetURL.absoluteString, privacy: .public)")
             return
         }
 
         loadedHost = targetHost
+        loadedNavigationTarget = targetNavigationTarget
         setDisplayReady(false)
         lastNavigationState = "requested"
         lastNavigationError = ""
@@ -244,6 +259,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     func forceLoad(url: String) {
         guard let targetURL = URL(string: url) else { return }
         loadedHost = normalizedHost(for: targetURL)
+        loadedNavigationTarget = normalizedNavigationTarget(for: targetURL)
         setDisplayReady(false)
         lastNavigationState = "forced"
         lastNavigationError = ""
@@ -381,11 +397,79 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         recordEvent("popup-closed")
     }
 
+    func collectLatestReply(serviceId: String, sourcePrompt: String) async -> SlotScrapeReply? {
+        let sid = serviceId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let preferDesktopDOMFirst = sid == "gemini" || sid == "grok"
+        recordEvent("collect-start \(sid) domFirst=\(preferDesktopDOMFirst) promptLen=\(sourcePrompt.count)")
+
+        if preferDesktopDOMFirst {
+            let domExtraction = await extractLatestAssistantRawReply(serviceId: sid, sourcePrompt: sourcePrompt)
+            recordEvent("collect-domExtract \(sid) rawLen=\(domExtraction?.raw.count ?? 0) frag=\(domExtraction?.fragmentOnly ?? false)")
+            let dom = await scrapeLatestReplyFromDesktopDOM(
+                extraction: domExtraction,
+                serviceId: sid,
+                sourcePrompt: sourcePrompt
+            )
+            recordEvent("collect-domScrape \(sid) textLen=\(dom?.text?.count ?? 0) err=\(dom?.error ?? "none")")
+            if dom?.text?.isEmpty == false { return dom }
+            let copied = await scrapeLatestReplyFromCopy(serviceId: sid, sourcePrompt: sourcePrompt)
+            recordEvent("collect-copy \(sid) textLen=\(copied?.text?.count ?? 0)")
+            let collectorTrace = buildCollectorTrace(
+                domExtraction: domExtraction,
+                domReply: dom,
+                copyReply: copied
+            )
+            return enrichCollectorTrace(copied ?? dom, collectorTrace: collectorTrace)
+        }
+
+        let copied = await scrapeLatestReplyFromCopy(serviceId: sid, sourcePrompt: sourcePrompt)
+        recordEvent("collect-copy \(sid) textLen=\(copied?.text?.count ?? 0)")
+        if copied?.text?.isEmpty == false {
+            let collectorTrace = buildCollectorTrace(
+                domExtraction: nil,
+                domReply: nil,
+                copyReply: copied
+            )
+            return enrichCollectorTrace(copied, collectorTrace: collectorTrace)
+        }
+        let domExtraction = await extractLatestAssistantRawReply(serviceId: sid, sourcePrompt: sourcePrompt)
+        recordEvent("collect-domExtract \(sid) rawLen=\(domExtraction?.raw.count ?? 0) frag=\(domExtraction?.fragmentOnly ?? false)")
+        let dom = await scrapeLatestReplyFromDesktopDOM(
+            extraction: domExtraction,
+            serviceId: sid,
+            sourcePrompt: sourcePrompt
+        )
+        recordEvent("collect-domScrape \(sid) textLen=\(dom?.text?.count ?? 0) err=\(dom?.error ?? "none")")
+        let collectorTrace = buildCollectorTrace(
+            domExtraction: domExtraction,
+            domReply: dom,
+            copyReply: copied
+        )
+        return enrichCollectorTrace(dom ?? copied, collectorTrace: collectorTrace)
+    }
+
     func scrapeLatestReply(serviceId: String, sourcePrompt: String) async -> SlotScrapeReply? {
-        let payload: [String: Any] = [
+        await scrapeLatestReply(
+            serviceId: serviceId,
+            sourcePrompt: sourcePrompt,
+            rawReplyOverride: nil,
+            stageLabel: "scrape"
+        )
+    }
+
+    private func scrapeLatestReply(
+        serviceId: String,
+        sourcePrompt: String,
+        rawReplyOverride: String?,
+        stageLabel: String
+    ) async -> SlotScrapeReply? {
+        var payload: [String: Any] = [
             "serviceId": serviceId,
             "sourcePrompt": sourcePrompt,
         ]
+        if let rawReplyOverride, !rawReplyOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["rawReplyOverride"] = rawReplyOverride
+        }
         let script = SharedScriptBridge.buildInvocation(namespace: scrapeScript, payload: payload)
         guard let raw = try? await webView.evaluateJavaScript(script) as? String else {
             lastScrapeState = "invoke-failed"
@@ -394,7 +478,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             lastScrapePromptCandidate = ""
             lastScrapePreview = ""
             lastScrapeCandidateTrace = ""
-            recordEvent("scrape-fail \(serviceId) invoke")
+            recordEvent("\(stageLabel)-fail \(serviceId) invoke")
             return nil
         }
 
@@ -405,7 +489,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             lastScrapePromptCandidate = ""
             lastScrapePreview = raw.prefix(180).description
             lastScrapeCandidateTrace = ""
-            recordEvent("scrape-fail \(serviceId) parse")
+            recordEvent("\(stageLabel)-fail \(serviceId) parse")
             return nil
         }
 
@@ -416,6 +500,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         let error = (response["error"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let selectedReplyPreview = (response["selected_reply_preview"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let candidateTrace = Self.formatCandidateTrace(response["candidate_trace"])
+        let debugTrace = Self.formatDebugTrace(response["debug_trace"])
         let success = response["success"] as? Bool == true && !text.isEmpty
 
         lastScrapeState = success ? "success" : "failed"
@@ -423,17 +508,419 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         lastScrapeDocumentTitle = documentTitle
         lastScrapePromptCandidate = promptCandidateText
         lastScrapePreview = (success ? text : (selectedReplyPreview.isEmpty ? raw : selectedReplyPreview)).prefix(220).description
-        lastScrapeCandidateTrace = candidateTrace
+        lastScrapeCandidateTrace = [candidateTrace, debugTrace]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n---\n")
         let errorLabel = error.isEmpty ? "unknown" : error
-        recordEvent(success ? "scrape-success \(serviceId) chars=\(text.count)" : "scrape-fail \(serviceId) \(errorLabel)")
+        recordEvent(success ? "\(stageLabel)-success \(serviceId) chars=\(text.count)" : "\(stageLabel)-fail \(serviceId) \(errorLabel)")
 
         return SlotScrapeReply(
             text: success ? text : nil,
             error: error,
             documentTitle: documentTitle,
             promptCandidateText: promptCandidateText,
-            rawResult: raw
+            debugTrace: debugTrace,
+            rawResult: raw,
+            method: stageLabel,
+            collectorTrace: ""
         )
+    }
+
+    private func buildCollectorTrace(
+        domExtraction: DesktopDOMExtraction?,
+        domReply: SlotScrapeReply?,
+        copyReply: SlotScrapeReply?
+    ) -> String {
+        let domRawLen = domExtraction?.raw.count ?? 0
+        let domFrag = domExtraction?.fragmentOnly == true ? "true" : "false"
+        let domReason = (domExtraction?.reason ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let domPreview = (domExtraction?.selectedPreview ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        let domTextLen = domReply?.text?.trimmingCharacters(in: .whitespacesAndNewlines).count ?? 0
+        let domErr = (domReply?.error ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let copyTextLen = copyReply?.text?.trimmingCharacters(in: .whitespacesAndNewlines).count ?? 0
+        let copyErr = (copyReply?.error ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return "collector domRaw=\(domRawLen) domFrag=\(domFrag) domReason=\(domReason.isEmpty ? "none" : domReason) domPreview=\(String(domPreview.prefix(80))) domText=\(domTextLen) domErr=\(domErr.isEmpty ? "none" : domErr) copyText=\(copyTextLen) copyErr=\(copyErr.isEmpty ? "none" : copyErr)"
+    }
+
+    private func enrichCollectorTrace(_ reply: SlotScrapeReply?, collectorTrace: String) -> SlotScrapeReply? {
+        guard let reply else { return nil }
+        let combinedTrace = [collectorTrace, reply.debugTrace]
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: " | ")
+        return SlotScrapeReply(
+            text: reply.text,
+            error: reply.error,
+            documentTitle: reply.documentTitle,
+            promptCandidateText: reply.promptCandidateText,
+            debugTrace: combinedTrace,
+            rawResult: reply.rawResult,
+            method: reply.method,
+            collectorTrace: collectorTrace
+        )
+    }
+
+    private func scrapeLatestReplyFromCopy(serviceId: String, sourcePrompt: String) async -> SlotScrapeReply? {
+        guard let captured = await captureLatestReplyViaCopy(serviceId: serviceId),
+              !captured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return nil
+        }
+
+        return await scrapeLatestReply(
+            serviceId: serviceId,
+            sourcePrompt: sourcePrompt,
+            rawReplyOverride: captured,
+            stageLabel: "copy"
+        )
+    }
+
+    private func scrapeLatestReplyFromDesktopDOM(
+        extraction: DesktopDOMExtraction?,
+        serviceId: String,
+        sourcePrompt: String
+    ) async -> SlotScrapeReply? {
+        guard let extraction,
+              !extraction.raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return nil
+        }
+
+        return await scrapeLatestReply(
+            serviceId: serviceId,
+            sourcePrompt: sourcePrompt,
+            rawReplyOverride: extraction.raw,
+            stageLabel: "dom"
+        )
+    }
+
+    private func extractLatestAssistantRawReply(serviceId: String, sourcePrompt: String) async -> DesktopDOMExtraction? {
+        let payload: [String: Any] = [
+            "serviceId": serviceId,
+            "sourcePrompt": sourcePrompt,
+            "compactDiagnostics": true,
+        ]
+        let script = SharedScriptBridge.buildInvocation(namespace: rawExtractorScript, payload: payload)
+        let evaluated: Any
+        do {
+            evaluated = try await webView.evaluateJavaScript(script)
+        } catch {
+            let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            recordEvent("dom-fail \(serviceId) js-\(message)")
+            return DesktopDOMExtraction(
+                raw: "",
+                fragmentOnly: false,
+                reason: "js-\(message)",
+                selectedPreview: ""
+            )
+        }
+
+        guard let raw = evaluated as? String else {
+            let typeLabel = String(describing: type(of: evaluated))
+            recordEvent("dom-fail \(serviceId) non-string-\(typeLabel)")
+            return DesktopDOMExtraction(
+                raw: "",
+                fragmentOnly: false,
+                reason: "non-string-\(typeLabel)",
+                selectedPreview: ""
+            )
+        }
+
+        guard let response = decodeJSONResult(raw) else {
+            let preview = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            let compactPreview = String(preview.prefix(80)).replacingOccurrences(of: "\n", with: " ")
+            recordEvent("dom-fail \(serviceId) parse-\(compactPreview)")
+            return DesktopDOMExtraction(
+                raw: "",
+                fragmentOnly: false,
+                reason: "parse-failed",
+                selectedPreview: compactPreview
+            )
+        }
+
+        if let bridgeError = (response["__verityBridgeError"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !bridgeError.isEmpty {
+            let stack = (response["__verityBridgeStack"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let compactStack = String(stack.prefix(120)).replacingOccurrences(of: "\n", with: " | ")
+            let reason = compactStack.isEmpty ? bridgeError : "\(bridgeError) @ \(compactStack)"
+            recordEvent("dom-fail \(serviceId) bridge-\(bridgeError)")
+            return DesktopDOMExtraction(
+                raw: "",
+                fragmentOnly: false,
+                reason: reason,
+                selectedPreview: ""
+            )
+        }
+
+        let diagnostics = response["diagnostics"] as? [String: Any]
+        if let diagnostics,
+           let selected = diagnostics["selected"] as? [String: Any],
+           let preview = selected["preview"] as? String,
+           !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lastScrapePreview = preview.prefix(220).description
+        }
+
+        let extracted = (response["raw"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let selected = diagnostics?["selected"] as? [String: Any]
+        let fragmentOnly = selected?["fragment_only"] as? Bool == true
+        let promptEcho = selected?["prompt_echo"] as? Bool == true
+        let selectedPreview = (selected?["preview"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let reason = (diagnostics?["no_candidate_reason"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if extracted.isEmpty {
+            recordEvent("dom-fail \(serviceId) \(reason.isEmpty ? "empty" : reason)")
+            return DesktopDOMExtraction(
+                raw: "",
+                fragmentOnly: fragmentOnly,
+                reason: reason.isEmpty ? "empty" : reason,
+                selectedPreview: selectedPreview
+            )
+        }
+
+        recordEvent("dom-captured \(serviceId) chars=\(extracted.count)\(fragmentOnly ? " fragment" : "")\(promptEcho ? " prompt-echo" : "")")
+        return DesktopDOMExtraction(
+            raw: extracted,
+            fragmentOnly: fragmentOnly,
+            reason: reason,
+            selectedPreview: selectedPreview
+        )
+    }
+
+    private func captureLatestReplyViaCopy(serviceId: String) async -> String? {
+        let sid = serviceId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let script = """
+        (function() {
+          try {
+            const sid = \(String(reflecting: sid));
+            function hasLayout(el) {
+              if (!el) return false;
+              const r = el.getBoundingClientRect();
+              const s = window.getComputedStyle(el);
+              return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+            }
+            function labelOf(el) {
+              return String(
+                el?.getAttribute?.('aria-label') ||
+                el?.getAttribute?.('title') ||
+                el?.getAttribute?.('mattooltip') ||
+                el?.textContent ||
+                ''
+              ).replace(/\\s+/g, ' ').trim();
+            }
+            function isCopyLike(label, el) {
+              const l = String(label || '').toLowerCase();
+              if (l && l.includes('copy')) return true;
+              try {
+                const own = (el?.className || '').toString().toLowerCase();
+                if (own.includes('copy')) return true;
+                if (el?.querySelector?.('.dl-icon-copy, [class*=\"copy-icon\"], [class*=\"copy-btn\"], [class*=\"copy-button\"]')) return true;
+              } catch (_) {}
+              return false;
+            }
+            function inExcludedArea(el) {
+              return !!el?.closest?.('textarea, [contenteditable=\"true\"], [role=\"textbox\"], [data-testid*=\"composer\"], [class*=\"composer\"]');
+            }
+            function messageContainer(el) {
+              const specific = el?.closest?.('[data-message-author-role=\"assistant\"], [data-testid*=\"assistant\"], [class*=\"assistant\"][class*=\"message\"], article, [class*=\"response\"], [class*=\"answer\"], [id^=\"response-\"], model-response, response-container, [class*=\"message-bubble\"], [class*=\"prose\"]');
+              if (specific) return specific;
+              let parent = el?.parentElement;
+              for (let i = 0; i < 15 && parent; i += 1) {
+                const text = (parent.innerText || parent.textContent || '').replace(/\\s+/g, ' ').trim();
+                if (text.length >= 30) return parent;
+                parent = parent.parentElement;
+              }
+              return null;
+            }
+
+            window.__verityCopiedText = '';
+            try {
+              if (navigator.clipboard && navigator.clipboard.writeText && !navigator.clipboard.__verityWrappedWriteText) {
+                const origWrite = navigator.clipboard.writeText.bind(navigator.clipboard);
+                const wrapped = function(text) {
+                  window.__verityCopiedText = String(text || '');
+                  return origWrite(text).catch(() => {});
+                };
+                wrapped.__verityWrappedWriteText = true;
+                navigator.clipboard.writeText = wrapped;
+              }
+            } catch (_) {}
+            try {
+              if (navigator.clipboard && navigator.clipboard.write && !navigator.clipboard.__verityWrappedWrite) {
+                const origWrite = navigator.clipboard.write.bind(navigator.clipboard);
+                const wrapped = async function(items) {
+                  try {
+                    for (const item of items || []) {
+                      if (item.types && item.types.includes('text/plain')) {
+                        const blob = await item.getType('text/plain');
+                        window.__verityCopiedText = await blob.text();
+                        break;
+                      }
+                      if (item.types && item.types.includes('text/html') && !window.__verityCopiedText) {
+                        const blob = await item.getType('text/html');
+                        const html = await blob.text();
+                        const tmp = document.createElement('div');
+                        tmp.innerHTML = html;
+                        window.__verityCopiedText = tmp.textContent || tmp.innerText || '';
+                      }
+                    }
+                  } catch (_) {}
+                  return origWrite(items).catch(() => {});
+                };
+                wrapped.__verityWrappedWrite = true;
+                navigator.clipboard.write = wrapped;
+              }
+            } catch (_) {}
+            try {
+              if (!document.__verityWrappedExecCommand) {
+                const origExec = document.execCommand.bind(document);
+                document.execCommand = function(cmd) {
+                  if (cmd === 'copy') {
+                    try { window.__verityCopiedText = window.getSelection().toString(); } catch (_) {}
+                  }
+                  return origExec.apply(document, arguments);
+                };
+                document.__verityWrappedExecCommand = true;
+              }
+            } catch (_) {}
+
+            const msgContainers = document.querySelectorAll('[id^=\"response-\"], model-response, response-container, [data-message-author-role=\"assistant\"], article, [class*=\"response\"]');
+            const lastContainer = Array.from(msgContainers).filter(hasLayout).pop();
+            if (lastContainer) {
+              ['mouseenter', 'mouseover', 'mousemove'].forEach((evt) => {
+                try { lastContainer.dispatchEvent(new MouseEvent(evt, { bubbles: true, clientX: 100, clientY: 100 })); } catch (_) {}
+              });
+            }
+
+            const selectors = [
+              '[data-testid=\"copy-turn-action-button\"]',
+              'button[aria-label*=\"Copy\" i]',
+              'button[title*=\"Copy\" i]',
+              '[role=\"button\"][aria-label*=\"Copy\" i]',
+              '[data-testid*=\"copy\" i]',
+              '[data-test-id*=\"copy\" i]',
+              'button[mattooltip*=\"Copy\" i]',
+              'copy-button button',
+              '.dl-btn:has(.dl-icon-copy)',
+              '.ds-icon-button:has(.dl-icon-copy)',
+              '[role=\"button\"]:has([class*=\"copy\"])',
+              '.ds-markdown-code-copy-button',
+              'button[class*=\"copy\"]',
+              '[class*=\"message-action\"] button:first-child'
+            ];
+
+            const seen = new Set();
+            const candidates = [];
+            selectors.forEach((sel) => {
+              try {
+                document.querySelectorAll(sel).forEach((el) => {
+                  if (!el || seen.has(el)) return;
+                  seen.add(el);
+                  const isExactChatGPT = sel === '[data-testid=\"copy-turn-action-button\"]';
+                  if (!isExactChatGPT && inExcludedArea(el)) return;
+                  if (!hasLayout(el)) return;
+                  const label = labelOf(el);
+                  if (!isCopyLike(label, el)) return;
+                  const rect = el.getBoundingClientRect();
+                  const msg = messageContainer(el);
+                  const msgText = (msg?.innerText || msg?.textContent || '').replace(/\\s+/g, ' ').trim();
+                  if (!msgText || msgText.length < 20) return;
+                  let score = rect.bottom + Math.min(msgText.length, 5000) * 0.04;
+                  if (sid === 'perplexity' && msgText.toLowerCase().includes('ask a follow-up')) score -= 1200;
+                  candidates.push({ el, label, score, bottom: rect.bottom });
+                });
+              } catch (_) {}
+            });
+
+            if (candidates.length === 0) {
+              return JSON.stringify({ clicked: false, reason: 'no-copy-button' });
+            }
+
+            candidates.sort((a, b) => (b.score - a.score) || (b.bottom - a.bottom));
+            const target = candidates[0];
+            const hoverTarget = target.el.closest('[class*=\"group\"]') || target.el.parentElement || target.el;
+            ['mouseenter', 'mouseover', 'mousemove'].forEach((evt) => {
+              try { hoverTarget.dispatchEvent(new MouseEvent(evt, { bubbles: true })); } catch (_) {}
+              try { target.el.dispatchEvent(new MouseEvent(evt, { bubbles: true })); } catch (_) {}
+            });
+            try { target.el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_) {}
+            try { window.focus(); } catch (_) {}
+            try { target.el.click(); } catch (_) { return JSON.stringify({ clicked: false, reason: 'click-failed' }); }
+            return JSON.stringify({ clicked: true, label: target.label, candidates: candidates.length });
+          } catch (e) {
+            return JSON.stringify({ clicked: false, reason: e?.message || String(e) });
+          }
+        })()
+        """
+
+        guard let raw = try? await webView.evaluateJavaScript(script) as? String,
+              let response = decodeJSONResult(raw)
+        else {
+            return nil
+        }
+
+        guard response["clicked"] as? Bool == true else {
+            if let reason = response["reason"] as? String, !reason.isEmpty {
+                recordEvent("copy-fail \(sid) \(reason)")
+            }
+            return nil
+        }
+
+        let readScript = """
+        (function() {
+          try {
+            return String(window.__verityCopiedText || '').trim();
+          } catch (_) {
+            return '';
+          }
+        })()
+        """
+
+        for _ in 0..<20 {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard let captured = try? await webView.evaluateJavaScript(readScript) as? String else {
+                continue
+            }
+
+            let normalized = captured.trimmingCharacters(in: .whitespacesAndNewlines)
+            if normalized.isEmpty {
+                continue
+            }
+
+            recordEvent("copy-captured \(sid) chars=\(normalized.count)")
+            return normalized
+        }
+
+        recordEvent("copy-fail \(sid) empty")
+        return nil
+    }
+
+    private func pickPreferredReply(
+        preferred: SlotScrapeReply?,
+        preferredFragmentOnly: Bool,
+        fallback: SlotScrapeReply?
+    ) -> SlotScrapeReply? {
+        let preferredText = preferred?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let fallbackText = fallback?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if preferredFragmentOnly, !fallbackText.isEmpty {
+            return fallback
+        }
+        if preferredText.isEmpty {
+            return fallback ?? preferred
+        }
+        if fallbackText.isEmpty {
+            return preferred ?? fallback
+        }
+        if fallbackText.count >= preferredText.count + 120 {
+            return fallback
+        }
+        if preferredText.count >= fallbackText.count + 120 {
+            return preferred
+        }
+
+        return preferred
     }
 
     func isStillGenerating(serviceId: String) async -> Bool {
@@ -627,9 +1114,85 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         .joined(separator: "\n")
     }
 
+    private static func formatDebugTrace(_ rawTrace: Any?) -> String {
+        guard let map = rawTrace as? [String: Any], !map.isEmpty else {
+            return ""
+        }
+
+        let keys = map.keys.sorted()
+        return keys.compactMap { key -> String? in
+            let value = String(describing: map[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { return nil }
+            return "\(key)=\(value)"
+        }.joined(separator: " | ")
+    }
+
     private func normalizedHost(for url: URL) -> String {
         let host = (url.host ?? url.absoluteString).lowercased()
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
+    private func normalizedNavigationTarget(for url: URL) -> String {
+        let host = normalizedHost(for: url)
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let segments = url.pathComponents
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty && $0 != "/" }
+
+        func firstAfter(_ label: String) -> String? {
+            guard let index = segments.firstIndex(of: label), index + 1 < segments.count else { return nil }
+            return segments[index + 1]
+        }
+
+        func looksLikeConversationID(_ value: String?) -> Bool {
+            let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            guard normalized.count >= 6 else { return false }
+            return normalized.range(of: #"^[a-z0-9][a-z0-9_-]*$"#, options: .regularExpression) != nil
+        }
+
+        var serviceID = host
+        var conversationKey: String?
+
+        switch host {
+        case "chatgpt.com", "chat.openai.com":
+            serviceID = "chatgpt"
+            conversationKey = firstAfter("c") ?? firstAfter("chat")
+            if conversationKey == nil,
+               components?.queryItems?.contains(where: { $0.name.lowercased() == "temporary-chat" }) == true {
+                conversationKey = "temporary"
+            }
+        case "claude.ai":
+            serviceID = "claude"
+            conversationKey = firstAfter("chat")
+        case "grok.com":
+            serviceID = "grok"
+            conversationKey = firstAfter("c") ?? firstAfter("chat")
+        case "gemini.google.com":
+            serviceID = "gemini"
+            conversationKey = firstAfter("app") ?? firstAfter("chat")
+        case "www.perplexity.ai", "perplexity.ai":
+            serviceID = "perplexity"
+            conversationKey = firstAfter("search")
+        case "chat.deepseek.com":
+            serviceID = "deepseek"
+            conversationKey = firstAfter("s") ?? firstAfter("chat")
+        default:
+            conversationKey = nil
+        }
+
+        if conversationKey == nil, looksLikeConversationID(segments.last) {
+            conversationKey = segments.last
+        }
+
+        if let conversationKey, !conversationKey.isEmpty {
+            return "\(serviceID):\(conversationKey)"
+        }
+
+        if !segments.isEmpty {
+            return "\(serviceID):\(segments.joined(separator: "/"))"
+        }
+
+        return serviceID
     }
 
     private func shouldAttemptAuthBackNavigation(for rawURL: String, webView: WKWebView) -> Bool {
@@ -656,6 +1219,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             return
         }
         loadedHost = normalizedHost(for: url)
+        loadedNavigationTarget = normalizedNavigationTarget(for: url)
         lastNavigationState = "finished"
         lastNavigationError = ""
         recordEvent("did-finish \(url.absoluteString)")

@@ -1921,6 +1921,9 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     private fun rememberResolvedSourcePrompt(prompt: String): String {
         val normalized = prompt.trim()
         if (normalized.isBlank()) return ""
+        // Canonical question-identity semantics live in
+        // Verity/docs/domains/SESSION_AND_INGEST_RULES.md.
+        // Keep Android aligned with iOS there instead of drifting here.
         SettingsManager.setParallelIngestSourcePrompt(this, normalized)
         return normalized
     }
@@ -1971,6 +1974,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         allowDirectFallback: Boolean = true,
         persist: Boolean = true
     ): String {
+        // This recovery order is product semantics, not Android-only glue.
+        // Update the meta-doc first: Verity/docs/domains/SESSION_AND_INGEST_RULES.md.
         val direct = if (allowDirectFallback) {
             SettingsManager.getParallelIngestSourcePrompt(this).trim()
         } else {

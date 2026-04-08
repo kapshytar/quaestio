@@ -241,6 +241,7 @@ enum AggregatedIngestClient {
         detailedLogging: Bool = false
     ) async throws -> AggregatedIngestResult {
         let payloadJSON = try stableJSON(payload)
+        print("[INGEST] sendAggregated called: endpoint=\(rpcBaseURL)/rest/v1/rpc/ingest_aggregated_v1, responses=\(payload.responses.count), detailedLogging=\(detailedLogging)")
         return try await callRPC(
             rpcBaseURL: rpcBaseURL,
             apiKey: apiKey,
@@ -317,6 +318,7 @@ enum AggregatedIngestClient {
     ) async throws -> AggregatedIngestResult {
         let payloadHash = sha256(payloadJSON)
         let endpoint = normalizeRPCEndpoint(base: rpcBaseURL, rpcName: rpcName)
+        print("[INGEST] callRPC: endpoint=\(endpoint), rpcName=\(rpcName), idempotencyKey=\(idempotencyKey)")
         let payloadObject = try JSONSerialization.jsonObject(with: Data(payloadJSON.utf8))
         let bodyObject: [String: Any] = [
             "p_payload": payloadObject,
@@ -324,6 +326,7 @@ enum AggregatedIngestClient {
             "p_payload_hash": payloadHash
         ]
         let rpcBodyData = try JSONSerialization.data(withJSONObject: bodyObject, options: [.sortedKeys])
+        print("[INGEST] callRPC: body size=\(rpcBodyData.count) bytes")
 
         try await logDebugEvent(
             rpcBaseURL: rpcBaseURL,
@@ -343,6 +346,7 @@ enum AggregatedIngestClient {
 
         var lastError: Error?
         for attempt in 0..<2 {
+            print("[INGEST] callRPC: attempt=\(attempt + 1)")
             do {
                 let raw = try await postJSON(
                     endpoint: endpoint,
@@ -352,6 +356,7 @@ enum AggregatedIngestClient {
                     ],
                     bodyData: rpcBodyData
                 )
+                print("[INGEST] callRPC: response received, length=\(raw.count)")
                 let result = AggregatedIngestResult(
                     sessionId: extractSessionId(raw),
                     noteId: extractNoteId(raw),
@@ -360,6 +365,7 @@ enum AggregatedIngestClient {
                     idempotentReplay: extractIdempotentReplay(raw),
                     rawResponse: raw
                 )
+                print("[INGEST] callRPC: result sessionId=\(result.sessionId ?? -1), noteId=\(result.noteId ?? "nil"), replay=\(result.idempotentReplay)")
                 try await logDebugEvent(
                     rpcBaseURL: rpcBaseURL,
                     apiKey: apiKey,
@@ -379,6 +385,7 @@ enum AggregatedIngestClient {
                 return result
             } catch {
                 lastError = error
+                print("[INGEST] callRPC: error on attempt \(attempt + 1): \(error.localizedDescription)")
                 if attempt == 0 {
                     try? await logDebugEvent(
                         rpcBaseURL: rpcBaseURL,
@@ -401,6 +408,7 @@ enum AggregatedIngestClient {
             }
         }
 
+        print("[INGEST] callRPC: all attempts failed, throwing error")
         throw lastError ?? NSError(domain: "AggregatedIngestClient", code: 1002, userInfo: [NSLocalizedDescriptionKey: "RPC failed without specific error"])
     }
 

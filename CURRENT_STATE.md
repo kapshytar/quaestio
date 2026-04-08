@@ -24,6 +24,7 @@
   - `shared/js/sendMessage.js`
   - `shared/js/attachFile.js`
   - `shared/js/scrapeReply.js`
+  - `shared/js/extractLatestAssistantRaw.js`
   - `shared/js/mergeStreamParser.js`
   - `shared/contracts/servicePresets.json`
   - `shared/contracts/mergeConfig.json`
@@ -44,6 +45,9 @@
   - source files: `ios/VerityMobile/`
 - Do not hand-guess the project path as `ios/VerityMobile.xcodeproj`; that path is wrong for this repo layout.
 - Shared JS resources are now bundled into the iOS app, not only read from workspace-relative dev paths.
+- iPhone `Merge -> Recent activity` now acts as the first-line collector debug surface:
+  - per-slot logs include collection method and compact collector diagnostics
+  - the log can be copied directly from the device UI for debugging
 - iOS slot webviews currently use `WKWebsiteDataStore.default()`, so normal app updates should preserve cookies and logged-in web sessions as long as the app is not uninstalled and the bundle identifier stays stable.
 - Shared-first architecture is the active source of truth:
   - Android and iOS share the SSE stream parser logic in JS.
@@ -55,7 +59,7 @@
   - native only where necessary
 - Versioning/changelog rule for this repo is now explicit:
   - meaningful mobile milestones must be recorded in `CHANGELOG.md`
-  - this repo follows `1.x.y`
+  - this repo currently ships on the `2.0.x` line
   - every code change increments `y`
   - every commit/push milestone increments `x`
   - after incrementing `x`, `y` resets to `0`

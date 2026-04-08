@@ -6,8 +6,15 @@ enum SharedScriptBridge {
         let payloadString = data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         return """
         (function() {
-            \(namespace)
-            return \(namespaceName(namespace)).run(\(payloadString));
+            try {
+                \(namespace)
+                return \(namespaceName(namespace)).run(\(payloadString));
+            } catch (error) {
+                return JSON.stringify({
+                    __verityBridgeError: String(error && error.message || error || "unknown"),
+                    __verityBridgeStack: String(error && error.stack || "")
+                });
+            }
         })();
         """
     }
@@ -16,6 +23,7 @@ enum SharedScriptBridge {
         if namespace.contains("VeritySharedSendMessage") { return "VeritySharedSendMessage" }
         if namespace.contains("VeritySharedAttachFile") { return "VeritySharedAttachFile" }
         if namespace.contains("VeritySharedScrapeReply") { return "VeritySharedScrapeReply" }
+        if namespace.contains("VeritySharedExtractLatestAssistantRaw") { return "VeritySharedExtractLatestAssistantRaw" }
         return "VeritySharedSendMessage"
     }
 }
