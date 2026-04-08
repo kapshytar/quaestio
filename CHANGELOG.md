@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.1
+
+- prefer canonical `slot_urls` over stale `slot_live_urls` when restoring iPhone sessions after a cold app restart, so note-backed sessions stop reopening older in-chat navigation targets
+
+
 Versioning contract:
 - canonical doc: [VERSIONING.md](./VERSIONING.md)
 - bump script: [scripts/bump-version.sh](./scripts/bump-version.sh)

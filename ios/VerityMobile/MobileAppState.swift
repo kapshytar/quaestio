@@ -288,8 +288,10 @@ final class MobileAppState: ObservableObject {
             let preset = presets[targetServiceId] ?? presets[fallback.serviceId]
             let storedURL = session.slotURLs[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
             let liveURL = session.slotLiveURLs[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
-            let resolvedURL = liveURL
-                ?? storedURL
+            // On cold restore, canonical slot URLs should win over stale live URLs from
+            // earlier in-app navigation history.
+            let resolvedURL = storedURL
+                ?? liveURL
                 ?? preset?.url
                 ?? fallback.url
             let targetEnabled = session.slotEnabled[slotKey] ?? fallback.isEnabled
