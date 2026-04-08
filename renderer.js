@@ -4670,6 +4670,10 @@ async function finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContex
 }
 
 async function collectNowAggregation(manual = true) {
+  if (manual) {
+    const traceId = startIngestTrace();
+    mergeLog(`Ingest trace restarted for manual collect: ${traceId}`, 'info');
+  }
   const pending = aggregationControl.pendingAggregation;
   const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
   const runtimeFingerprint = buildSessionFingerprint(enabledSlots);
