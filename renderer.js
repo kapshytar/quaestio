@@ -5158,6 +5158,8 @@ function sessionSnapshotKey(session) {
 }
 
 function sessionSnapshotFreshness(session) {
+  const sortAt = Date.parse(session?.sortAt || session?.sort_at || '');
+  if (Number.isFinite(sortAt)) return sortAt;
   const updated = Date.parse(session?.updatedAt || session?.updated_at || '');
   if (Number.isFinite(updated)) return updated;
   const created = Date.parse(session?.createdAt || session?.created_at || '');
@@ -5316,15 +5318,19 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
       // Sessions tab should show global history, not only current ingest session.
       const dbSessions = await window.electronAPI.loadSessions(null);
       if (Array.isArray(dbSessions) && dbSessions.length > 0) {
-        const mergedSessions = mergeSessionSnapshots(dbSessions, cachedSessions);
-        // Cache in localStorage
-          localStorage.setItem(SESSIONS_KEY, JSON.stringify(mergedSessions));
-          sessionsListMemoryCache = mergedSessions;
+        const normalizedSessions = dedupeLatestSessionSnapshots(dbSessions);
+        // Database is the source of truth when available. Replace local cache so
+        // deleted/stale rows do not linger in the Sessions tab.
+          localStorage.setItem(SESSIONS_KEY, JSON.stringify(normalizedSessions));
+          sessionsListMemoryCache = normalizedSessions;
           setSessionsNotice('Loaded from database.', 'ok');
-          return mergedSessions;
+          return normalizedSessions;
         }
       if (Array.isArray(dbSessions) && dbSessions.length === 0) {
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify([]));
+        sessionsListMemoryCache = [];
         setSessionsNotice('Database returned 0 sessions.', 'info');
+        return [];
       }
     } catch (error) {
       console.error('[loadSessionsList] DB load failed:', error);
@@ -5519,7 +5525,8 @@ async function updateSessionsUI(options = {}) {
     const slotEnabledMap = session.slotEnabled || session.slot_enabled || {};
     const displaySessionId = session.sessionId ?? session.session_id ?? session.id;
 
-    const timeStr = new Date(session.updatedAt || session.updated_at || session.timestamp || Date.now()).toLocaleString('ru-RU', {
+    const displayTime = session.displayAt || session.display_at || session.createdAt || session.created_at || session.updatedAt || session.updated_at || session.timestamp || Date.now();
+    const timeStr = new Date(displayTime).toLocaleString('ru-RU', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
 
@@ -5591,6 +5598,7 @@ async function initSessionsTab() {
   await updateSessionsUI();
 
   const saveSessionBtn = document.getElementById('save-session-btn');
+  const refreshSessionsBtn = document.getElementById('refresh-sessions-btn');
   const sessionsSearchInput = document.getElementById('sessions-search-input');
   if (sessionsSearchInput) {
     sessionsSearchInput.value = sessionsSearchQuery;
@@ -5615,6 +5623,25 @@ async function initSessionsTab() {
           saveSessionBtn.disabled = false;
           saveSessionBtn.textContent = originalText;
         }, 1500);
+      }
+    });
+  }
+  if (refreshSessionsBtn) {
+    refreshSessionsBtn.addEventListener('click', async () => {
+      const originalText = 'Refresh';
+      refreshSessionsBtn.disabled = true;
+      refreshSessionsBtn.textContent = 'Refreshing...';
+      try {
+        await updateSessionsUI({ forceRefresh: true });
+        refreshSessionsBtn.textContent = 'Refreshed';
+      } catch (error) {
+        console.error('[refreshSessionsBtn] refresh failed:', error);
+        refreshSessionsBtn.textContent = 'Refresh failed';
+      } finally {
+        setTimeout(() => {
+          refreshSessionsBtn.disabled = false;
+          refreshSessionsBtn.textContent = originalText;
+        }, 1200);
       }
     });
   }

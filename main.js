@@ -1030,7 +1030,7 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
     }));
 
     const noteQuery = [
-      'select=id,note_session_id,title,updated_at',
+      'select=id,note_session_id,title,updated_at,created_at',
       'note_type=eq.1',
       'order=updated_at.desc',
       'limit=1000'
@@ -1071,7 +1071,13 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
         slotConfig: matchingSnapshot?.slotConfig || {},
         slotUrls: matchingSnapshot?.slotUrls || {},
         slotEnabled: matchingSnapshot?.slotEnabled || {},
-        updatedAt: note.updated_at || matchingSnapshot?.updatedAt || null
+        // Session history should be stable even if the underlying note is edited later.
+        // Use note creation time for note-backed rows and keep the live snapshot update as
+        // auxiliary metadata only.
+        updatedAt: matchingSnapshot?.updatedAt || note.updated_at || null,
+        createdAt: note.created_at || null,
+        sortAt: note.created_at || matchingSnapshot?.updatedAt || note.updated_at || null,
+        displayAt: note.created_at || note.updated_at || matchingSnapshot?.updatedAt || null
       };
     });
 
