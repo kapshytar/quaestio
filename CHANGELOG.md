@@ -5,6 +5,11 @@ Versioning contract:
 - bump script: [scripts/bump-version.sh](./scripts/bump-version.sh)
 - validation script: [scripts/check-versioning.sh](./scripts/check-versioning.sh)
 
+## 2.1.0
+
+- push milestone after landing the iPhone collector parity/debugging cycle and the canonical versioning workflow
+- standardize repo versioning mechanics around `VERSIONING.md`, `bump-version.sh`, and `check-versioning.sh` so push milestones consistently roll `2.x.y -> 2.(x+1).0`
+
 ## 2.0.38
 
 - bundle `shared/js/extractLatestAssistantRaw.js` into the iPhone app so the on-device raw DOM extractor is actually available at runtime instead of silently falling back because the script was missing from app resources
