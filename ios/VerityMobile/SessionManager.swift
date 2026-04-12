@@ -97,6 +97,46 @@ final class SessionManager {
         ))
     }
 
+    func startNewQuestionInCurrentSession(sourcePrompt: String) {
+        var state = getParallelIngestState()
+        state.activeNoteId = ""
+        state.sourcePrompt = sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        replaceParallelIngestState(state)
+    }
+
+    /// Query the notes table for the latest note in this session and update activeNoteId.
+    /// This ensures that when loading a note-backed session, new questions are attached
+    /// to the current tip of the chain instead of creating parallel root notes.
+    @MainActor
+    func refreshActiveNoteIdForSession(_ sessionId: Int) async {
+        let rpcBaseURL = KeyObfuscation.getSupabaseRPCURL(nil)
+        let apiKey = KeyObfuscation.getSupabaseAPIKey(nil)
+        guard !rpcBaseURL.isEmpty, !apiKey.isEmpty else { return }
+
+        let query = "select=id,updated_at&note_type=eq.1&note_session_id=eq.\(sessionId)&order=updated_at.desc&limit=1"
+        let endpoint = normalizeRestEndpoint(rpcBaseURL) + "/notes?\(query)"
+        guard let url = URL(string: endpoint) else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 30
+        request.setValue(apiKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let latestNote = rows.first,
+              let noteId = latestNote["id"] as? String
+        else { return }
+
+        var state = getParallelIngestState()
+        state.activeNoteId = noteId
+        replaceParallelIngestState(state)
+    }
+
     func rememberSourcePrompt(_ prompt: String) {
         var state = getParallelIngestState()
         state.sourcePrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -364,6 +404,7 @@ final class SessionManager {
 
         var snapshotByNote: [String: SessionSnapshot] = [:]
         var latestSnapshotBySession: [Int: SessionSnapshot] = [:]
+        var rpcBySession: [Int: SessionSnapshot] = [:]
 
         for snapshot in snapshots {
             if let noteId = snapshot.noteId?.nilIfEmpty {
@@ -374,6 +415,9 @@ final class SessionManager {
                 if existing == nil || snapshot.timestamp >= existing!.timestamp {
                     latestSnapshotBySession[sessionId] = snapshot
                 }
+                // Keep original RPC snapshots as fallback for note-backed rows
+                // when no local snapshot matches the note row's session ID.
+                rpcBySession[sessionId] = snapshot
             }
         }
 
@@ -392,16 +436,20 @@ final class SessionManager {
             let updatedAt = (row["updated_at"] as? String) ?? ""
             let exactNoteSnapshot = snapshotByNote[noteId]
             let matchingSnapshot = exactNoteSnapshot ?? latestSnapshotBySession[rowSessionId]
+            let rpcFallback = rpcBySession[rowSessionId]
             let title = ((row["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // Notes table doesn't store slot URLs — fall back to the RPC snapshot.
+            // Notes table doesn't store slot URLs — fall back to the RPC snapshot,
+            // then to the original RPC response for this session ID.
             let exactURLs = exactNoteSnapshot?.slotURLs
             let exactLive = exactNoteSnapshot?.slotLiveURLs
             let resolvedSlotURLs = (exactURLs?.isEmpty == false ? exactURLs : nil)
                 ?? matchingSnapshot?.slotURLs
+                ?? rpcFallback?.slotURLs
                 ?? [:]
             let resolvedLiveURLs = (exactLive?.isEmpty == false ? exactLive : nil)
                 ?? matchingSnapshot?.slotLiveURLs
+                ?? rpcFallback?.slotLiveURLs
                 ?? [:]
 
             return SessionSnapshot(

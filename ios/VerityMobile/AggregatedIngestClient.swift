@@ -187,7 +187,7 @@ enum AggregatedIngestClient {
             let slotNumber = meta.map { $0.slot + 1 }
             let segmentId: String
             if let slotNumber, slotNumber > 0 {
-                segmentId = "slot-\(slotNumber):\(providerId)"
+                segmentId = "slot-\(slotNumber)"
             } else {
                 segmentId = providerId
             }

@@ -92,7 +92,7 @@ object AggregatedIngestClient {
                 ?: normalizeSegmentId(serviceName)
             val slotNumber = (meta?.get("slot") as? Number)?.toInt()?.plus(1)
             val segmentId = if (slotNumber != null && slotNumber > 0) {
-                "slot-$slotNumber:$providerId"
+                "slot-$slotNumber"
             } else {
                 providerId
             }

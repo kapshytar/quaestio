@@ -1,5 +1,50 @@
 # Changelog
 
+Parent / entry point:
+- Start from [../VERITY_MAP.md](../VERITY_MAP.md)
+- Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
+- Repo-specific versioning contract lives in [VERSIONING.md](./VERSIONING.md)
+
+## 2.1.9
+
+- fix note-backed session loading on iPhone so new questions attach to the current tip of the note chain instead of creating parallel root notes under the session root
+- restore the active aggregated note ID by querying the latest note for the session when loading a note-backed session
+
+## 2.1.8
+
+- fix iPhone session slot URL restoration when the device has no local cached session snapshot, by falling back to the original RPC snapshot from `aggregator_sessions_bridge_v1` instead of returning empty URLs
+- apply the same fallback fix to Android and Desktop so all three platforms restore slot URLs consistently even after cache loss
+
+## 2.1.7
+
+- keep the iPhone logical session link when sending or collecting a different question, clearing only the active aggregated note so the backend creates the next question root as a child instead of starting a separate session
+- preserve the iPhone active session link across app startup instead of clearing it unconditionally, avoiding split roots after a cold restart while still resetting slots when no valid note-backed context exists
+
+## 2.1.6
+
+- prefer latest/bottom Claude scrape candidates before falling back to length-based ordering, so Android Claude collection is less likely to pick an older prompt/container instead of the current assistant answer
+
+## 2.1.5
+
+- relax the Android post-scrape quality gate so DOM `promptCandidate` is not treated as authoritative prompt text; this restores valid Claude/Gemini replies while keeping direct prompt-echo rejection against the known scrape seed prompt
+
+## 2.1.4
+
+- block Android manual collect from overwriting an existing aggregated root when the current scrape is partial, so dropping a bad Claude prompt echo cannot delete the previously valid Claude segment
+
+## 2.1.3
+
+- add an Android post-scrape quality gate before aggregation ingest so prompt echoes such as `Сделай саммари видео и вытащи ключевые идеи` cannot be saved as Claude replies
+- compare Android cleaned replies against both the scrape seed prompt and the DOM prompt candidate, covering cases where the WebView selected the prompt node instead of the assistant answer
+- keep the iPhone scrape path unchanged; this patch targets the Android-only Claude failure seen on session `134`
+
+## 2.1.2
+
+- persist canonical per-slot live chat URLs during iPhone ingest instead of falling back to preset/project URLs, so cold-start collects stop saving stale ChatGPT/Claude/Gemini/Grok links
+- simplify mobile aggregate segment IDs to stable slot IDs while keeping provider metadata separate, preventing doubled markers such as `slot-1:chatgpt:chatgpt`
+- reject short scrape artifacts such as `Glasp`, `Searched the web`, and `Fetching from...` before they can be stored as model replies
+- keep Android on the same shared segment-ID and quality-gate behavior without changing its working scrape flow
+
 ## 2.1.1
 
 - prefer canonical `slot_urls` over stale `slot_live_urls` when restoring iPhone sessions after a cold app restart, so note-backed sessions stop reopening older in-chat navigation targets

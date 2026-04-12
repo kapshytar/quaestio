@@ -113,8 +113,7 @@ final class MobileAppState: ObservableObject {
             self.lastUserPrompt = parallelState.sourcePrompt
         }
         self.activeProjectId = nil
-        self.sessionIndicatorText = nil
-        sessionManager.clearCurrentSessionLink(preservingProject: false)
+        self.sessionIndicatorText = Self.makeSessionIndicator(from: parallelState)
         if !hasActiveSessionLink() {
             self.slots = Self.slotsResetToPresetURLs(slots: self.slots, presets: presets)
         }
@@ -173,10 +172,12 @@ final class MobileAppState: ObservableObject {
         if successCount > 0 {
             lastUserPrompt = message
             persistLastUserPrompt(message)
-            if shouldResetQuestionContext || !hadCurrentQuestionContext {
+            if shouldResetQuestionContext {
+                sessionManager.startNewQuestionInCurrentSession(sourcePrompt: message)
+            } else if !hadCurrentQuestionContext {
                 sessionManager.clearParallelIngestState()
+                sessionManager.rememberSourcePrompt(message)
             }
-            sessionManager.rememberSourcePrompt(message)
             updateSessionIndicator()
             composerText = ""
             let expectedSlots = activeSlots.count
@@ -315,6 +316,16 @@ final class MobileAppState: ObservableObject {
             noteId: session.noteId,
             sourcePrompt: session.name
         )
+
+        // For note-backed sessions, always target the latest note in the chain
+        // as the active aggregated note, so new questions attach as children
+        // of the current tip instead of creating parallel roots.
+        if let sessionId = session.sessionId, !session.noteId.isNilOrBlank {
+            Task {
+                await sessionManager.refreshActiveNoteIdForSession(sessionId)
+            }
+        }
+
         updateSessionIndicator()
         lastUserPrompt = session.name.trimmingCharacters(in: .whitespacesAndNewlines)
         persistLastUserPrompt(lastUserPrompt)
@@ -378,8 +389,7 @@ final class MobileAppState: ObservableObject {
         }
         let sameQuestionAsCurrentRoot = hasLoadedQuestionContext && promptsReferToSameQuestion(prompt, loadedQuestionPrompt)
         if hasLoadedQuestionContext && !sameQuestionAsCurrentRoot {
-            sessionManager.clearParallelIngestState()
-            sessionManager.rememberSourcePrompt(prompt)
+            sessionManager.startNewQuestionInCurrentSession(sourcePrompt: prompt)
             updateSessionIndicator()
         }
         let replaceExisting = existingAggregatedNoteId != nil && sameQuestionAsCurrentRoot
@@ -637,7 +647,7 @@ final class MobileAppState: ObservableObject {
             throw NSError(domain: "MobileAppState", code: 2001, userInfo: [NSLocalizedDescriptionKey: "Supabase integration is not configured"])
         }
 
-        let existingSessionId = currentQuestionSessionId()
+        let existingSessionId = sessionManager.getParallelIngestState().sessionId ?? currentQuestionSessionId()
         let traceId = sessionManager.ensureTraceId()
         let sequence = sessionManager.nextSequence()
         let sessionOrTmp = existingSessionId.map(String.init) ?? sessionManager.ensureExternalChatId()
@@ -651,15 +661,17 @@ final class MobileAppState: ObservableObject {
         // DEBUG: Log ingest details
         appendIngestEvent("ingest-start seq=\(sequence) session=\(existingSessionId ?? -1) responses=\(responses.count) replace=\(replaceExisting)")
 
+        let slotSourceURLs = currentSessionSnapshotSlotURLs()
         let scrapeMeta = slots
             .filter(\.isEnabled)
             .compactMap { slot -> IngestScrapeMetaRow? in
                 guard responses[slot.title] != nil, let preset = presets[slot.serviceId] else { return nil }
+                let slotKey = "slot-\(slot.id)"
                 return IngestScrapeMetaRow(
                     slot: slot.id - 1,
                     serviceName: slot.title,
                     serviceId: preset.id,
-                    sourceURL: slot.url
+                    sourceURL: slotSourceURLs[slotKey] ?? slot.url
                 )
             }
 

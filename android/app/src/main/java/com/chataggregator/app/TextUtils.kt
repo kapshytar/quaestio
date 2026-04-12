@@ -9,6 +9,43 @@ private fun normalizeMultilineText(text: String): String {
         .trim()
 }
 
+private fun flatTextForQuality(text: String): String {
+    return normalizeMultilineText(text)
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .lowercase()
+}
+
+fun isQualityScrapedReply(
+    serviceId: String,
+    text: String,
+    sourcePrompt: String = ""
+): Boolean {
+    val normalized = normalizeMultilineText(text)
+    val flat = flatTextForQuality(normalized)
+    if (flat.length < 20) return false
+    if (flat.length < 180 && Regex("\\b(glasp|searched the web|fetching from)\\b", RegexOption.IGNORE_CASE).containsMatchIn(flat)) {
+        return false
+    }
+
+    val promptFlat = flatTextForQuality(sourcePrompt)
+    if (promptFlat.isNotBlank()) {
+        if (flat == promptFlat) return false
+        if (flat.length < promptFlat.length * 1.5 && flat.contains(promptFlat)) return false
+        if (flat.length >= 20 && promptFlat.contains(flat)) return false
+        val textHead = flat.take(200)
+        val promptHead = promptFlat.take(200)
+        if (textHead.length >= 40 && promptHead.contains(textHead)) return false
+        if (promptHead.length >= 40 && textHead.contains(promptHead)) return false
+    }
+
+    if (serviceId == "claude" && Regex("^(?:you said|you asked|вы сказали)\\b", RegexOption.IGNORE_CASE).containsMatchIn(flat)) {
+        return false
+    }
+
+    return true
+}
+
 private fun looksLikePipeRow(text: String): Boolean {
     val trimmed = text.trim()
     if (!trimmed.contains("|")) return false

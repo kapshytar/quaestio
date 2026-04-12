@@ -2367,6 +2367,19 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 promptsReferToSameQuestion(sourcePrompt, loadedQuestionPrompt)
             val replaceExisting = existingAggregatedNoteId != null && sameQuestionAsCurrentRoot
             val targetAggregatedNoteId = if (replaceExisting) existingAggregatedNoteId else null
+            if (replaceExisting && responses.size < expectedServices.size) {
+                val missing = expectedServices.filterNot { responses.containsKey(it) }
+                if (SettingsManager.isDetailedLoggingEnabled(this)) {
+                    Log.w(
+                        TAG,
+                        "collectNowAggregation aborted partial overwrite: collected=${responses.size}/${expectedServices.size} missing=${missing.joinToString()} noteId=$existingAggregatedNoteId"
+                    )
+                }
+                runOnUiThread {
+                    onDone?.invoke(false, "Partial collect blocked; missing ${missing.joinToString()}")
+                }
+                return@collectLatestRepliesFromEnabledSlots
+            }
 
             if (
                 SettingsManager.isDetailedLoggingEnabled(this) &&
@@ -3190,11 +3203,18 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 val text = scrape?.text
                 if (!text.isNullOrBlank()) {
                     val cleaned = sanitizeScrapedReply(serviceId, text, lastSentPrompt)
-                    if (cleaned.isBlank()) {
+                    if (
+                        cleaned.isBlank() ||
+                        !isQualityScrapedReply(
+                            serviceId = serviceId,
+                            text = cleaned,
+                            sourcePrompt = lastSentPrompt
+                        )
+                    ) {
                         if (detailed) {
                             Log.d(
                                 TAG,
-                                "collectLatestReplies slot=$slotIndex service=$serviceName dropped-by-sanitizer rawChars=${text.length}"
+                                "collectLatestReplies slot=$slotIndex service=$serviceName dropped-by-quality rawChars=${text.length} cleanChars=${cleaned.length}"
                             )
                         }
                         remaining--

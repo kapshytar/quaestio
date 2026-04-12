@@ -581,6 +581,7 @@
         if (hasPromptEchoShape(normalized)) return false;
 
         const flat = flatText(normalized).toLowerCase();
+        if (flat.length < 180 && /\b(glasp|searched the web|fetching from)\b/i.test(flat)) return false;
         const promptFlat = flatText(sourcePrompt).toLowerCase();
         if (promptFlat) {
           if (flat === promptFlat) return false;
@@ -1196,6 +1197,18 @@
         });
 
         return JSON.stringify(chooseSuccessfulCandidate(wrapped, false));
+      }
+
+      if (serviceId === 'claude') {
+        const claudePool = source
+          .slice()
+          .sort((a, b) => {
+            if (b.bottom !== a.bottom) return b.bottom - a.bottom;
+            if (b.structure !== a.structure) return b.structure - a.structure;
+            if (b.flat.length !== a.flat.length) return b.flat.length - a.flat.length;
+            return b.top - a.top;
+          });
+        return JSON.stringify(chooseSuccessfulCandidate(claudePool, false));
       }
 
       pool.sort((a, b) => {

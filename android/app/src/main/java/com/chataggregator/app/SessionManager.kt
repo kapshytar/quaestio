@@ -283,6 +283,7 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
 
             val snapshotByNote = mutableMapOf<String, SessionSnapshot>()
             val latestSnapshotBySession = mutableMapOf<Int, SessionSnapshot>()
+            val rpcBySession = mutableMapOf<Int, SessionSnapshot>()
             snapshots.forEach { snapshot ->
                 snapshot.noteId?.takeIf { it.isNotBlank() }?.let { snapshotByNote[it] = snapshot }
                 snapshot.sessionId?.let { sid ->
@@ -290,6 +291,9 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
                     if (existing == null || snapshot.timestamp >= existing.timestamp) {
                         latestSnapshotBySession[sid] = snapshot
                     }
+                    // Keep original RPC snapshots as fallback for note-backed rows
+                    // when no local snapshot matches the note row's session ID.
+                    rpcBySession[sid] = snapshot
                 }
             }
 
@@ -305,6 +309,7 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
                     val title = obj.get("title")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
                     val updatedAt = obj.get("updated_at")?.takeIf { !it.isJsonNull }?.asString ?: ""
                     val matchingSnapshot = snapshotByNote[noteId] ?: latestSnapshotBySession[rowSessionId]
+                    val rpcFallback = rpcBySession[rowSessionId]
 
                     SessionSnapshot(
                         id = matchingSnapshot?.id ?: "note:$noteId",
@@ -316,9 +321,9 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
                         name = title.ifBlank {
                             matchingSnapshot?.name?.trim().orEmpty().ifBlank { "Session #$rowSessionId" }
                         },
-                        slotConfig = matchingSnapshot?.slotConfig ?: emptyMap(),
-                        slotUrls = matchingSnapshot?.slotUrls ?: emptyMap(),
-                        slotEnabled = matchingSnapshot?.slotEnabled ?: emptyMap(),
+                        slotConfig = matchingSnapshot?.slotConfig ?: rpcFallback?.slotConfig ?: emptyMap(),
+                        slotUrls = matchingSnapshot?.slotUrls ?: rpcFallback?.slotUrls ?: emptyMap(),
+                        slotEnabled = matchingSnapshot?.slotEnabled ?: rpcFallback?.slotEnabled ?: emptyMap(),
                         createdAt = matchingSnapshot?.createdAt ?: "",
                         updatedAt = updatedAt.ifBlank { matchingSnapshot?.updatedAt ?: "" }
                     )
