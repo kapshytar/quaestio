@@ -455,7 +455,7 @@ function appendDebugArtifact(traceId, eventPayload) {
         trace_id: traceId,
         source_platform_code: INGEST_DEBUG_SOURCE_PLATFORM_CODE,
         app_name: INGEST_DEBUG_APP_NAME,
-          app_version: getRuntimeAppVersion(),
+        app_version: getRuntimeAppVersion(),
         created_at: nowIso,
         updated_at: nowIso,
         events: []
@@ -480,7 +480,7 @@ async function emitIngestDebugEvent({ supabaseUrl, serviceRoleKey, eventPayload 
     trace_id: eventPayload?.trace_id || sanitizeTraceId(),
     source_platform_code: INGEST_DEBUG_SOURCE_PLATFORM_CODE,
     app_name: INGEST_DEBUG_APP_NAME,
-      app_version: getRuntimeAppVersion(),
+    app_version: getRuntimeAppVersion(),
     session_id: Number.isInteger(eventPayload?.session_id) ? eventPayload.session_id : null,
     step: eventPayload?.step || 'error',
     rpc_name: eventPayload?.rpc_name || '',
@@ -1018,10 +1018,10 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       noteId: typeof row.note_id === 'string'
         ? row.note_id
         : (typeof row.noteId === 'string'
-            ? row.noteId
-            : (typeof row.question_note_id === 'string'
-                ? row.question_note_id
-                : (typeof row.questionNoteId === 'string' ? row.questionNoteId : null))),
+          ? row.noteId
+          : (typeof row.question_note_id === 'string'
+            ? row.question_note_id
+            : (typeof row.questionNoteId === 'string' ? row.questionNoteId : null))),
       name: row.name,
       slotConfig: row.slot_config || row.slotConfig || {},
       slotUrls: row.slot_urls || row.slotUrls || {},
@@ -1044,6 +1044,7 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
 
     const snapshotByNote = new Map();
     const latestSnapshotBySession = new Map();
+    const rpcBySession = new Map();
     for (const snapshot of snapshots) {
       if (snapshot.noteId) snapshotByNote.set(snapshot.noteId, snapshot);
       if (snapshot.sessionId == null) continue;
@@ -1053,6 +1054,9 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       if (!existing || currentTs >= existingTs) {
         latestSnapshotBySession.set(snapshot.sessionId, snapshot);
       }
+      // Keep original RPC snapshots as fallback for note-backed rows
+      // when no local snapshot matches the note row's session ID.
+      rpcBySession.set(snapshot.sessionId, snapshot);
     }
 
     const noteBackedRows = (Array.isArray(noteRows) ? noteRows : []).map((note) => {
@@ -1061,6 +1065,7 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       const matchingSnapshot = (noteId ? snapshotByNote.get(noteId) : null)
         || (rowSessionId != null ? latestSnapshotBySession.get(rowSessionId) : null)
         || null;
+      const rpcFallback = rowSessionId != null ? rpcBySession.get(rowSessionId) : null;
       return {
         id: matchingSnapshot?.id || (noteId ? `note:${noteId}` : `session:${rowSessionId ?? 'unknown'}`),
         sessionId: rowSessionId,
@@ -1068,9 +1073,9 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
         name: String(note.title || '').trim()
           || matchingSnapshot?.name
           || (rowSessionId != null ? `Session #${rowSessionId}` : 'Session'),
-        slotConfig: matchingSnapshot?.slotConfig || {},
-        slotUrls: matchingSnapshot?.slotUrls || {},
-        slotEnabled: matchingSnapshot?.slotEnabled || {},
+        slotConfig: matchingSnapshot?.slotConfig || rpcFallback?.slotConfig || {},
+        slotUrls: matchingSnapshot?.slotUrls || rpcFallback?.slotUrls || {},
+        slotEnabled: matchingSnapshot?.slotEnabled || rpcFallback?.slotEnabled || {},
         // Session history should be stable even if the underlying note is edited later.
         // Use note creation time for note-backed rows and keep the live snapshot update as
         // auxiliary metadata only.
@@ -1129,8 +1134,8 @@ ipcMain.handle('dream-delete-session', async (_event, sessionTarget) => {
       : '';
     const sessionId = typeof sessionTarget === 'object' && sessionTarget
       ? (Number.isInteger(sessionTarget.sessionId)
-          ? sessionTarget.sessionId
-          : (Number.isInteger(sessionTarget.session_id) ? sessionTarget.session_id : null))
+        ? sessionTarget.sessionId
+        : (Number.isInteger(sessionTarget.session_id) ? sessionTarget.session_id : null))
       : null;
 
     return await callSupabaseRpc('aggregator_sessions_bridge_v1', {

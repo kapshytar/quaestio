@@ -220,6 +220,12 @@ const AGGREGATION_WAIT_MAX_CHECKS = 12;
 const AGGREGATION_WAIT_INTERVAL_MS = 2500;
 const AGGREGATION_SETTLE_DELAY_MS = 1500;
 
+function resizeMessageInput() {
+  if (!messageInput) return;
+  messageInput.style.height = 'auto';
+  messageInput.style.height = `${Math.min(messageInput.scrollHeight, 160)}px`;
+}
+
 function stableStringify(value) {
   const sort = (v) => {
     if (Array.isArray(v)) return v.map(sort);
@@ -1224,6 +1230,7 @@ function toNoteTitle(rawText, fallback) {
 function isQualityReply(text, sourcePrompt = '') {
   if (!text || text.trim().length < INGEST_MIN_REPLY_CHARS) return false;
   const flat = text.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (flat.length < 180 && /\b(glasp|searched the web|fetching from)\b/i.test(flat)) return false;
   const promptFlat = (sourcePrompt || '').replace(/\s+/g, ' ').trim().toLowerCase();
   // Reject if the scraped text is just the user's prompt
   if (promptFlat && flat === promptFlat) return false;
@@ -3305,6 +3312,7 @@ async function sendToAll() {
   }
 
   messageInput.value = '';
+  resizeMessageInput();
   messageInput.focus();
 
   const pendingAggregation = {
@@ -3335,6 +3343,8 @@ async function sendToAll() {
 }
 
 sendBtn.addEventListener('click', sendToAll);
+
+messageInput?.addEventListener('input', resizeMessageInput);
 
 messageInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -4477,7 +4487,7 @@ async function collectLatestRepliesFromEnabledSlots() {
       const modelName = reserveModelName(serviceName);
       responsesByModel[modelName] = cleanedReply;
       aggregatedResponses.push({
-        segment_id: `${slot}:${serviceId || 'unknown'}`,
+        segment_id: slot,
         provider: serviceId || 'unknown',
         source_url: currentUrl || SERVICE_PRESETS[serviceId]?.url || '',
         markdown: cleanedReply
@@ -4730,7 +4740,7 @@ async function collectNowAggregation(manual = true) {
 
   enabledSlots.forEach((slot) => {
     const serviceId = detectServiceByUrl(getWebviewCurrentUrl(slot)) || slotConfig[slot] || slot;
-    const hasReply = aggregatedResponses.some((item) => item.segment_id === `${slot}:${serviceId}` || item.provider === serviceId);
+    const hasReply = aggregatedResponses.some((item) => item.segment_id === slot || item.segment_id === `${slot}:${serviceId}` || item.provider === serviceId);
     setAggregationSlotStatus(slot, hasReply ? collected : error);
   });
   renderAggregationSummary(enabledSlots);

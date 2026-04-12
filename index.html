@@ -63,6 +63,8 @@
       flex: 1; padding: 10px 14px; font-size: 14px; background: #333;
       border: 2px solid #555; border-radius: 8px; color: #fff;
       outline: none; font-family: inherit; transition: border-color 0.2s;
+      resize: none; min-height: 42px; max-height: 160px; line-height: 1.35;
+      overflow-y: auto;
     }
     #message-input:focus { border-color: #0066ff; }
     #send-btn {
@@ -755,7 +757,7 @@
         <button class="control-btn" id="toggle-merge-panel-btn">Merge ></button>
       </div>
       <div id="input-container">
-        <input type="text" id="message-input" placeholder="Type message and press Enter..." autocomplete="off">
+        <textarea id="message-input" rows="1" placeholder="Type message. Enter sends, Shift+Enter adds a line..." autocomplete="off"></textarea>
         <button id="send-btn">Send</button>
         <button id="collapse-toolbar">Tools</button>
       </div>
@@ -947,6 +949,5 @@
   <script src="renderer.js" defer></script>
 </body>
 </html>
-
 
 
