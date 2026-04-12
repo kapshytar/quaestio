@@ -421,17 +421,24 @@ final class SessionManager {
             }
         }
 
-        return rows.compactMap { (row: [String: Any]) -> SessionSnapshot? in
-            guard let rawId = row["id"] as? String else { return nil }
+        // Build snapshots from note rows, then deduplicate by session ID
+        // to keep only the latest note's snapshot per session.
+        var bySession: [Int: SessionSnapshot] = [:]
+        print("[loadNoteBacked] notes rows=\(rows.count), rpc snapshots=\(snapshots.count)")
+        print("[loadNoteBacked] snapshotByNote keys=\(snapshotByNote.keys.sorted())")
+        print("[loadNoteBacked] latestBySession keys=\(latestSnapshotBySession.keys.sorted())")
+        print("[loadNoteBacked] rpcBySession keys=\(rpcBySession.keys.sorted())")
+        for row in rows {
+            guard let rawId = row["id"] as? String else { continue }
             let noteId = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !noteId.isEmpty else { return nil }
+            guard !noteId.isEmpty else { continue }
 
             let rowSessionId =
                 (row["note_session_id"] as? NSNumber)?.intValue
                 ?? (row["session_id"] as? NSNumber)?.intValue
                 ?? Int((row["note_session_id"] as? String) ?? "")
                 ?? Int((row["session_id"] as? String) ?? "")
-            guard let rowSessionId else { return nil }
+            guard let rowSessionId else { continue }
 
             let updatedAt = (row["updated_at"] as? String) ?? ""
             let exactNoteSnapshot = snapshotByNote[noteId]
@@ -439,8 +446,18 @@ final class SessionManager {
             let rpcFallback = rpcBySession[rowSessionId]
             let title = ((row["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // Notes table doesn't store slot URLs — fall back to the RPC snapshot,
-            // then to the original RPC response for this session ID.
+            print("[loadNoteBacked] note=\(noteId.prefix(8)) session=\(rowSessionId) exactMatch=\(exactNoteSnapshot != nil) match=\(matchingSnapshot != nil) rpcFallback=\(rpcFallback != nil)")
+            if let rpc = rpcFallback {
+                print("[loadNoteBacked]   rpcFallback slot_urls=\(rpc.slotURLs)")
+                print("[loadNoteBacked]   rpcFallback slot_config=\(rpc.slotConfig)")
+            }
+            if let match = matchingSnapshot {
+                print("[loadNoteBacked]   matching slot_urls=\(match.slotURLs)")
+                print("[loadNoteBacked]   matching slot_config=\(match.slotConfig)")
+            }
+
+            // All slot data falls back through: exact note snapshot →
+            // matching session snapshot → original RPC response.
             let exactURLs = exactNoteSnapshot?.slotURLs
             let exactLive = exactNoteSnapshot?.slotLiveURLs
             let resolvedSlotURLs = (exactURLs?.isEmpty == false ? exactURLs : nil)
@@ -451,8 +468,14 @@ final class SessionManager {
                 ?? matchingSnapshot?.slotLiveURLs
                 ?? rpcFallback?.slotLiveURLs
                 ?? [:]
+            let resolvedSlotConfig = matchingSnapshot?.slotConfig
+                ?? rpcFallback?.slotConfig
+                ?? [:]
+            let resolvedSlotEnabled = matchingSnapshot?.slotEnabled
+                ?? rpcFallback?.slotEnabled
+                ?? [:]
 
-            return SessionSnapshot(
+            let snapshot = SessionSnapshot(
                 id: matchingSnapshot?.id ?? "note:\(noteId)",
                 timestamp: Self.parseISO(updatedAt)
                     ?? matchingSnapshot?.timestamp
@@ -463,17 +486,25 @@ final class SessionManager {
                     matchingSnapshot?.name.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("Session #\(rowSessionId)")
                     ?? "Session #\(rowSessionId)"
                 ),
-                slotConfig: matchingSnapshot?.slotConfig ?? [:],
+                slotConfig: resolvedSlotConfig,
                 slotURLs: resolvedSlotURLs,
-                slotEnabled: matchingSnapshot?.slotEnabled ?? [:],
+                slotEnabled: resolvedSlotEnabled,
                 slotLiveURLs: resolvedLiveURLs,
                 createdAt: matchingSnapshot?.createdAt ?? "",
                 updatedAt: updatedAt.ifEmpty(matchingSnapshot?.updatedAt ?? "")
             )
+
+            // Keep only the latest snapshot per session
+            let existing = bySession[rowSessionId]
+            if existing == nil || snapshot.timestamp >= existing!.timestamp {
+                bySession[rowSessionId] = snapshot
+            }
         }
-        .sorted(by: { $0.timestamp > $1.timestamp })
-        .prefix(maxSessions)
-        .map { $0 }
+
+        return Array(bySession.values)
+            .sorted(by: { $0.timestamp > $1.timestamp })
+            .prefix(maxSessions)
+            .map { $0 }
     }
 
     private func normalizeRestEndpoint(_ baseInput: String) -> String {

@@ -311,6 +311,14 @@ final class MobileAppState: ObservableObject {
             selectedSlotId = firstEnabledSlot
         }
 
+        // DEBUG: Log session slot config and URLs for debugging
+        print("[loadSession] session=\(session.sessionId ?? -1) noteId=\(session.noteId ?? "nil")")
+        for slotKey in ["slot-1", "slot-2", "slot-3", "slot-4"] {
+            let svc = session.slotConfig[slotKey] ?? "unknown"
+            let url = session.slotURLs[slotKey] ?? "none"
+            print("[loadSession]   \(slotKey) -> \(svc) @ \(url.prefix(60))")
+        }
+
         sessionManager.updateSessionLink(
             sessionId: session.sessionId,
             noteId: session.noteId,

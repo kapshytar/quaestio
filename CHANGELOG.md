@@ -5,6 +5,13 @@ Parent / entry point:
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 - Repo-specific versioning contract lives in [VERSIONING.md](./VERSIONING.md)
 
+## 2.1.10
+
+- deduplicate session snapshots by session ID in `loadNoteBackedSessions` so sessions with multiple notes don't produce duplicate entries with mismatched slot configs
+- add full fallback chain for `slotConfig` and `slotEnabled` in note-backed session loading, falling through to the original RPC response when no local snapshot matches
+- query the latest note for a session when loading a note-backed session to restore the correct active aggregated note ID, so new questions attach to the chain tip
+- add debug logging to session slot URL and config resolution for diagnosing slot mismatches
+
 ## 2.1.9
 
 - fix note-backed session loading on iPhone so new questions attach to the current tip of the note chain instead of creating parallel root notes under the session root
