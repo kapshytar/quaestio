@@ -108,6 +108,8 @@ class ChatFragment : Fragment(), Findable {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
+            // Hardware acceleration for GPU-composited rendering (critical for S10)
+            setLayerType(LAYER_TYPE_HARDWARE, null)
             setBackgroundColor(context.getColor(R.color.bg_surface))
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
