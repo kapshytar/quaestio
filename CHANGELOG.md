@@ -4,6 +4,9 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.103.0
+- add per-slot desktop view controls near the address bar: `Split` expands a slot within its side while preserving the opposite side, `Full` expands one slot to the whole webview workspace, and `Escape` exits either focused view mode
+
 ## 1.102.7
 - make the desktop composer multiline by switching it to an auto-growing textarea; `Enter` still sends and `Shift+Enter` inserts a line break
 

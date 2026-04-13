@@ -116,6 +116,9 @@ const webviewReady = {};
 const pendingNavigation = {};
 const incognitoEnsureTimers = {};
 const incognitoEnsureState = {};
+let expandedSlot = null;
+let leftSplitSlot = null;
+let rightSplitSlot = null;
 
 SLOTS.forEach(slot => {
   webviews[slot] = document.getElementById(`webview-${slot}`);
@@ -154,6 +157,7 @@ const aboutBaseVersionEl = document.getElementById('about-base-version');
 const aboutGitMetaEl = document.getElementById('about-git-meta');
 const aboutChangelogListEl = document.getElementById('about-changelog-list');
 const aboutChangelogEmptyEl = document.getElementById('about-changelog-empty');
+const webviewGridEl = document.getElementById('webview-grid');
 
 // Merge panel elements (populated after DOM ready)
 let mergeProviderSelect, mergeApiKeyInput, mergeEndpointInput, mergeModelInput;
@@ -2230,6 +2234,96 @@ if (showAddressBar === 'false') {
   toggleAddressBarBtn.click();
 }
 
+function updateExpandedSlotControls() {
+  document.querySelectorAll('.webview-header[data-slot]').forEach(header => {
+    const slot = header.dataset.slot;
+    const splitBtn = header.querySelector('[data-action="split-toggle"]');
+    const expandBtn = header.querySelector('[data-action="expand-toggle"]');
+    const isSplitActive = leftSplitSlot === slot || rightSplitSlot === slot;
+    const isFullActive = expandedSlot === slot;
+
+    if (splitBtn) {
+      splitBtn.classList.toggle('active', isSplitActive);
+      splitBtn.textContent = isSplitActive ? 'Exit' : 'Split';
+      splitBtn.title = isSplitActive ? 'Return to all slots' : 'Split this slot to its side';
+      splitBtn.setAttribute('aria-pressed', isSplitActive ? 'true' : 'false');
+    }
+
+    if (expandBtn) {
+      expandBtn.classList.toggle('active', isFullActive);
+      expandBtn.textContent = isFullActive ? 'Exit' : 'Full';
+      expandBtn.title = isFullActive ? 'Return to all slots' : 'Expand this slot';
+      expandBtn.setAttribute('aria-pressed', isFullActive ? 'true' : 'false');
+    }
+  });
+}
+
+function getSlotSplitSide(slot) {
+  return slot === 'slot-1' || slot === 'slot-3' ? 'left' : 'right';
+}
+
+function setSplitSlot(slot) {
+  const nextSlot = slot && SLOTS.includes(slot) ? slot : null;
+  if (nextSlot) {
+    expandedSlot = null;
+    if (getSlotSplitSide(nextSlot) === 'left') {
+      leftSplitSlot = leftSplitSlot === nextSlot ? null : nextSlot;
+    } else {
+      rightSplitSlot = rightSplitSlot === nextSlot ? null : nextSlot;
+    }
+  } else {
+    leftSplitSlot = null;
+    rightSplitSlot = null;
+  }
+
+  const hasSplitSlot = !!leftSplitSlot || !!rightSplitSlot;
+  webviewGridEl?.classList.toggle('split-slot', hasSplitSlot);
+  webviewGridEl?.classList.toggle('expanded-slot', false);
+
+  SLOTS.forEach(candidateSlot => {
+    const container = document
+      .querySelector(`.webview-header[data-slot="${candidateSlot}"]`)
+      ?.closest('.webview-container');
+    if (!container) return;
+    const isActive = leftSplitSlot === candidateSlot || rightSplitSlot === candidateSlot;
+    const side = isActive ? getSlotSplitSide(candidateSlot) : null;
+    const candidateSide = getSlotSplitSide(candidateSlot);
+    const sameSideSplitSlot = candidateSide === 'left' ? leftSplitSlot : rightSplitSlot;
+    const shouldHide = !!sameSideSplitSlot && sameSideSplitSlot !== candidateSlot;
+    container.classList.toggle('expanded', false);
+    container.classList.toggle('split-left', side === 'left');
+    container.classList.toggle('split-right', side === 'right');
+    container.classList.toggle('hidden-by-expansion', shouldHide);
+  });
+
+  updateExpandedSlotControls();
+}
+
+function setExpandedSlot(slot) {
+  expandedSlot = slot && SLOTS.includes(slot) ? slot : null;
+  if (expandedSlot) {
+    leftSplitSlot = null;
+    rightSplitSlot = null;
+  }
+
+  webviewGridEl?.classList.toggle('expanded-slot', !!expandedSlot);
+  webviewGridEl?.classList.toggle('split-slot', false);
+
+  SLOTS.forEach(candidateSlot => {
+    const container = document
+      .querySelector(`.webview-header[data-slot="${candidateSlot}"]`)
+      ?.closest('.webview-container');
+    if (!container) return;
+    const isActive = expandedSlot === candidateSlot;
+    container.classList.toggle('expanded', isActive);
+    container.classList.toggle('split-left', false);
+    container.classList.toggle('split-right', false);
+    container.classList.toggle('hidden-by-expansion', !!expandedSlot && !isActive);
+  });
+
+  updateExpandedSlotControls();
+}
+
 // ========== WEBVIEW CONTROLS ==========
 document.querySelectorAll('.webview-header').forEach(header => {
   const slot = header.dataset.slot;
@@ -2388,6 +2482,20 @@ document.querySelectorAll('.webview-header').forEach(header => {
         savePageBtn.disabled = false;
         savePageBtn.style.opacity = '1';
       }
+    });
+  }
+
+  const expandBtn = header.querySelector('[data-action="expand-toggle"]');
+  if (expandBtn) {
+    expandBtn.addEventListener('click', () => {
+      setExpandedSlot(expandedSlot === slot ? null : slot);
+    });
+  }
+
+  const splitBtn = header.querySelector('[data-action="split-toggle"]');
+  if (splitBtn) {
+    splitBtn.addEventListener('click', () => {
+      setSplitSlot(slot);
     });
   }
 
@@ -2877,6 +2985,13 @@ document.addEventListener('keydown', (e) => {
   if (isProjectPanelVisible && e.key === 'Escape') {
     e.preventDefault();
     hideProjectPanel();
+    return;
+  }
+
+  if ((expandedSlot || leftSplitSlot || rightSplitSlot) && e.key === 'Escape') {
+    e.preventDefault();
+    setExpandedSlot(null);
+    setSplitSlot(null);
     return;
   }
 

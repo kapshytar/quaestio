@@ -19,16 +19,44 @@
       display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
       flex: 1; gap: 2px; background: #000; padding: 2px;
     }
+    #webview-grid.expanded-slot {
+      grid-template-columns: 1fr; grid-template-rows: 1fr;
+    }
+    #webview-grid.split-slot {
+      grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+    }
     webview { width: 100%; height: 100%; background: #fff; }
     .webview-container {
       position: relative; background: #2a2a2a; border-radius: 4px;
       overflow: hidden; display: flex; flex-direction: column;
     }
+    .webview-container.hidden-by-expansion { display: none; }
+    .webview-container.expanded {
+      border-radius: 0;
+      grid-column: 1 / -1;
+      grid-row: 1 / -1;
+    }
+    .webview-container.split-left,
+    .webview-container.split-right {
+      border-radius: 0;
+      grid-row: 1 / -1;
+    }
+    .webview-container.split-left { grid-column: 1 / 2; }
+    .webview-container.split-right { grid-column: 2 / 3; }
+    #webview-grid.split-slot .webview-container:nth-child(1) { grid-column: 1 / 2; grid-row: 1 / 2; }
+    #webview-grid.split-slot .webview-container:nth-child(2) { grid-column: 2 / 3; grid-row: 1 / 2; }
+    #webview-grid.split-slot .webview-container:nth-child(3) { grid-column: 1 / 2; grid-row: 2 / 3; }
+    #webview-grid.split-slot .webview-container:nth-child(4) { grid-column: 2 / 3; grid-row: 2 / 3; }
+    #webview-grid.split-slot .webview-container.split-left,
+    #webview-grid.split-slot .webview-container.split-right { grid-row: 1 / -1; }
     .webview-header {
       background: #1a1a1a; padding: 4px 8px; display: flex;
       align-items: center; gap: 6px; border-bottom: 1px solid #333; min-height: 28px;
     }
     .webview-header.hidden { display: none; }
+    .webview-container.expanded .webview-header.hidden,
+    .webview-container.split-left .webview-header.hidden,
+    .webview-container.split-right .webview-header.hidden { display: flex; }
     .service-select {
       background: #333; border: 1px solid #555; border-radius: 3px;
       color: #ccc; font-size: 10px; padding: 2px 4px; cursor: pointer; min-width: 70px;
@@ -53,6 +81,8 @@
       color: #fff; font-size: 10px; padding: 2px 6px; cursor: pointer; line-height: 1;
     }
     .zoom-btn:hover { background: #444; }
+    .split-slot-btn, .expand-slot-btn { min-width: 34px; }
+    .split-slot-btn.active, .expand-slot-btn.active { border-color: #777; background: #444; color: #fff; }
     .zoom-level { font-size: 10px; color: #999; min-width: 35px; text-align: center; }
     .webview-wrapper { flex: 1; position: relative; }
     #bottom-panel {
@@ -650,6 +680,8 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
+            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
         </div>
         <div class="webview-wrapper"><webview id="webview-slot-1" partition="persist:shared" allowpopups></webview></div>
@@ -677,6 +709,8 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
+            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
         </div>
         <div class="webview-wrapper"><webview id="webview-slot-2" partition="persist:shared" allowpopups></webview></div>
@@ -704,6 +738,8 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
+            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
         </div>
         <div class="webview-wrapper"><webview id="webview-slot-3" partition="persist:shared" allowpopups></webview></div>
@@ -731,6 +767,8 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
+            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
         </div>
         <div class="webview-wrapper"><webview id="webview-slot-4" partition="persist:shared" allowpopups></webview></div>
@@ -949,5 +987,3 @@
   <script src="renderer.js" defer></script>
 </body>
 </html>
-
-

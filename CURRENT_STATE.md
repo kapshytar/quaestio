@@ -45,6 +45,10 @@
   - search by title
   - expand/collapse for long session titles
 - Desktop session list interaction is cached in-memory after refresh so the sessions dialog feels immediate during local filtering/toggling.
+- Desktop webview headers now have per-slot focused view controls:
+  - `Split` expands a slot within its own side while preserving the opposite side
+  - `Full` expands one slot to the whole webview workspace
+  - `Escape` exits either focused view mode
 - Desktop no longer keeps a separate `dismissed session ids` filter in local storage; local session deletion now removes only the selected row instead of hiding the whole numeric `session_id`.
 - Desktop ingest sends:
   - `prompt_text`
