@@ -4,6 +4,9 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.104.0
+- preserve desktop composer line breaks when sending prompts while keeping the provider input-fill method on the proven pre-regression path
+
 ## 1.103.0
 - add per-slot desktop view controls near the address bar: `Split` expands a slot within its side while preserving the opposite side, `Full` expands one slot to the whole webview workspace, and `Escape` exits either focused view mode
 

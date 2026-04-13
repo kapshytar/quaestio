@@ -49,6 +49,7 @@
   - `Split` expands a slot within its own side while preserving the opposite side
   - `Full` expands one slot to the whole webview workspace
   - `Escape` exits either focused view mode
+- Desktop composer preserves line breaks when sending prompts, while provider input fill still uses the proven `textContent` + input/change event path for contenteditable chat boxes.
 - Desktop no longer keeps a separate `dismissed session ids` filter in local storage; local session deletion now removes only the selected row instead of hiding the whole numeric `session_id`.
 - Desktop ingest sends:
   - `prompt_text`

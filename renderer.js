@@ -3381,9 +3381,9 @@ async function sendMessage(slot, text) {
 }
 
 async function sendToAll() {
-  const text = messageInput.value.trim();
+  const text = (messageInput.value || '').replace(/\r\n/g, '\n');
 
-  if (!text) {
+  if (!text.trim()) {
     alert('Please enter a message');
     return;
   }
