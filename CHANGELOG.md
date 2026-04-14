@@ -4,6 +4,9 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.105.0
+- add a `Reset` action to the desktop Sessions tab that clears the current local session/aggregated-note context without deleting saved database sessions, so the next send or collect starts from a fresh question root
+
 ## 1.104.0
 - preserve desktop composer line breaks when sending prompts while keeping the provider input-fill method on the proven pre-regression path
 

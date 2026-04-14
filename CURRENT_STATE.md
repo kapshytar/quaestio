@@ -44,6 +44,7 @@
   - search by `session_id`
   - search by title
   - expand/collapse for long session titles
+  - resetting the current local session/aggregated-note context without deleting saved database sessions
 - Desktop session list interaction is cached in-memory after refresh so the sessions dialog feels immediate during local filtering/toggling.
 - Desktop webview headers now have per-slot focused view controls:
   - `Split` expands a slot within its own side while preserving the opposite side

@@ -887,8 +887,18 @@ function clearStoredSessionContext() {
   activeSessionId = null;
   activeAggregatedNoteId = null;
   activeSessionPrompt = '';
+  activeSessionFingerprint = null;
   localStorage.removeItem(AGGREGATED_SESSION_CONTEXT_KEY);
   localStorage.removeItem(AGGREGATED_SESSION_ID_KEY);
+}
+
+function resetActiveSessionContext() {
+  clearStoredSessionContext();
+  clearIngestSessionIndicator();
+  if (window.mergeApiClient) {
+    window.mergeApiClient.lastSourcePrompt = '';
+  }
+  mergeLog('Session context reset by user from Sessions tab', 'info');
 }
 
 function getStoredSessionIdForFingerprint(fingerprint) {
@@ -5723,6 +5733,7 @@ async function initSessionsTab() {
   await updateSessionsUI();
 
   const saveSessionBtn = document.getElementById('save-session-btn');
+  const resetSessionBtn = document.getElementById('reset-session-btn');
   const refreshSessionsBtn = document.getElementById('refresh-sessions-btn');
   const sessionsSearchInput = document.getElementById('sessions-search-input');
   if (sessionsSearchInput) {
@@ -5748,6 +5759,28 @@ async function initSessionsTab() {
           saveSessionBtn.disabled = false;
           saveSessionBtn.textContent = originalText;
         }, 1500);
+      }
+    });
+  }
+  if (resetSessionBtn) {
+    resetSessionBtn.addEventListener('click', async () => {
+      const originalText = 'Reset';
+      resetSessionBtn.disabled = true;
+      resetSessionBtn.textContent = 'Resetting...';
+      try {
+        resetActiveSessionContext();
+        setSessionsNotice('Current session context reset. Next send/collect will create or resolve a fresh question root.', 'ok');
+        await updateSessionsUI();
+        resetSessionBtn.textContent = 'Reset';
+      } catch (error) {
+        console.error('[resetSessionBtn] reset failed:', error);
+        setSessionsNotice(`Session reset failed: ${errorToText(error)}`, 'warn');
+        resetSessionBtn.textContent = 'Reset failed';
+      } finally {
+        setTimeout(() => {
+          resetSessionBtn.disabled = false;
+          resetSessionBtn.textContent = originalText;
+        }, 1200);
       }
     });
   }
