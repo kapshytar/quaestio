@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.0
+
+- add `-allowProvisioningUpdates` to the canonical iPhone deploy script so local device installs can refresh Apple development provisioning automatically after profile/certificate changes
+
+
 Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)

@@ -161,6 +161,7 @@ xcodebuild \
   -configuration "$CONFIGURATION" \
   -destination "$DESTINATION" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
+  -allowProvisioningUpdates \
   build
 
 if [ ! -d "$APP_PATH" ]; then
