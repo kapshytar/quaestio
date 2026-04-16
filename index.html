@@ -117,6 +117,9 @@
       transition: background 0.2s; font-size: 11px;
     }
     .toggle:hover { background: #3a3a3a; }
+    .toggle[draggable="true"] { cursor: grab; }
+    .toggle.dragging { opacity: 0.55; outline: 1px dashed #77a7ff; }
+    .toggle.drag-over { background: #26466f; outline: 1px solid #77a7ff; }
     .toggle input { width: 14px; height: 14px; cursor: pointer; accent-color: #0066ff; }
     .toggle label { cursor: pointer; user-select: none; font-size: 11px; font-weight: 500; }
     .status { margin-left: 2px; font-size: 11px; min-width: 12px; text-align: center; color: #888; }
@@ -776,10 +779,10 @@
     </div>
     <div id="bottom-panel">
       <div id="toggles">
-        <div class="toggle"><input type="checkbox" id="toggle-slot-1" checked><label for="toggle-slot-1" id="label-slot-1">Slot 1</label><span class="status" id="status-slot-1"></span></div>
-        <div class="toggle"><input type="checkbox" id="toggle-slot-2" checked><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
-        <div class="toggle"><input type="checkbox" id="toggle-slot-3" checked><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
-        <div class="toggle"><input type="checkbox" id="toggle-slot-4" checked><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
+        <div class="toggle" draggable="true" data-slot="slot-1" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-1" checked><label for="toggle-slot-1" id="label-slot-1">Slot 1</label><span class="status" id="status-slot-1"></span></div>
+        <div class="toggle" draggable="true" data-slot="slot-2" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-2" checked><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
+        <div class="toggle" draggable="true" data-slot="slot-3" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-3" checked><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
+        <div class="toggle" draggable="true" data-slot="slot-4" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-4" checked><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
         <button class="control-btn" id="project-selector-btn" title="Projects">Proj</button>
         <button class="control-btn" id="toggle-address-bar-btn">Hide Address Bar</button>
         <button class="control-btn" id="import-cookies-btn">Import Cookies</button>
@@ -889,6 +892,10 @@
                 <span style="font-size:10px;color:#666;flex:1;">Verbose API log</span>
                 <button class="control-btn" id="debug-clear-btn">Clear</button>
               </div>
+              <label style="display:flex;gap:6px;align-items:center;margin-bottom:6px;font-size:11px;color:#aaa;">
+                <input type="checkbox" id="debug-mode-toggle">
+                Debug mode: include slot send diagnostics
+              </label>
               <div id="merge-debug-log"></div>
             </div>
             <!-- Sessions tab -->

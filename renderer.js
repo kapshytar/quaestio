@@ -165,7 +165,7 @@ let mergeFallbackInput, mergeInstructionsInput, mergeResultDiv, mergeStatusDiv;
 let clarificationContainer, clarificationInput, clarificationSendBtn, resetInstructionsBtn;
 let fallbackModelsField, runMergeBtn;
 let aggregationSummaryDiv, pauseAggregationBtn, collectNowBtn, refreshAggregationBtn;
-let debugLogDiv, debugClearBtn;
+let debugLogDiv, debugClearBtn, debugModeToggle;
 
 // Merge state
 let mergeInProgress = false;
@@ -190,6 +190,8 @@ let desktopAboutInfoCache = null;
 const AGGREGATED_SESSION_ID_KEY = 'aggregated-ingest-session-id';
 const AGGREGATED_SESSION_CONTEXT_KEY = 'aggregated-ingest-session-context';
 const SLOT_ENABLED_STATE_KEY = 'slot-enabled-state';
+const DEBUG_MODE_STATE_KEY = 'debug-mode-enabled';
+const SLOT_VISUAL_ORDER_KEY = 'slot-visual-order';
 const INGEST_POLL_ATTEMPTS = 30;
 const INGEST_POLL_INTERVAL_MS = 2000;
 const INGEST_INITIAL_DELAY_MS = 5000;
@@ -2101,6 +2103,110 @@ window.addEventListener('beforeunload', () => {
   saveSlotEnabledState(getCurrentSlotEnabledState());
 });
 
+function normalizeSlotVisualOrder(value) {
+  const seen = new Set();
+  const normalized = [];
+  (Array.isArray(value) ? value : []).forEach((slot) => {
+    if (SLOTS.includes(slot) && !seen.has(slot)) {
+      seen.add(slot);
+      normalized.push(slot);
+    }
+  });
+  SLOTS.forEach((slot) => {
+    if (!seen.has(slot)) normalized.push(slot);
+  });
+  return normalized;
+}
+
+function loadSlotVisualOrder() {
+  try {
+    return normalizeSlotVisualOrder(JSON.parse(localStorage.getItem(SLOT_VISUAL_ORDER_KEY) || '[]'));
+  } catch (_) {
+    return [...SLOTS];
+  }
+}
+
+let slotVisualOrder = loadSlotVisualOrder();
+
+function saveSlotVisualOrder() {
+  localStorage.setItem(SLOT_VISUAL_ORDER_KEY, JSON.stringify(slotVisualOrder));
+}
+
+function getSlotContainer(slot) {
+  return document.querySelector(`.webview-header[data-slot="${slot}"]`)?.closest('.webview-container') || null;
+}
+
+function getSlotToggleWrapper(slot) {
+  return toggles[slot]?.closest('.toggle') || null;
+}
+
+function applySlotVisualOrder() {
+  slotVisualOrder.forEach((slot, index) => {
+    const container = getSlotContainer(slot);
+    if (container) container.style.order = String(index);
+  });
+
+  if (togglesContainer) {
+    Array.from(togglesContainer.children).forEach((child) => {
+      if (!child.matches?.('.toggle[data-slot]')) child.style.order = '100';
+    });
+    slotVisualOrder.forEach((slot, index) => {
+      const toggle = getSlotToggleWrapper(slot);
+      if (toggle) toggle.style.order = String(index);
+    });
+  }
+}
+
+function swapSlotVisualOrder(sourceSlot, targetSlot) {
+  if (!SLOTS.includes(sourceSlot) || !SLOTS.includes(targetSlot) || sourceSlot === targetSlot) return false;
+  const sourceIndex = slotVisualOrder.indexOf(sourceSlot);
+  const targetIndex = slotVisualOrder.indexOf(targetSlot);
+  if (sourceIndex < 0 || targetIndex < 0) return false;
+  [slotVisualOrder[sourceIndex], slotVisualOrder[targetIndex]] = [slotVisualOrder[targetIndex], slotVisualOrder[sourceIndex]];
+  saveSlotVisualOrder();
+  applySlotVisualOrder();
+  mergeLog(`Swapped visual slots: ${sourceSlot} <-> ${targetSlot}`, 'info');
+  return true;
+}
+
+function initSlotDragAndDrop() {
+  document.querySelectorAll('#toggles .toggle[data-slot]').forEach((toggleEl) => {
+    toggleEl.addEventListener('dragstart', (event) => {
+      const slot = toggleEl.dataset.slot || '';
+      toggleEl.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', slot);
+    });
+
+    toggleEl.addEventListener('dragend', () => {
+      document.querySelectorAll('#toggles .toggle').forEach((el) => {
+        el.classList.remove('dragging', 'drag-over');
+      });
+    });
+
+    toggleEl.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      toggleEl.classList.add('drag-over');
+    });
+
+    toggleEl.addEventListener('dragleave', () => {
+      toggleEl.classList.remove('drag-over');
+    });
+
+    toggleEl.addEventListener('drop', (event) => {
+      event.preventDefault();
+      toggleEl.classList.remove('drag-over');
+      const sourceSlot = event.dataTransfer.getData('text/plain');
+      const targetSlot = toggleEl.dataset.slot || '';
+      swapSlotVisualOrder(sourceSlot, targetSlot);
+    });
+  });
+}
+
+applySlotVisualOrder();
+initSlotDragAndDrop();
+
 // ========== INITIALIZE SLOTS ==========
 function initSlot(slot) {
   const serviceId = slotConfig[slot];
@@ -3259,23 +3365,78 @@ async function sendMessage(slot, text) {
        el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Unidentified' }));
      }
 
+     const diag = { serviceId, steps: [] };
+
+     function snapEl(label, el, value) {
+       const NL = String.fromCharCode(10);
+       const tc = el ? (el.textContent || '') : '';
+       const it = el ? (el.innerText || '') : '';
+       const v = String(value || '');
+       diag.steps.push({
+         step: label,
+         tag: el ? el.tagName : null,
+         role: el ? (el.getAttribute('role') || '') : null,
+         ce: el ? el.isContentEditable : null,
+         tc_len: tc.length, tc_nl: tc.split(NL).length - 1,
+         it_len: it.length, it_nl: it.split(NL).length - 1,
+         val_len: v.length, val_nl: v.split(NL).length - 1
+       });
+     }
+
+     function pasteIntoContentEditable(el, value) {
+       const sel = window.getSelection ? window.getSelection() : null;
+       if (sel) {
+         try {
+           const r = document.createRange();
+           r.selectNodeContents(el);
+           sel.removeAllRanges();
+           sel.addRange(r);
+         } catch (_) {}
+       }
+
+       const dt = new DataTransfer();
+       dt.setData('text/plain', value);
+       el.dispatchEvent(new ClipboardEvent('paste', {
+         bubbles: true,
+         cancelable: true,
+         clipboardData: dt
+       }));
+     }
+
      function fillInput(el, value) {
        el.focus();
+       snapEl('before-fill', el, value);
 
        if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
          setNativeValue(el, value);
          dispatchInputEvents(el, value);
+         snapEl('after-fill-textarea', el, value);
          return;
        }
 
        if (el.isContentEditable) {
-         el.textContent = value;
-         dispatchInputEvents(el, value);
+         const hasNewline = String(value || '').includes(String.fromCharCode(10));
+         if (serviceId === 'gemini' || !hasNewline) {
+           el.textContent = value;
+           dispatchInputEvents(el, value);
+           snapEl(serviceId === 'gemini' ? 'after-fill-ce-gemini-legacy' : 'after-fill-ce-plain', el, value);
+           return;
+         }
+
+         try {
+           pasteIntoContentEditable(el, value);
+           snapEl('after-fill-ce-paste', el, value);
+         } catch (_) {
+           el.textContent = value;
+           dispatchInputEvents(el, value);
+           snapEl('after-fill-ce-paste-fallback', el, value);
+         }
          return;
        }
 
        el.textContent = value;
        dispatchInputEvents(el, value);
+       snapEl('after-fill-generic', el, value);
      }
 
      function isActionableButton(btn) {
@@ -3321,8 +3482,9 @@ async function sendMessage(slot, text) {
 
      const inputEl = findInput();
      if (!inputEl) {
-       return { success: false, error: 'Input not found' };
+       return { success: false, error: 'Input not found', diag };
      }
+     snapEl('input-found', inputEl, message);
 
      // Perplexity warm-up hack: React UI only enables send button after first keystroke
      if (serviceId === 'perplexity') {
@@ -3337,7 +3499,7 @@ async function sendMessage(slot, text) {
          pressEnter(inputEl);
        }
        await wait(60);
-       return { success: true };
+       return { success: true, diag };
      }
 
      fillInput(inputEl, message);
@@ -3361,7 +3523,7 @@ async function sendMessage(slot, text) {
      }
 
      await wait(60);
-     return { success: sent };
+     return { success: sent, diag };
    })();
  `;
 
@@ -3369,6 +3531,10 @@ async function sendMessage(slot, text) {
     let result;
     try {
       result = await webview.executeJavaScript(code);
+      if (debugModeToggle?.checked) {
+        console.log(`[${slot}] send-diag:`, JSON.stringify(result?.diag || {}));
+        mergeLog(`${slot} send diagnostic`, 'info', result?.diag || {});
+      }
       if (!result || !result.success) {
         throw new Error("First attempt failed");
       }
@@ -3376,10 +3542,14 @@ async function sendMessage(slot, text) {
       console.warn("[" + slot + "] Retry sending...");
       await new Promise(r => setTimeout(r, 1000));
       result = await webview.executeJavaScript(code);
+      if (debugModeToggle?.checked) {
+        console.log(`[${slot}] send-diag (retry):`, JSON.stringify(result?.diag || {}));
+        mergeLog(`${slot} send diagnostic retry`, 'info', result?.diag || {});
+      }
     }
 
     if (result && result.success === false) {
-      console.error(`[${slot}] Error:`, result.error);
+      console.error(`[${slot}] Error:`, result.error, debugModeToggle?.checked ? `| diag: ${JSON.stringify(result?.diag || {})}` : '');
       setStatus(slot, window.AggregationControl?.SLOT_STATUS?.ERROR || 'error', { temporary: true });
     } else {
       setStatus(slot, window.AggregationControl?.SLOT_STATUS?.SENT || 'success', { temporary: true });
@@ -3607,6 +3777,7 @@ function initMergePanel() {
   refreshAggregationBtn = document.getElementById('refresh-aggregation-btn');
   debugLogDiv = document.getElementById('merge-debug-log');
   debugClearBtn = document.getElementById('debug-clear-btn');
+  debugModeToggle = document.getElementById('debug-mode-toggle');
 
   // Only wire up if panel elements exist
   if (!runMergeBtn) return;
@@ -3757,6 +3928,14 @@ function initMergePanel() {
   debugClearBtn?.addEventListener('click', () => {
     if (debugLogDiv) debugLogDiv.innerHTML = '';
   });
+
+  if (debugModeToggle) {
+    debugModeToggle.checked = localStorage.getItem(DEBUG_MODE_STATE_KEY) === 'true';
+    debugModeToggle.addEventListener('change', () => {
+      localStorage.setItem(DEBUG_MODE_STATE_KEY, debugModeToggle.checked ? 'true' : 'false');
+      mergeLog(`Debug mode ${debugModeToggle.checked ? 'enabled' : 'disabled'}`, 'info');
+    });
+  }
 
   // ---- Config Tabs ----
   const tabsBody = document.getElementById('config-tabs-body');
