@@ -669,7 +669,7 @@ final class MobileAppState: ObservableObject {
         // DEBUG: Log ingest details
         appendIngestEvent("ingest-start seq=\(sequence) session=\(existingSessionId ?? -1) responses=\(responses.count) replace=\(replaceExisting)")
 
-        let slotSourceURLs = currentSessionSnapshotSlotURLs()
+        let slotSourceURLs = await currentSessionSnapshotSlotURLsFresh()
         let scrapeMeta = slots
             .filter(\.isEnabled)
             .compactMap { slot -> IngestScrapeMetaRow? in
@@ -723,9 +723,9 @@ final class MobileAppState: ObservableObject {
                 name: String(prompt.prefix(60)).ifEmpty("Session"),
                 dreamSessionId: sessionId,
                 slotStates: slots,
-                slotURLs: currentSessionSnapshotSlotURLs(),
+                slotURLs: slotSourceURLs,
                 noteId: result.noteId,
-                slotLiveURLs: currentSessionSnapshotSlotURLs()
+                slotLiveURLs: slotSourceURLs
             )
             Task.detached {
                 _ = await SessionManager().syncSessionToDatabase(snapshot)
@@ -1030,6 +1030,17 @@ final class MobileAppState: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             return ("slot-\(slot.id)", liveURL.isEmpty ? slot.url : liveURL)
         })
+    }
+
+    private func currentSessionSnapshotSlotURLsFresh() async -> [String: String] {
+        var result: [String: String] = [:]
+        for slot in slots {
+            let liveURL = await webModel(for: slot.id)
+                .resolveCurrentLocationHrefForSnapshot()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            result["slot-\(slot.id)"] = liveURL.isEmpty ? slot.url : liveURL
+        }
+        return result
     }
 
     private func restoreStoredQuestionContextForCurrentSlots() -> SessionSnapshot? {

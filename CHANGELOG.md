@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.0
+
+- fix iPhone collect/session save to read each WebView's live `window.location.href` immediately before ingest, so new sessions persist concrete provider chat URLs instead of base service URLs
+
 ## 2.2.0
 
 - add `-allowProvisioningUpdates` to the canonical iPhone deploy script so local device installs can refresh Apple development provisioning automatically after profile/certificate changes

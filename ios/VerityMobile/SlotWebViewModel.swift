@@ -1397,6 +1397,20 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         }
     }
 
+    func resolveCurrentLocationHrefForSnapshot() async -> String {
+        let script = "String(window.location && window.location.href || '')"
+        let jsHref = (try? await webView.evaluateJavaScript(script) as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackHref = (webView.url?.absoluteString ?? currentLocationHref)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = jsHref?.isEmpty == false ? jsHref! : fallbackHref
+        if !resolved.isEmpty {
+            currentLocationHref = resolved
+            recordEvent("snapshot-href \(resolved)")
+        }
+        return resolved
+    }
+
     private func refreshPopupRuntimeSnapshot(for popup: WKWebView) {
         let script = """
         (function() {
