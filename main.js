@@ -25,10 +25,6 @@ app.commandLine.appendSwitch('ignore-certificate-errors');
 app.commandLine.appendSwitch('enable-mixed-content');
 app.commandLine.appendSwitch('allow-running-insecure-content');
 
-// Throttle background rendering to reduce idle CPU usage
-app.commandLine.appendSwitch('disable-background-timer-throttling', 'false');
-app.commandLine.appendSwitch('disable-renderer-backgrounding', 'false');
-
 const { importCookiesFromJSON } = require('./cookie-import-simple');
 
 let mainWindow;

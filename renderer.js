@@ -2090,11 +2090,30 @@ function getCurrentSlotEnabledState() {
 }
 
 const slotEnabledState = loadSlotEnabledState();
+
+function updateSlotToggleVisualState(slot) {
+  const checkbox = toggles[slot];
+  const wrapper = checkbox?.closest('.toggle');
+  if (!wrapper || !checkbox) return;
+  wrapper.classList.toggle('inactive', !checkbox.checked);
+}
+
+function updateSlotWindowVisualState(slot) {
+  const checkbox = toggles[slot];
+  const container = getSlotContainer(slot);
+  if (!container || !checkbox) return;
+  container.classList.toggle('inactive', !checkbox.checked);
+}
+
 SLOTS.forEach(slot => {
   if (!toggles[slot]) return;
   toggles[slot].checked = slotEnabledState[slot] !== false;
+  updateSlotToggleVisualState(slot);
+  updateSlotWindowVisualState(slot);
   toggles[slot].addEventListener('change', () => {
     slotEnabledState[slot] = !!toggles[slot].checked;
+    updateSlotToggleVisualState(slot);
+    updateSlotWindowVisualState(slot);
     saveSlotEnabledState(slotEnabledState);
   });
 });
@@ -2140,6 +2159,32 @@ function getSlotToggleWrapper(slot) {
   return toggles[slot]?.closest('.toggle') || null;
 }
 
+function getSlotVisualIndex(slot) {
+  const visualIndex = slotVisualOrder.indexOf(slot);
+  if (visualIndex >= 0) return visualIndex;
+  return SLOTS.indexOf(slot);
+}
+
+function getSlotSplitSide(slot) {
+  const visualIndex = getSlotVisualIndex(slot);
+  return visualIndex === 0 || visualIndex === 2 ? 'left' : 'right';
+}
+
+function normalizeSplitSlotsForVisualOrder() {
+  const activeSlots = [leftSplitSlot, rightSplitSlot].filter((slot) => slot && SLOTS.includes(slot));
+  leftSplitSlot = null;
+  rightSplitSlot = null;
+
+  activeSlots.forEach((slot) => {
+    const side = getSlotSplitSide(slot);
+    if (side === 'left' && !leftSplitSlot) {
+      leftSplitSlot = slot;
+    } else if (side === 'right' && !rightSplitSlot) {
+      rightSplitSlot = slot;
+    }
+  });
+}
+
 function applySlotVisualOrder() {
   slotVisualOrder.forEach((slot, index) => {
     const container = getSlotContainer(slot);
@@ -2154,6 +2199,11 @@ function applySlotVisualOrder() {
       const toggle = getSlotToggleWrapper(slot);
       if (toggle) toggle.style.order = String(index);
     });
+  }
+
+  if (leftSplitSlot || rightSplitSlot) {
+    normalizeSplitSlotsForVisualOrder();
+    renderSplitSlotLayout();
   }
 }
 
@@ -2374,24 +2424,7 @@ function updateExpandedSlotControls() {
   });
 }
 
-function getSlotSplitSide(slot) {
-  return slot === 'slot-1' || slot === 'slot-3' ? 'left' : 'right';
-}
-
-function setSplitSlot(slot) {
-  const nextSlot = slot && SLOTS.includes(slot) ? slot : null;
-  if (nextSlot) {
-    expandedSlot = null;
-    if (getSlotSplitSide(nextSlot) === 'left') {
-      leftSplitSlot = leftSplitSlot === nextSlot ? null : nextSlot;
-    } else {
-      rightSplitSlot = rightSplitSlot === nextSlot ? null : nextSlot;
-    }
-  } else {
-    leftSplitSlot = null;
-    rightSplitSlot = null;
-  }
-
+function renderSplitSlotLayout() {
   const hasSplitSlot = !!leftSplitSlot || !!rightSplitSlot;
   webviewGridEl?.classList.toggle('split-slot', hasSplitSlot);
   webviewGridEl?.classList.toggle('expanded-slot', false);
@@ -2413,6 +2446,29 @@ function setSplitSlot(slot) {
   });
 
   updateExpandedSlotControls();
+}
+
+function setSplitSlot(slot) {
+  const nextSlot = slot && SLOTS.includes(slot) ? slot : null;
+  normalizeSplitSlotsForVisualOrder();
+
+  if (nextSlot) {
+    expandedSlot = null;
+    const wasActive = leftSplitSlot === nextSlot || rightSplitSlot === nextSlot;
+    if (wasActive) {
+      if (leftSplitSlot === nextSlot) leftSplitSlot = null;
+      if (rightSplitSlot === nextSlot) rightSplitSlot = null;
+    } else if (getSlotSplitSide(nextSlot) === 'left') {
+      leftSplitSlot = nextSlot;
+    } else {
+      rightSplitSlot = nextSlot;
+    }
+  } else {
+    leftSplitSlot = null;
+    rightSplitSlot = null;
+  }
+
+  renderSplitSlotLayout();
 }
 
 function setExpandedSlot(slot) {
@@ -5693,6 +5749,8 @@ async function loadSession(sessionId) {
     slotEnabled[slot] = hasExplicitFlag ? sessionSlotEnabled[slot] !== false : hasSlotData;
     if (toggles[slot]) {
       toggles[slot].checked = slotEnabled[slot];
+      updateSlotToggleVisualState(slot);
+      updateSlotWindowVisualState(slot);
     }
   });
   saveSlotEnabledState(slotEnabled);
@@ -5806,19 +5864,8 @@ async function openSessionInNewWindow(sessionId) {
   }
 }
 
-async function updateSessionsUI(options = {}) {
-  const container = document.getElementById('sessions-list');
+function renderSessionsIntoContainer(container, sessions) {
   if (!container) return;
-
-  const allSessions = await loadSessionsList(options);
-  const query = String(sessionsSearchQuery || '').trim().toLowerCase();
-  const sessions = query
-    ? allSessions.filter((session) => {
-        const sessionId = String(session.sessionId ?? session.session_id ?? '').trim().toLowerCase();
-        const name = String(session.name || session.title || '').trim().toLowerCase();
-        return sessionId.includes(query) || name.includes(query);
-      })
-    : allSessions;
   container.innerHTML = '';
 
   if (sessionsNotice.text) {
@@ -5907,22 +5954,44 @@ async function updateSessionsUI(options = {}) {
   });
 }
 
+async function updateSessionsUI(options = {}) {
+  const containers = Array.from(document.querySelectorAll('.sessions-list'));
+  if (containers.length === 0) return;
+
+  const allSessions = await loadSessionsList(options);
+  const query = String(sessionsSearchQuery || '').trim().toLowerCase();
+  const sessions = query
+    ? allSessions.filter((session) => {
+        const sessionId = String(session.sessionId ?? session.session_id ?? '').trim().toLowerCase();
+        const name = String(session.name || session.title || '').trim().toLowerCase();
+        return sessionId.includes(query) || name.includes(query);
+      })
+    : allSessions;
+  containers.forEach((container) => renderSessionsIntoContainer(container, sessions));
+}
+
 // Initialize sessions UI and save button
 async function initSessionsTab() {
   await updateSessionsUI();
 
-  const saveSessionBtn = document.getElementById('save-session-btn');
-  const resetSessionBtn = document.getElementById('reset-session-btn');
-  const refreshSessionsBtn = document.getElementById('refresh-sessions-btn');
-  const sessionsSearchInput = document.getElementById('sessions-search-input');
-  if (sessionsSearchInput) {
+  const sessionsPopup = document.getElementById('sessions-popup');
+  const sessionsPopupClose = document.getElementById('sessions-popup-close');
+  const syncSessionsSearchInputs = () => {
+    document.querySelectorAll('.sessions-search-input').forEach((input) => {
+      if (input.value !== sessionsSearchQuery) input.value = sessionsSearchQuery;
+    });
+  };
+
+  document.querySelectorAll('.sessions-search-input').forEach((sessionsSearchInput) => {
     sessionsSearchInput.value = sessionsSearchQuery;
     sessionsSearchInput.addEventListener('input', (event) => {
       sessionsSearchQuery = String(event?.target?.value || '');
+      syncSessionsSearchInputs();
       updateSessionsUI().catch(err => console.warn('[sessions-search] refresh failed:', err));
     });
-  }
-  if (saveSessionBtn) {
+  });
+
+  document.querySelectorAll('.save-session-action').forEach((saveSessionBtn) => {
     saveSessionBtn.addEventListener('click', async () => {
       const originalText = 'Save Current';
       saveSessionBtn.disabled = true;
@@ -5940,8 +6009,9 @@ async function initSessionsTab() {
         }, 1500);
       }
     });
-  }
-  if (resetSessionBtn) {
+  });
+
+  document.querySelectorAll('.reset-session-action').forEach((resetSessionBtn) => {
     resetSessionBtn.addEventListener('click', async () => {
       const originalText = 'Reset';
       resetSessionBtn.disabled = true;
@@ -5962,8 +6032,9 @@ async function initSessionsTab() {
         }, 1200);
       }
     });
-  }
-  if (refreshSessionsBtn) {
+  });
+
+  document.querySelectorAll('.refresh-sessions-action').forEach((refreshSessionsBtn) => {
     refreshSessionsBtn.addEventListener('click', async () => {
       const originalText = 'Refresh';
       refreshSessionsBtn.disabled = true;
@@ -5981,7 +6052,60 @@ async function initSessionsTab() {
         }, 1200);
       }
     });
-  }
+  });
+
+  const closeSessionsPopup = () => {
+    sessionsPopup?.classList.remove('open');
+    ingestSessionIndicator?.classList.remove('open');
+  };
+
+  const positionSessionsPopup = () => {
+    if (!sessionsPopup || !ingestSessionIndicator) return;
+    const indicatorRect = ingestSessionIndicator.getBoundingClientRect();
+    const popupWidth = Math.min(430, window.innerWidth - 28);
+    const estimatedHeight = Math.min(620, window.innerHeight - 96);
+    const left = Math.max(14, Math.min(window.innerWidth - popupWidth - 14, indicatorRect.left + indicatorRect.width / 2 - popupWidth / 2));
+    const top = Math.max(14, indicatorRect.top - estimatedHeight - 10);
+    sessionsPopup.style.setProperty('--sessions-popup-left', `${Math.round(left)}px`);
+    sessionsPopup.style.setProperty('--sessions-popup-top', `${Math.round(top)}px`);
+  };
+
+  const toggleSessionsPopup = async () => {
+    if (!sessionsPopup || !ingestSessionIndicator) return;
+    const nextOpen = !sessionsPopup.classList.contains('open');
+    if (nextOpen) positionSessionsPopup();
+    sessionsPopup.classList.toggle('open', nextOpen);
+    ingestSessionIndicator.classList.toggle('open', nextOpen);
+    if (nextOpen) {
+      await updateSessionsUI();
+      positionSessionsPopup();
+    }
+  };
+
+  ingestSessionIndicator?.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleSessionsPopup().catch(err => console.warn('[sessions-popup] open failed:', err));
+  });
+  sessionsPopupClose?.addEventListener('click', (event) => {
+    event.preventDefault();
+    closeSessionsPopup();
+  });
+  sessionsPopup?.addEventListener('click', (event) => {
+    event.stopPropagation();
+  });
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (sessionsPopup?.contains(target) || ingestSessionIndicator?.contains(target)) return;
+    closeSessionsPopup();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeSessionsPopup();
+  });
+  window.addEventListener('resize', () => {
+    if (sessionsPopup?.classList.contains('open')) positionSessionsPopup();
+  });
 
   // Auto-restore session passed via window query string (opened from another window)
   try {

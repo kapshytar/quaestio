@@ -29,6 +29,43 @@
     .webview-container {
       position: relative; background: #2a2a2a; border-radius: 4px;
       overflow: hidden; display: flex; flex-direction: column;
+      transition: opacity 0.2s, border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    }
+    .webview-container.inactive {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
+        #26282d;
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,0.06),
+        inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+    .webview-container.inactive::after {
+      content: '';
+      position: absolute;
+      inset: 28px 0 0 0;
+      background: rgba(118, 124, 136, 0.18);
+      backdrop-filter: blur(10px) saturate(90%);
+      -webkit-backdrop-filter: blur(10px) saturate(90%);
+      pointer-events: auto;
+      z-index: 5;
+    }
+    .webview-container.inactive .webview-header {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)),
+        rgba(42, 45, 52, 0.92);
+      border-bottom-color: rgba(255,255,255,0.07);
+      opacity: 0.82;
+    }
+    .webview-container.inactive .webview-wrapper {
+      filter: grayscale(0.15) brightness(0.78) saturate(0.8);
+    }
+    .webview-container.inactive .webview-controls,
+    .webview-container.inactive .webview-url,
+    .webview-container.inactive .service-select,
+    .webview-container.inactive .webview-label,
+    .webview-container.inactive .nav-btn,
+    .webview-container.inactive .zoom-level {
+      opacity: 0.7;
     }
     .webview-container.hidden-by-expansion { display: none; }
     .webview-container.expanded {
@@ -113,15 +150,37 @@
     #toggles.hidden { display: none !important; }
     .toggle {
       display: flex; align-items: center; gap: 4px; padding: 3px 8px;
-      background: #333; border-radius: 4px; cursor: pointer;
-      transition: background 0.2s; font-size: 11px;
+      background: #333; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; cursor: pointer;
+      transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, backdrop-filter 0.2s;
+      font-size: 11px;
     }
     .toggle:hover { background: #3a3a3a; }
+    .toggle.inactive {
+      color: rgba(210, 214, 220, 0.46);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015)),
+        rgba(122, 128, 138, 0.20);
+      border-color: rgba(255,255,255,0.08);
+      backdrop-filter: blur(12px) saturate(120%);
+      -webkit-backdrop-filter: blur(12px) saturate(120%);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        inset 0 -1px 0 rgba(0,0,0,0.18);
+      opacity: 0.72;
+    }
+    .toggle.inactive:hover {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)),
+        rgba(138, 144, 154, 0.24);
+      border-color: rgba(255,255,255,0.11);
+      opacity: 0.86;
+    }
     .toggle[draggable="true"] { cursor: grab; }
     .toggle.dragging { opacity: 0.55; outline: 1px dashed #77a7ff; }
     .toggle.drag-over { background: #26466f; outline: 1px solid #77a7ff; }
     .toggle input { width: 14px; height: 14px; cursor: pointer; accent-color: #0066ff; }
     .toggle label { cursor: pointer; user-select: none; font-size: 11px; font-weight: 500; }
+    .toggle.inactive label, .toggle.inactive .status { opacity: 0.72; }
     .status { margin-left: 2px; font-size: 11px; min-width: 12px; text-align: center; color: #888; }
     .status.sent, .status.success { color: #00ff88; }
     .status.sending, .status.pending, .status.waiting { color: #ffaa00; }
@@ -293,12 +352,39 @@
       gap: 1px; padding: 2px 4px;
     }
     .cfg-tab {
-      flex: 1; padding: 4px 6px; background: transparent; border: none;
+      flex: 1; padding: 4px 6px; background: transparent; border: 1px solid transparent;
       color: #666; font-size: 10px; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.4px; cursor: pointer; border-radius: 4px; transition: all 0.15s;
+      letter-spacing: 0.4px; cursor: pointer; border-radius: 4px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s, backdrop-filter 0.15s;
     }
-    .cfg-tab:hover { color: #aaa; background: #2a2a2a; }
-    .cfg-tab.active { color: #fff; background: #383838; }
+    .cfg-tab:not(.active) {
+      color: rgba(214, 218, 224, 0.42);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.015)),
+        rgba(128, 134, 144, 0.22);
+      border-color: rgba(255, 255, 255, 0.10);
+      backdrop-filter: blur(14px) saturate(125%);
+      -webkit-backdrop-filter: blur(14px) saturate(125%);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+      opacity: 0.72;
+    }
+    .cfg-tab:hover {
+      color: rgba(230, 234, 239, 0.72);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02)),
+        rgba(144, 150, 160, 0.26);
+      border-color: rgba(255, 255, 255, 0.14);
+      opacity: 0.9;
+    }
+    .cfg-tab.active {
+      color: #fff;
+      background: linear-gradient(180deg, #3d3d3d, #343434);
+      border-color: rgba(255, 255, 255, 0.06);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+      opacity: 1;
+    }
     #config-tabs-collapse {
       margin-left: auto; padding: 3px 7px; background: transparent; border: none;
       color: #555; font-size: 10px; cursor: pointer; border-radius: 4px; transition: all 0.15s; flex-shrink: 0;
@@ -310,12 +396,39 @@
     .cfg-tab-pane.active { display: flex; }
     #prompt-subtabs-bar { display: flex; gap: 2px; background: #1a1a1a; border-radius: 5px; padding: 2px; }
     .prompt-subtab {
-      flex: 1; padding: 3px 6px; background: transparent; border: none;
+      flex: 1; padding: 3px 6px; background: transparent; border: 1px solid transparent;
       color: #555; font-size: 10px; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.3px; cursor: pointer; border-radius: 3px; transition: all 0.15s;
+      letter-spacing: 0.3px; cursor: pointer; border-radius: 3px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s, backdrop-filter 0.15s;
     }
-    .prompt-subtab:hover { color: #aaa; }
-    .prompt-subtab.active { color: #ddd; background: #2e2e2e; }
+    .prompt-subtab:not(.active) {
+      color: rgba(210, 214, 220, 0.40);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015)),
+        rgba(128, 134, 144, 0.18);
+      border-color: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(12px) saturate(120%);
+      -webkit-backdrop-filter: blur(12px) saturate(120%);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.16);
+      opacity: 0.7;
+    }
+    .prompt-subtab:hover {
+      color: rgba(230, 234, 239, 0.68);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)),
+        rgba(144, 150, 160, 0.22);
+      border-color: rgba(255, 255, 255, 0.12);
+      opacity: 0.88;
+    }
+    .prompt-subtab.active {
+      color: #ddd;
+      background: linear-gradient(180deg, #313131, #2a2a2a);
+      border-color: rgba(255, 255, 255, 0.05);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+      opacity: 1;
+    }
     .prompt-subtab-pane { display: none; flex-direction: column; gap: 8px; }
     .prompt-subtab-pane.active { display: flex; }
     .config-field { display: flex; flex-direction: column; gap: 4px; }
@@ -504,8 +617,13 @@
     #ingest-session-indicator {
       display: flex; align-items: center; gap: 5px; padding: 3px 10px;
       background: #333; border: 1px solid #555; border-radius: 12px;
-      font-size: 11px; color: #aaa; user-select: none;
+      font-size: 11px; color: #aaa; user-select: none; cursor: pointer;
       transition: all 0.2s;
+    }
+    #ingest-session-indicator:hover { background: #3a3a3a; color: #ddd; }
+    #ingest-session-indicator.open {
+      border-color: #7a8fa8;
+      box-shadow: 0 0 0 1px rgba(122, 143, 168, 0.22);
     }
     #ingest-session-indicator .session-dot {
       width: 7px; height: 7px; border-radius: 50%; background: #555; transition: background 0.2s; flex-shrink: 0;
@@ -514,6 +632,58 @@
       background: #1f3a18; border-color: #44aa44; color: #8fe88f;
     }
     #ingest-session-indicator.active .session-dot { background: #8fe88f; }
+    #sessions-popup {
+      position: fixed;
+      left: var(--sessions-popup-left, 14px);
+      top: var(--sessions-popup-top, auto);
+      z-index: 3000;
+      width: min(430px, calc(100vw - 28px));
+      max-height: min(620px, calc(100vh - 96px));
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px;
+      background: rgba(26, 26, 26, 0.96);
+      border: 1px solid #444;
+      border-radius: 10px;
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(16px) saturate(120%);
+      -webkit-backdrop-filter: blur(16px) saturate(120%);
+    }
+    #sessions-popup.open { display: flex; }
+    #sessions-popup-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 24px;
+    }
+    #sessions-popup-title {
+      flex: 1;
+      color: #ddd;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    #sessions-popup-close {
+      width: 24px;
+      min-width: 24px;
+      padding: 0;
+      color: #aaa;
+    }
+    #sessions-popup-actions {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 6px;
+    }
+    #sessions-popup-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-height: 120px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
     #incognito-mode-btn.active {
       background: #2a2138; border-color: #8b6fd6; color: #e4d8ff;
     }
@@ -797,6 +967,19 @@
         </div>
         <button class="control-btn" id="toggle-merge-panel-btn">Merge ></button>
       </div>
+      <div id="sessions-popup" aria-label="Sessions popup">
+        <div id="sessions-popup-header">
+          <span id="sessions-popup-title">Sessions</span>
+          <button class="control-btn" id="sessions-popup-close" title="Close">x</button>
+        </div>
+        <div id="sessions-popup-actions">
+          <button class="control-btn save-session-action">Save Current</button>
+          <button class="control-btn reset-session-action">Reset</button>
+          <button class="control-btn refresh-sessions-action">Refresh</button>
+        </div>
+        <input class="sessions-search sessions-search-input" type="text" placeholder="Search by session id or title...">
+        <div id="sessions-popup-list" class="sessions-list"></div>
+      </div>
       <div id="input-container">
         <textarea id="message-input" rows="1" placeholder="Type message. Enter sends, Shift+Enter adds a line..." autocomplete="off"></textarea>
         <button id="send-btn">Send</button>
@@ -901,14 +1084,14 @@
             <!-- Sessions tab -->
             <div class="cfg-tab-pane" id="cfg-pane-sessions">
               <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
-                <button class="control-btn" id="save-session-btn" style="flex:1;">Save Current</button>
-                <button class="control-btn" id="reset-session-btn">Reset</button>
-                <button class="control-btn" id="refresh-sessions-btn">Refresh</button>
+                <button class="control-btn save-session-action" id="save-session-btn" style="flex:1;">Save Current</button>
+                <button class="control-btn reset-session-action" id="reset-session-btn">Reset</button>
+                <button class="control-btn refresh-sessions-action" id="refresh-sessions-btn">Refresh</button>
               </div>
               <div style="margin-bottom:8px;">
-                <input id="sessions-search-input" class="sessions-search" type="text" placeholder="Search by session id or title...">
+                <input id="sessions-search-input" class="sessions-search sessions-search-input" type="text" placeholder="Search by session id or title...">
               </div>
-              <div id="sessions-list" style="display:flex;flex-direction:column;gap:4px;flex:1;overflow-y:auto;"></div>
+              <div id="sessions-list" class="sessions-list" style="display:flex;flex-direction:column;gap:4px;flex:1;overflow-y:auto;"></div>
             </div>
           </div>
         </div>

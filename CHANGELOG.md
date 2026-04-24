@@ -4,6 +4,12 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.107.0
+- add a sessions popup above the bottom session indicator with session-only actions, search, load, new-window, and delete controls
+- make split view follow the current visual slot order after dragging slots between positions
+- dim disabled slot windows with a translucent glass overlay while preserving the existing slot toggle controls
+- remove misleading `disable-* = false` Chromium switches so background throttling can work normally again
+
 ## 1.106.0
 - preserve multiline prompt sending for ChatGPT/Claude/Grok with the paste-based contenteditable path while keeping Gemini on its proven legacy send path
 - add a Debug mode checkbox that gates slot send diagnostics in the Debug tab
