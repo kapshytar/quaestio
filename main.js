@@ -1160,7 +1160,7 @@ ipcMain.handle('dream-delete-session', async (_event, sessionTarget) => {
 
 ipcMain.handle('dream-list-project-tree-data', async () => {
   try {
-    const tags = await callSupabaseRestGet('tags?select=id,name&order=name.asc');
+    const tags = await callSupabaseRestGet('tags?select=id,name,color&order=name.asc');
     const tagParents = await callSupabaseRestGet('tag_parents?select=tag_id,parent_id', true);
     return {
       ok: true,

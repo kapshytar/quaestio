@@ -1840,11 +1840,13 @@ async function loadProjectSlotUrls(projectId) {
 
 function buildProjectTreeNodes(tags, tagParents) {
   const namesById = new Map();
+  const colorsById = new Map();
   (Array.isArray(tags) ? tags : []).forEach((row) => {
     const id = String(row?.id || '').trim();
     const name = String(row?.name || '').trim();
     if (!id || !name) return;
     namesById.set(id, name);
+    if (row?.color) colorsById.set(id, String(row.color).trim());
   });
   if (namesById.size === 0) return [];
 
@@ -1889,7 +1891,12 @@ function buildProjectTreeNodes(tags, tagParents) {
     const childNodes = (childrenByParent.get(nodeId) || [])
       .filter((childId) => !nextPath.has(childId))
       .map((childId) => buildNode(childId, nextPath));
-    return { id: nodeId, name: namesById.get(nodeId) || '', children: childNodes };
+    return { 
+      id: nodeId, 
+      name: namesById.get(nodeId) || '', 
+      color: colorsById.get(nodeId) || '',
+      children: childNodes 
+    };
   };
 
   const rootIds = childrenByParent.get(null) || [];
@@ -1987,6 +1994,7 @@ function setProjectPanelVisible(visible) {
   isProjectPanelVisible = !!visible;
   if (projectPanelEl) projectPanelEl.classList.toggle('visible', isProjectPanelVisible);
   if (projectPanelScrimEl) projectPanelScrimEl.classList.toggle('visible', isProjectPanelVisible);
+  document.body.classList.toggle('project-panel-open', isProjectPanelVisible);
 }
 
 async function loadAndRenderProjectTree() {
@@ -2029,8 +2037,29 @@ function hideProjectPanel() {
 async function setActiveProject(projectId) {
   const normalizedId = projectId ? String(projectId).trim() : '';
   activeProjectId = normalizedId || null;
+  
+  let activeProjectColor = '';
+  if (activeProjectId) {
+    const findColor = (nodes) => {
+      for (const node of nodes) {
+        if (node.id === activeProjectId) return node.color;
+        if (node.children) {
+          const childColor = findColor(node.children);
+          if (childColor) return childColor;
+        }
+      }
+      return '';
+    };
+    activeProjectColor = findColor(projectTreeNodes);
+  }
+
   if (projectSelectorBtn) {
     projectSelectorBtn.classList.toggle('active', !!activeProjectId);
+    if (activeProjectId && activeProjectColor) {
+      projectSelectorBtn.style.color = activeProjectColor;
+    } else {
+      projectSelectorBtn.style.color = '';
+    }
   }
   renderProjectPanel(projectTreeNodes);
 

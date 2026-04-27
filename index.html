@@ -219,29 +219,52 @@
       box-sizing: border-box; white-space: nowrap; transition: background 0.2s, color 0.2s, border-color 0.2s;
     }
     .control-btn:hover { background: #444; color: #fff; }
-    #project-selector-btn {
-      width: 28px;
-      min-width: 28px;
+    #project-selector-btn.left-grid-chevron-btn {
+      position: absolute;
+      left: calc(100% - 13px);
+      right: auto;
+      top: calc(50% - (var(--bottom-panel-height, 100px) / 2));
+      z-index: 5000;
+      width: 30px;
+      min-width: 30px;
+      height: 26px;
+      min-height: 26px;
+      margin: 0;
       padding: 0;
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      color: rgba(244, 239, 228, 0.38);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       font-size: 0;
       line-height: 1;
-      text-align: center;
+      transform: translateY(-50%);
+      transition: color 0.2s, transform 0.2s, background 0.2s;
     }
-    #project-selector-btn::before {
+    #project-selector-btn.left-grid-chevron-btn::before {
       content: '';
-      width: 14px;
-      height: 11px;
-      display: inline-block;
-      border: 2px solid currentColor;
-      border-radius: 3px 3px 2px 2px;
-      border-top-width: 5px;
-      box-sizing: border-box;
-      opacity: 0.9;
+      width: 9px;
+      height: 9px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(-45deg);
+      transition: transform 0.2s;
     }
-    #project-selector-btn.active {
-      color: #9cc4ff;
-      border-color: #3b82f6;
-      background: #1a2a42;
+    #project-selector-btn.left-grid-chevron-btn:hover,
+    #project-selector-btn.left-grid-chevron-btn:focus {
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      outline: none;
+      color: var(--accent-strong) !important;
+    }
+    #project-selector-btn.left-grid-chevron-btn.active {
+      color: #b8d7ff;
+    }
+    #project-panel.visible #project-selector-btn.left-grid-chevron-btn::before {
+      transform: rotate(135deg);
     }
     #project-panel-scrim {
       position: fixed;
@@ -1588,7 +1611,6 @@
           <div class="toggle" draggable="true" data-slot="slot-2" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-2" checked><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
           <div class="toggle" draggable="true" data-slot="slot-3" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-3" checked><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
           <div class="toggle" draggable="true" data-slot="slot-4" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-4" checked><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
-          <button class="control-btn" id="project-selector-btn" title="Projects" aria-label="Projects">Folder</button>
           <button class="control-btn" id="import-cookies-btn">Import Cookies</button>
           <button class="control-btn" id="incognito-mode-btn" title="Use provider-native temporary chat where available">Temp mode</button>
           <div id="mobile-ua-toggle" title="Switch to mobile user-agent (loads lighter mobile pages)">
@@ -1623,6 +1645,7 @@
 
   <div id="project-panel-scrim"></div>
   <aside id="project-panel" aria-label="Project selector">
+    <button class="control-btn left-grid-chevron-btn" id="project-selector-btn" title="Projects" aria-label="Projects"></button>
     <div id="project-panel-header">
       <span id="project-panel-title">Projects</span>
       <button id="project-panel-close" title="Close projects">x</button>
