@@ -54,9 +54,13 @@
         "textarea": [
           "textarea#chat-input",
           "textarea[placeholder*=\"Message\"]",
-          "textarea[placeholder*=\"Ask\"]"
+          "textarea[placeholder*=\"Ask\"]",
+          "textarea"
         ],
-        "contenteditable": [],
+        "contenteditable": [
+          "div[contenteditable=\"true\"][role=\"textbox\"]",
+          "div[contenteditable=\"true\"]"
+        ],
         "button": [
           "button[data-testid=\"send-button\"]",
           "button[aria-label*=\"Send\"]",

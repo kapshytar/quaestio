@@ -60,7 +60,12 @@ object ServiceConfig {
                 textarea = listOf(
                     "textarea#chat-input",
                     "textarea[placeholder*=\"Message\"]",
-                    "textarea[placeholder*=\"Ask\"]"
+                    "textarea[placeholder*=\"Ask\"]",
+                    "textarea"
+                ),
+                contenteditable = listOf(
+                    "div[contenteditable=\"true\"][role=\"textbox\"]",
+                    "div[contenteditable=\"true\"]"
                 ),
                 button = listOf(
                     "button[data-testid=\"send-button\"]",

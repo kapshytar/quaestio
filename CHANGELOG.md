@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.1
+
+- align DeepSeek selectors with the desktop reference by adding the generic textarea fallback and contenteditable fallbacks to the shared mobile service presets
+
+
 ## 2.3.0
 
 - fix iPhone collect/session save to read each WebView's live `window.location.href` immediately before ingest, so new sessions persist concrete provider chat URLs instead of base service URLs
