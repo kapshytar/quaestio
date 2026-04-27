@@ -2419,9 +2419,7 @@ document.addEventListener('keydown', (event) => {
 let collapsed = localStorage.getItem('top-collapsed');
 collapsed = collapsed === 'true';
 
-if (collapsed) {
-  togglesContainer.classList.add('hidden');
-}
+togglesContainer?.classList.remove('hidden');
 
 function updateToolsChevron() {
   collapseBtn?.classList.toggle('tools-open', !collapsed);
@@ -2440,7 +2438,6 @@ syncBottomPanelHeightVar();
 
 collapseBtn.addEventListener('click', () => {
   collapsed = !collapsed;
-  togglesContainer.classList.toggle('hidden', collapsed);
   localStorage.setItem('top-collapsed', collapsed);
   updateToolsChevron();
   requestAnimationFrame(syncBottomPanelHeightVar);

@@ -4,6 +4,7 @@ const sidePanelToggle = document.getElementById('side-panel-toggle');
 const resizeHandle = document.getElementById('resize-handle');
 const toggleMergePanelBtn = document.getElementById('toggle-merge-panel-btn');
 const mainContent = document.getElementById('main-content');
+const sidePanelWrapper = document.getElementById('side-panel-wrapper');
 
 // Side panel state
 let isPanelCollapsed = false;
@@ -19,12 +20,14 @@ function updatePanelChevron() {
 // Toggle side panel
 function toggleSidePanel() {
   isPanelCollapsed = !isPanelCollapsed;
-  
+
   if (isPanelCollapsed) {
     sidePanel.classList.add('collapsed');
+    sidePanelWrapper?.classList.add('collapsed');
     mainContent.classList.add('full-width');
     mainContent.classList.remove('with-panel');
   } else {
+    sidePanelWrapper?.classList.remove('collapsed');
     sidePanel.classList.remove('collapsed');
     mainContent.classList.add('with-panel');
     mainContent.classList.remove('full-width');
@@ -69,7 +72,6 @@ function stopResize() {
 }
 
 function doResize(clientX) {
-  const sidePanelWrapper = document.getElementById('side-panel-wrapper');
   const wrapperRight = sidePanelWrapper
     ? sidePanelWrapper.getBoundingClientRect().right
     : window.innerWidth;
@@ -80,6 +82,7 @@ function doResize(clientX) {
 
   const clampedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
   sidePanel.style.width = clampedWidth + 'px';
+  document.documentElement.style.setProperty('--side-panel-width', `${clampedWidth}px`);
   mainContent.style.width = '';
   mainContent.style.flex = '1 1 0';
 }
@@ -125,8 +128,10 @@ const savedCollapsed = localStorage.getItem('merge-panel-collapsed');
 if (savedCollapsed === 'true') {
   isPanelCollapsed = true;
   sidePanel?.classList.add('collapsed');
+  sidePanelWrapper?.classList.add('collapsed');
   mainContent?.classList.add('full-width');
 } else {
+  sidePanelWrapper?.classList.remove('collapsed');
   mainContent?.classList.add('with-panel');
   mainContent.style.flex = '1 1 0';
   // Restore saved width (clamped to current screen)
@@ -136,6 +141,7 @@ if (savedCollapsed === 'true') {
     const maxWidth = Math.floor(window.innerWidth / 3);
     if (w >= 300 && w <= maxWidth) {
       sidePanel.style.width = w + 'px';
+      document.documentElement.style.setProperty('--side-panel-width', `${w}px`);
     }
   }
 }
