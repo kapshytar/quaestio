@@ -9,6 +9,13 @@ const mainContent = document.getElementById('main-content');
 let isPanelCollapsed = false;
 let isResizing = false;
 
+function updatePanelChevron() {
+  if (!toggleMergePanelBtn) return;
+  toggleMergePanelBtn.textContent = '';
+  toggleMergePanelBtn.classList.toggle('panel-open', !isPanelCollapsed);
+  toggleMergePanelBtn.setAttribute('aria-expanded', (!isPanelCollapsed).toString());
+}
+
 // Toggle side panel
 function toggleSidePanel() {
   isPanelCollapsed = !isPanelCollapsed;
@@ -17,13 +24,12 @@ function toggleSidePanel() {
     sidePanel.classList.add('collapsed');
     mainContent.classList.add('full-width');
     mainContent.classList.remove('with-panel');
-    if (toggleMergePanelBtn) toggleMergePanelBtn.textContent = 'Merge >';
   } else {
     sidePanel.classList.remove('collapsed');
     mainContent.classList.add('with-panel');
     mainContent.classList.remove('full-width');
-    if (toggleMergePanelBtn) toggleMergePanelBtn.textContent = 'Merge <';
   }
+  updatePanelChevron();
   
   localStorage.setItem('merge-panel-collapsed', isPanelCollapsed.toString());
   console.log('[SidePanel] Toggled, collapsed:', isPanelCollapsed);
@@ -120,7 +126,6 @@ if (savedCollapsed === 'true') {
   isPanelCollapsed = true;
   sidePanel?.classList.add('collapsed');
   mainContent?.classList.add('full-width');
-  if (toggleMergePanelBtn) toggleMergePanelBtn.textContent = 'Merge >';
 } else {
   mainContent?.classList.add('with-panel');
   mainContent.style.flex = '1 1 0';
@@ -134,5 +139,6 @@ if (savedCollapsed === 'true') {
     }
   }
 }
+updatePanelChevron();
 
 console.log('[SidePanel] Initialized, collapsed:', isPanelCollapsed);

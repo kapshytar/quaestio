@@ -4,6 +4,84 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.107.26
+- size the desktop side-panel wrapper to the webview grid height so the side-panel chevron stays centered between the slot rows while remaining above the panel
+
+## 1.107.25
+- move the desktop side-panel chevron into the side-panel wrapper so it stays visible above the open panel at the panel boundary
+
+## 1.107.24
+- keep the desktop side-panel chevron at the right grid midpoint while raising it above the side panel so it remains visible when open
+
+## 1.107.23
+- move the desktop side-panel chevron to the top of the right grid edge
+
+## 1.107.22
+- move the desktop Tools chevron to the bottom edge of the webview grid so it sits between the lower slots and the controls panel
+
+## 1.107.21
+- flip the desktop center address-bar chevron direction while keeping its grid-centered placement
+
+## 1.107.20
+- align the desktop side-panel chevron flush with the right edge of the webview grid
+
+## 1.107.19
+- extend inactive-slot blur to the top of each slot when address bars are hidden so no unblurred header strip remains
+
+## 1.107.18
+- reverse the desktop address-bar chevron direction to match the side-panel affordance
+
+## 1.107.17
+- anchor desktop grid chevrons inside the webview grid itself and reverse the side-panel chevron direction for clearer open/close affordance
+
+## 1.107.16
+- remove the desktop side panel header area and its `Merge Responses` title now that the panel is controlled by the external chevron
+
+## 1.107.15
+- align desktop center-grid chevrons to the slot-row divider and keep the address-bar chevron visible when the bottom tools row is collapsed
+
+## 1.107.14
+- move the desktop side-panel toggle into the right center gap as a transparent chevron and replace the Projects text button with a folder icon
+
+## 1.107.13
+- move the desktop address-bar toggle out of the bottom controls and render it as a transparent center-grid chevron between slot rows
+
+## 1.107.12
+- anchor the desktop Tools chevron to the composer so it does not jump when tools collapse, and render it as a CSS chevron instead of a text glyph
+
+## 1.107.11
+- make the desktop Tools chevron fully transparent except for the glyph, match the side-panel chevron size, and correct its open/closed direction
+
+## 1.107.10
+- make inactive desktop slot headers visually match active headers by removing stale dimming opacity/background differences from the toolbar chrome
+
+## 1.107.9
+- move the desktop Tools chevron into the gap above the composer and make its button chrome fully transparent
+
+## 1.107.8
+- normalize all four desktop slot headers to the same compact dimensions across active and inactive states
+
+## 1.107.7
+- make the desktop Tools chevron centered above the composer with a transparent hit target and muted hover-only affordance
+
+## 1.107.6
+- further compact all four desktop webview headers so split/full controls fit even when the merge side panel is wide
+
+## 1.107.5
+- make desktop webview headers compact again so provider, navigation, URL, zoom, split, and full controls remain visible when the side panel is wide
+
+## 1.107.4
+- replace the bottom Tools text button with a compact composer-adjacent chevron and keep Merge config sections collapsed by default on startup
+
+## 1.107.3
+- compact the desktop bottom controls, restore the composer to its prior size, and replace the text Merge toggle with a right-aligned side-panel chevron
+
+## 1.107.2
+- refresh the desktop visual system with a quieter Notion/Codex-style palette, softer surfaces, compact controls, and cleaner composer/panel styling
+
+## 1.107.1
+- fix split view placement after visual slot reordering so the focused split slot fills its side without leaving an empty black quadrant
+
 ## 1.107.0
 - add a sessions popup above the bottom session indicator with session-only actions, search, load, new-window, and delete controls
 - make split view follow the current visual slot order after dragging slots between positions

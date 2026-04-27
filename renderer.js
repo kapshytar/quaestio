@@ -2170,6 +2170,26 @@ function getSlotSplitSide(slot) {
   return visualIndex === 0 || visualIndex === 2 ? 'left' : 'right';
 }
 
+function getSlotVisualCell(slot) {
+  const visualIndex = Math.max(0, getSlotVisualIndex(slot));
+  const column = (visualIndex % 2) + 1;
+  const row = Math.floor(visualIndex / 2) + 1;
+  return { column, row };
+}
+
+function clearSlotGridPlacement(container) {
+  if (!container) return;
+  container.style.gridColumn = '';
+  container.style.gridRow = '';
+}
+
+function placeSlotInGridCell(container, slot) {
+  if (!container) return;
+  const { column, row } = getSlotVisualCell(slot);
+  container.style.gridColumn = `${column} / ${column + 1}`;
+  container.style.gridRow = `${row} / ${row + 1}`;
+}
+
 function normalizeSplitSlotsForVisualOrder() {
   const activeSlots = [leftSplitSlot, rightSplitSlot].filter((slot) => slot && SLOTS.includes(slot));
   leftSplitSlot = null;
@@ -2369,17 +2389,35 @@ if (collapsed) {
   togglesContainer.classList.add('hidden');
 }
 
+function updateToolsChevron() {
+  collapseBtn?.classList.toggle('tools-open', !collapsed);
+  collapseBtn?.setAttribute('aria-expanded', (!collapsed).toString());
+  document.getElementById('bottom-panel')?.classList.toggle('tools-collapsed', collapsed);
+}
+
+function syncBottomPanelHeightVar() {
+  const bottomPanel = document.getElementById('bottom-panel');
+  if (!bottomPanel) return;
+  document.documentElement.style.setProperty('--bottom-panel-height', `${bottomPanel.offsetHeight}px`);
+}
+
+updateToolsChevron();
+syncBottomPanelHeightVar();
+
 collapseBtn.addEventListener('click', () => {
   collapsed = !collapsed;
   togglesContainer.classList.toggle('hidden', collapsed);
   localStorage.setItem('top-collapsed', collapsed);
+  updateToolsChevron();
+  requestAnimationFrame(syncBottomPanelHeightVar);
 });
+
+window.addEventListener('resize', syncBottomPanelHeightVar);
 
 // ========== ADDRESS BAR TOGGLE ==========
 let addressBarVisible = true;
 
-toggleAddressBarBtn.addEventListener('click', () => {
-  addressBarVisible = !addressBarVisible;
+function applyAddressBarVisibility() {
   const headers = document.querySelectorAll('.webview-header');
 
   headers.forEach(header => {
@@ -2390,15 +2428,23 @@ toggleAddressBarBtn.addEventListener('click', () => {
     }
   });
 
-  toggleAddressBarBtn.textContent = addressBarVisible ? 'Hide Address Bar' : 'Show Address Bar';
+  webviewGridEl?.classList.toggle('address-bars-hidden', !addressBarVisible);
+  toggleAddressBarBtn.classList.toggle('address-open', addressBarVisible);
+  toggleAddressBarBtn.setAttribute('aria-expanded', addressBarVisible.toString());
   localStorage.setItem('show-address-bar', addressBarVisible);
+}
+
+toggleAddressBarBtn.addEventListener('click', () => {
+  addressBarVisible = !addressBarVisible;
+  applyAddressBarVisibility();
 });
 
 // Restore address bar setting
 const showAddressBar = localStorage.getItem('show-address-bar');
 if (showAddressBar === 'false') {
-  toggleAddressBarBtn.click();
+  addressBarVisible = false;
 }
+applyAddressBarVisibility();
 
 function updateExpandedSlotControls() {
   document.querySelectorAll('.webview-header[data-slot]').forEach(header => {
@@ -2439,6 +2485,15 @@ function renderSplitSlotLayout() {
     const candidateSide = getSlotSplitSide(candidateSlot);
     const sameSideSplitSlot = candidateSide === 'left' ? leftSplitSlot : rightSplitSlot;
     const shouldHide = !!sameSideSplitSlot && sameSideSplitSlot !== candidateSlot;
+    if (!hasSplitSlot) {
+      clearSlotGridPlacement(container);
+    } else if (side) {
+      const column = side === 'left' ? 1 : 2;
+      container.style.gridColumn = `${column} / ${column + 1}`;
+      container.style.gridRow = '1 / -1';
+    } else {
+      placeSlotInGridCell(container, candidateSlot);
+    }
     container.classList.toggle('expanded', false);
     container.classList.toggle('split-left', side === 'left');
     container.classList.toggle('split-right', side === 'right');
@@ -2487,6 +2542,7 @@ function setExpandedSlot(slot) {
       ?.closest('.webview-container');
     if (!container) return;
     const isActive = expandedSlot === candidateSlot;
+    clearSlotGridPlacement(container);
     container.classList.toggle('expanded', isActive);
     container.classList.toggle('split-left', false);
     container.classList.toggle('split-right', false);
@@ -3996,7 +4052,7 @@ function initMergePanel() {
   // ---- Config Tabs ----
   const tabsBody = document.getElementById('config-tabs-body');
   const tabsCollapseBtn = document.getElementById('config-tabs-collapse');
-  // Always start collapsed G�� user can expand manually during session
+  // Always start collapsed; user can expand manually during the session.
   let tabsCollapsed = true;
 
   function applyTabsCollapsed() {

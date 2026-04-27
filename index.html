@@ -6,6 +6,29 @@
   <title>Verity (alpha)</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #11110f;
+      --bg-elevated: #171715;
+      --surface: #1d1c19;
+      --surface-soft: #24231f;
+      --surface-hover: #2d2b26;
+      --border-subtle: rgba(255, 248, 231, 0.08);
+      --border-strong: rgba(255, 248, 231, 0.16);
+      --text: #f4efe4;
+      --text-muted: #aaa397;
+      --text-faint: #726c62;
+      --accent: #d8b45f;
+      --accent-strong: #edc76d;
+      --success: #7bcf9a;
+      --danger: #e57676;
+      --warning: #d8a657;
+      --radius-sm: 7px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+      --shadow-soft: 0 18px 50px rgba(0, 0, 0, 0.34);
+      --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", "Consolas", monospace;
+    }
     html, body { height: 100%; overflow: hidden; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -18,6 +41,7 @@
     #webview-grid {
       display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
       flex: 1; gap: 2px; background: #000; padding: 2px;
+      position: relative;
     }
     #webview-grid.expanded-slot {
       grid-template-columns: 1fr; grid-template-rows: 1fr;
@@ -80,10 +104,6 @@
     }
     .webview-container.split-left { grid-column: 1 / 2; }
     .webview-container.split-right { grid-column: 2 / 3; }
-    #webview-grid.split-slot .webview-container:nth-child(1) { grid-column: 1 / 2; grid-row: 1 / 2; }
-    #webview-grid.split-slot .webview-container:nth-child(2) { grid-column: 2 / 3; grid-row: 1 / 2; }
-    #webview-grid.split-slot .webview-container:nth-child(3) { grid-column: 1 / 2; grid-row: 2 / 3; }
-    #webview-grid.split-slot .webview-container:nth-child(4) { grid-column: 2 / 3; grid-row: 2 / 3; }
     #webview-grid.split-slot .webview-container.split-left,
     #webview-grid.split-slot .webview-container.split-right { grid-row: 1 / -1; }
     .webview-header {
@@ -142,11 +162,12 @@
     #send-btn:hover { background: #0052cc; transform: translateY(-1px); }
     #send-btn:active { transform: translateY(0); }
     #collapse-toolbar {
-      padding: 10px 16px; background: #333; border: 1px solid #555;
+      padding: 0; background: #333; border: 1px solid #555;
       border-radius: 8px; color: #fff; cursor: pointer; font-size: 16px; transition: all 0.2s;
     }
     #collapse-toolbar:hover { background: #444; }
-    #toggles { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    #bottom-toolbar-row { display: flex; gap: 8px; align-items: center; }
+    #toggles { display: flex; gap: 8px; align-items: center; flex: 1; flex-wrap: wrap; min-width: 0; }
     #toggles.hidden { display: none !important; }
     .toggle {
       display: flex; align-items: center; gap: 4px; padding: 3px 8px;
@@ -202,9 +223,20 @@
       width: 28px;
       min-width: 28px;
       padding: 0;
-      font-size: 15px;
+      font-size: 0;
       line-height: 1;
       text-align: center;
+    }
+    #project-selector-btn::before {
+      content: '';
+      width: 14px;
+      height: 11px;
+      display: inline-block;
+      border: 2px solid currentColor;
+      border-radius: 3px 3px 2px 2px;
+      border-top-width: 5px;
+      box-sizing: border-box;
+      opacity: 0.9;
     }
     #project-selector-btn.active {
       color: #9cc4ff;
@@ -313,7 +345,7 @@
       white-space: nowrap;
       flex: 1;
     }
-    #side-panel-wrapper { display: flex; flex-shrink: 0; position: relative; }
+    #side-panel-wrapper { display: flex; flex-shrink: 0; position: relative; height: calc(100% - var(--bottom-panel-height, 100px)); }
     #side-panel {
       width: 420px; min-width: 300px; max-width: 45vw;
       background: #2a2a2a; border-left: 2px solid #444;
@@ -819,6 +851,602 @@
       color: #9a9a9a;
       font-style: italic;
     }
+
+    /* Minimal desktop refresh: quiet surfaces, softer controls, less dev-tool chrome. */
+    body {
+      font-family: var(--font-ui);
+      background:
+        radial-gradient(circle at 18% 0%, rgba(216, 180, 95, 0.10), transparent 34%),
+        radial-gradient(circle at 92% 12%, rgba(126, 107, 73, 0.08), transparent 30%),
+        var(--bg);
+      color: var(--text);
+    }
+    #main-content { background: var(--bg); }
+    #webview-grid {
+      gap: 1px;
+      padding: 1px;
+      background: rgba(255, 248, 231, 0.07);
+    }
+    .webview-container {
+      background: var(--surface);
+      border-radius: var(--radius-md);
+      box-shadow: inset 0 0 0 1px var(--border-subtle);
+    }
+    .webview-container.expanded,
+    .webview-container.split-left,
+    .webview-container.split-right {
+      border-radius: 0;
+    }
+    .webview-container.inactive {
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.008)),
+        #20201d;
+      box-shadow: inset 0 0 0 1px rgba(255, 248, 231, 0.055);
+    }
+    .webview-container.inactive::after {
+      inset: 34px 0 0 0;
+      background: rgba(35, 34, 31, 0.34);
+      backdrop-filter: blur(12px) saturate(85%);
+      -webkit-backdrop-filter: blur(12px) saturate(85%);
+    }
+    .webview-container.inactive .webview-wrapper {
+      filter: grayscale(0.12) brightness(0.72) saturate(0.82);
+    }
+    .webview-header {
+      min-height: 34px;
+      padding: 5px 8px;
+      gap: 6px;
+      background: rgba(18, 18, 16, 0.94);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .webview-header {
+      min-width: 0;
+      min-height: 28px;
+      padding: 3px 6px;
+      gap: 4px;
+    }
+    .service-select {
+      width: 68px;
+      min-width: 48px;
+      max-width: 68px;
+      height: 22px;
+      padding: 1px 4px;
+      font-size: 10px;
+      flex: 0 1 68px;
+    }
+    .webview-label {
+      min-width: 16px;
+      font-size: 10px;
+      flex: 0 0 auto;
+    }
+    .nav-btn,
+    .zoom-btn {
+      min-width: 21px;
+      height: 22px;
+      padding: 1px 5px;
+      font-size: 10px;
+      flex: 0 0 auto;
+    }
+    .webview-url {
+      min-width: 36px;
+      height: 22px;
+      padding: 1px 6px;
+      font-size: 10px;
+      flex: 1 1 54px;
+    }
+    .webview-controls {
+      gap: 2px;
+      margin-left: 2px;
+      flex: 0 0 auto;
+      min-width: max-content;
+    }
+    .zoom-level {
+      min-width: 24px;
+      font-size: 9px;
+    }
+    .split-slot-btn,
+    .expand-slot-btn {
+      min-width: 27px;
+      padding-inline: 4px;
+      font-size: 9px;
+    }
+    .service-select,
+    .nav-btn,
+    .zoom-btn,
+    .control-btn,
+    #collapse-toolbar,
+    #about-close-btn,
+    #project-panel-close,
+    #sessions-popup-close,
+    .session-item-action {
+      background: var(--surface-soft);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      box-shadow: none;
+    }
+    .service-select:hover,
+    .nav-btn:hover,
+    .zoom-btn:hover,
+    .control-btn:hover,
+    #collapse-toolbar:hover,
+    #about-close-btn:hover,
+    #project-panel-close:hover,
+    #sessions-popup-close:hover,
+    .session-item-action:hover {
+      background: var(--surface-hover);
+      border-color: var(--border-strong);
+      color: var(--text);
+    }
+    .service-select:focus,
+    .webview-url:focus,
+    #message-input:focus,
+    .config-field input:focus,
+    .config-field select:focus,
+    .config-field textarea:focus,
+    .sessions-search:focus,
+    #search-input:focus,
+    #clarification-input:focus {
+      border-color: rgba(216, 180, 95, 0.82);
+      box-shadow: 0 0 0 3px rgba(216, 180, 95, 0.13);
+      outline: none;
+    }
+    .webview-label {
+      color: var(--text-faint);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .webview-url {
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .webview-url:focus {
+      background: rgba(255, 255, 255, 0.055);
+      color: var(--text);
+    }
+    .zoom-level { color: var(--text-faint); }
+    .split-slot-btn.active,
+    .expand-slot-btn.active {
+      background: rgba(216, 180, 95, 0.17);
+      border-color: rgba(216, 180, 95, 0.48);
+      color: var(--accent-strong);
+    }
+    #bottom-panel {
+      padding: 7px 12px 9px;
+      background: rgba(17, 17, 15, 0.96);
+      border-top: 1px solid var(--border-subtle);
+      box-shadow: 0 -14px 40px rgba(0, 0, 0, 0.24);
+      position: relative;
+    }
+    #bottom-panel.tools-collapsed {
+      padding-top: 9px;
+    }
+    #bottom-toolbar-row { gap: 8px; }
+    #toggles { gap: 7px; }
+    .toggle,
+    #mobile-ua-toggle,
+    #ingest-session-indicator {
+      min-height: 26px;
+      padding: 0 9px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+    }
+    .toggle:hover,
+    #mobile-ua-toggle:hover,
+    #ingest-session-indicator:hover {
+      background: rgba(255, 255, 255, 0.07);
+      border-color: var(--border-strong);
+      color: var(--text);
+    }
+    .toggle.inactive {
+      background: rgba(255, 255, 255, 0.025);
+      border-color: rgba(255, 248, 231, 0.055);
+      color: rgba(244, 239, 228, 0.46);
+      opacity: 0.72;
+      box-shadow: none;
+    }
+    .toggle.dragging,
+    .toggle.drag-over {
+      outline-color: var(--accent-strong);
+      background: rgba(216, 180, 95, 0.14);
+    }
+    .toggle input {
+      width: 12px;
+      height: 12px;
+      accent-color: var(--accent);
+    }
+    .toggle label,
+    .status,
+    #mobile-ua-label,
+    #ingest-session-label {
+      font-size: 10px;
+    }
+    .status.sent,
+    .status.success,
+    .status.ready { color: var(--success); }
+    .status.sending,
+    .status.pending,
+    .status.waiting,
+    .status.scraping { color: var(--warning); }
+    .status.error { color: var(--danger); }
+    #input-container {
+      position: relative;
+      gap: 8px;
+      margin-top: 8px;
+      align-items: stretch;
+    }
+    #bottom-panel.tools-collapsed #input-container {
+      margin-top: 0;
+    }
+    #message-input {
+      min-height: 42px;
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.35;
+      transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
+    }
+    #message-input::placeholder { color: var(--text-faint); }
+    #send-btn {
+      padding: 0 24px;
+      background: var(--text);
+      color: #11110f;
+      border-radius: 8px;
+      font-weight: 750;
+      transition: background 0.16s, transform 0.16s;
+    }
+    #send-btn:hover {
+      background: #fff9ec;
+      transform: translateY(-1px);
+    }
+    #collapse-toolbar {
+      padding: 0;
+      border-radius: 8px;
+      font-weight: 650;
+      font-size: 13px;
+    }
+    .control-btn {
+      min-height: 26px;
+      padding: 0 9px;
+      font-size: 10px;
+    }
+    .panel-chevron-btn { display: none; }
+    #collapse-toolbar.tools-chevron-btn {
+      position: absolute;
+      left: 50%;
+      bottom: -13px;
+      z-index: 20;
+      width: 30px;
+      min-width: 30px;
+      height: 26px;
+      min-height: 26px;
+      margin: 0;
+      padding: 0;
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      color: rgba(244, 239, 228, 0.38);
+      font-size: 0;
+      line-height: 1;
+      transform: translateX(-50%);
+    }
+    #collapse-toolbar.tools-chevron-btn::before {
+      content: '';
+      width: 9px;
+      height: 9px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(-135deg);
+    }
+    #collapse-toolbar.tools-chevron-btn:hover {
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      color: var(--accent-strong);
+    }
+    #collapse-toolbar.tools-chevron-btn:focus,
+    #collapse-toolbar.tools-chevron-btn:active {
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      outline: none;
+    }
+    #collapse-toolbar.tools-chevron-btn.tools-open {
+      transform: translateX(-50%);
+    }
+    #collapse-toolbar.tools-chevron-btn.tools-open::before {
+      transform: rotate(45deg);
+    }
+    #toggle-address-bar-btn.center-grid-chevron-btn {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      z-index: 20;
+      width: 30px;
+      min-width: 30px;
+      height: 26px;
+      min-height: 26px;
+      margin: 0;
+      padding: 0;
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      color: rgba(244, 239, 228, 0.38);
+      font-size: 0;
+      line-height: 1;
+      transform: translate(-50%, -50%);
+    }
+    #toggle-address-bar-btn.center-grid-chevron-btn::before {
+      content: '';
+      width: 9px;
+      height: 9px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(45deg);
+    }
+    #toggle-address-bar-btn.center-grid-chevron-btn:hover,
+    #toggle-address-bar-btn.center-grid-chevron-btn:focus,
+    #toggle-address-bar-btn.center-grid-chevron-btn:active {
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      outline: none;
+      color: var(--accent-strong);
+    }
+    #toggle-address-bar-btn.center-grid-chevron-btn.address-open::before {
+      transform: rotate(-135deg);
+    }
+    #toggle-merge-panel-btn.side-grid-chevron-btn {
+      position: absolute;
+      left: -17px;
+      top: 50%;
+      z-index: 5000;
+      width: 30px;
+      min-width: 30px;
+      height: 26px;
+      min-height: 26px;
+      margin: 0;
+      padding: 0;
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      color: rgba(244, 239, 228, 0.38);
+      display: inline-flex;
+      font-size: 0;
+      line-height: 1;
+      transform: translateY(-50%);
+    }
+    #toggle-merge-panel-btn.side-grid-chevron-btn::before {
+      content: '';
+      width: 9px;
+      height: 9px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(135deg);
+    }
+    #toggle-merge-panel-btn.side-grid-chevron-btn:hover,
+    #toggle-merge-panel-btn.side-grid-chevron-btn:focus,
+    #toggle-merge-panel-btn.side-grid-chevron-btn:active {
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      outline: none;
+      color: var(--accent-strong);
+    }
+    #toggle-merge-panel-btn.side-grid-chevron-btn.panel-open::before {
+      transform: rotate(-45deg);
+    }
+    #side-panel {
+      background: rgba(23, 23, 21, 0.98);
+      border-left: 1px solid var(--border-subtle);
+      box-shadow: -20px 0 50px rgba(0, 0, 0, 0.20);
+    }
+    #side-panel-header,
+    #sessions-popup-header,
+    #project-panel-header,
+    #about-dialog-header {
+      background: transparent;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    #side-panel-title,
+    #sessions-popup-title,
+    #project-panel-title,
+    #about-dialog-title {
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+    #side-panel-content::-webkit-scrollbar-track,
+    #sessions-popup-list::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #side-panel-content::-webkit-scrollbar-thumb,
+    #sessions-popup-list::-webkit-scrollbar-thumb {
+      background: rgba(255, 248, 231, 0.16);
+      border-radius: 999px;
+    }
+    #config-tabs-panel,
+    #merge-result,
+    #merge-debug-log,
+    #sessions-list,
+    #project-panel,
+    #about-dialog,
+    #sessions-popup,
+    .about-section {
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-soft);
+    }
+    #config-tabs-bar,
+    #prompt-subtabs-bar {
+      background: rgba(255, 255, 255, 0.035);
+      border-bottom: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      gap: 4px;
+      padding: 4px;
+    }
+    .cfg-tab,
+    .prompt-subtab {
+      border-radius: var(--radius-sm);
+      color: var(--text-faint);
+      letter-spacing: 0;
+      text-transform: none;
+    }
+    .cfg-tab.active,
+    .prompt-subtab.active {
+      background: var(--bg);
+      border-color: var(--border-subtle);
+      color: var(--text);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+    }
+    .config-field label,
+    .about-meta-label,
+    .session-item-date,
+    .session-item-models,
+    .session-count,
+    #merge-status {
+      color: var(--text-faint);
+    }
+    .config-field input,
+    .config-field select,
+    .config-field textarea,
+    .sessions-search,
+    #search-input,
+    #clarification-input {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      color: var(--text);
+    }
+    .search-result-item,
+    .session-item,
+    .about-changelog-item,
+    .debug-entry .debug-body {
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 248, 231, 0.055);
+      border-radius: var(--radius-md);
+    }
+    .session-item {
+      border-left: 0;
+    }
+    .session-item:hover,
+    .search-result-item:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: var(--border-subtle);
+    }
+    .session-item-id,
+    .about-changelog-version,
+    .about-section h3 {
+      color: var(--accent-strong);
+    }
+    #run-merge-btn,
+    #clarification-send-btn {
+      background: var(--accent);
+      border-color: transparent;
+      color: #15120b;
+      border-radius: var(--radius-md);
+      font-weight: 750;
+    }
+    #run-merge-btn:hover,
+    #clarification-send-btn:hover {
+      background: var(--accent-strong);
+    }
+    #project-panel-scrim,
+    #about-dialog-scrim,
+    #sessions-popup-scrim {
+      background: rgba(5, 5, 4, 0.50);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+    /* Final header normalization: keep all four slot toolbars identical and compact. */
+    .webview-header {
+      min-width: 0;
+      min-height: 26px;
+      height: 26px;
+      padding: 2px 5px;
+      gap: 3px;
+      overflow: hidden;
+    }
+    .webview-container.inactive .webview-header {
+      min-height: 26px;
+      height: 26px;
+      padding: 2px 5px;
+      background: rgba(18, 18, 16, 0.94);
+      border-bottom: 1px solid var(--border-subtle);
+      opacity: 1;
+    }
+    .webview-container.inactive .webview-controls,
+    .webview-container.inactive .webview-url,
+    .webview-container.inactive .service-select,
+    .webview-container.inactive .webview-label,
+    .webview-container.inactive .nav-btn,
+    .webview-container.inactive .zoom-btn,
+    .webview-container.inactive .zoom-level {
+      opacity: 1;
+    }
+    .webview-container.inactive::after {
+      inset: 26px 0 0 0;
+    }
+    #webview-grid.address-bars-hidden .webview-container.inactive::after {
+      inset: 0;
+    }
+    .webview-header .service-select {
+      width: 62px;
+      min-width: 42px;
+      max-width: 62px;
+      height: 21px;
+      padding: 0 4px;
+      font-size: 10px;
+      flex: 0 1 62px;
+    }
+    .webview-header .webview-label {
+      min-width: 15px;
+      font-size: 10px;
+      flex: 0 0 auto;
+    }
+    .webview-header .nav-btn,
+    .webview-header .zoom-btn {
+      min-width: 20px;
+      height: 21px;
+      padding: 0 4px;
+      border-radius: 6px;
+      font-size: 10px;
+      line-height: 1;
+      flex: 0 0 auto;
+    }
+    .webview-header .webview-url {
+      min-width: 28px;
+      height: 21px;
+      padding: 0 6px;
+      border-radius: 6px;
+      font-size: 10px;
+      flex: 1 1 44px;
+    }
+    .webview-header .webview-controls {
+      gap: 2px;
+      margin-left: 1px;
+      min-width: max-content;
+      flex: 0 0 auto;
+    }
+    .webview-header .zoom-level {
+      min-width: 22px;
+      font-size: 9px;
+    }
+    .webview-header .split-slot-btn,
+    .webview-header .expand-slot-btn {
+      min-width: 26px;
+      padding-inline: 3px;
+      font-size: 9px;
+    }
     @media (max-width: 720px) {
       .about-meta-grid {
         grid-template-columns: 1fr;
@@ -946,26 +1574,28 @@
         </div>
         <div class="webview-wrapper"><webview id="webview-slot-4" partition="persist:shared" allowpopups></webview></div>
       </div>
+      <button class="control-btn center-grid-chevron-btn" id="toggle-address-bar-btn" title="Toggle address bars" aria-label="Toggle address bars" aria-expanded="true"></button>
+      <button class="control-btn tools-chevron-btn" id="collapse-toolbar" title="Toggle tools" aria-label="Toggle tools" aria-expanded="true"></button>
     </div>
     <div id="bottom-panel">
-      <div id="toggles">
-        <div class="toggle" draggable="true" data-slot="slot-1" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-1" checked><label for="toggle-slot-1" id="label-slot-1">Slot 1</label><span class="status" id="status-slot-1"></span></div>
-        <div class="toggle" draggable="true" data-slot="slot-2" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-2" checked><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
-        <div class="toggle" draggable="true" data-slot="slot-3" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-3" checked><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
-        <div class="toggle" draggable="true" data-slot="slot-4" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-4" checked><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
-        <button class="control-btn" id="project-selector-btn" title="Projects">Proj</button>
-        <button class="control-btn" id="toggle-address-bar-btn">Hide Address Bar</button>
-        <button class="control-btn" id="import-cookies-btn">Import Cookies</button>
-        <button class="control-btn" id="incognito-mode-btn" title="Use provider-native temporary chat where available">Temp mode</button>
-        <div id="mobile-ua-toggle" title="Switch to mobile user-agent (loads lighter mobile pages)">
-          <span class="ua-dot"></span>
-          <span id="mobile-ua-label">Mobile</span>
+      <div id="bottom-toolbar-row">
+        <div id="toggles">
+          <div class="toggle" draggable="true" data-slot="slot-1" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-1" checked><label for="toggle-slot-1" id="label-slot-1">Slot 1</label><span class="status" id="status-slot-1"></span></div>
+          <div class="toggle" draggable="true" data-slot="slot-2" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-2" checked><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
+          <div class="toggle" draggable="true" data-slot="slot-3" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-3" checked><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
+          <div class="toggle" draggable="true" data-slot="slot-4" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-4" checked><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
+          <button class="control-btn" id="project-selector-btn" title="Projects" aria-label="Projects">Folder</button>
+          <button class="control-btn" id="import-cookies-btn">Import Cookies</button>
+          <button class="control-btn" id="incognito-mode-btn" title="Use provider-native temporary chat where available">Temp mode</button>
+          <div id="mobile-ua-toggle" title="Switch to mobile user-agent (loads lighter mobile pages)">
+            <span class="ua-dot"></span>
+            <span id="mobile-ua-label">Mobile</span>
+          </div>
+          <div id="ingest-session-indicator" title="Dream Tracker session id status">
+            <span class="session-dot"></span>
+            <span id="ingest-session-label">Session ID</span>
+          </div>
         </div>
-        <div id="ingest-session-indicator" title="Dream Tracker session id status">
-          <span class="session-dot"></span>
-          <span id="ingest-session-label">Session ID</span>
-        </div>
-        <button class="control-btn" id="toggle-merge-panel-btn">Merge ></button>
       </div>
       <div id="sessions-popup" aria-label="Sessions popup">
         <div id="sessions-popup-header">
@@ -983,7 +1613,6 @@
       <div id="input-container">
         <textarea id="message-input" rows="1" placeholder="Type message. Enter sends, Shift+Enter adds a line..." autocomplete="off"></textarea>
         <button id="send-btn">Send</button>
-        <button id="collapse-toolbar">Tools</button>
       </div>
     </div>
   </div>
@@ -999,14 +1628,11 @@
 
   <!-- Side Panel Wrapper -->
   <div id="side-panel-wrapper">
+    <button class="control-btn side-grid-chevron-btn" id="toggle-merge-panel-btn" title="Toggle side panel" aria-label="Toggle side panel" aria-expanded="true"></button>
     <!-- Resize Handle -->
     <div id="resize-handle" title="Drag to resize panel"></div>
     <!-- Side Panel - Merge -->
     <div id="side-panel">
-      <div id="side-panel-header">
-        <span id="side-panel-title">Merge Responses</span>
-        <button id="side-panel-toggle" title="Close Panel">x</button>
-      </div>
       <div id="side-panel-content">
         <!-- Config Tabs -->
         <div id="config-tabs-panel">
