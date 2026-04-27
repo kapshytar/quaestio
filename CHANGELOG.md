@@ -4,6 +4,9 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.107.27
+- align desktop DeepSeek and Perplexity send selectors with the shared mobile service presets so selector parity checks pass across desktop, iOS, and Android
+
 ## 1.107.26
 - size the desktop side-panel wrapper to the webview grid height so the side-panel chevron stays centered between the slot rows while remaining above the panel
 

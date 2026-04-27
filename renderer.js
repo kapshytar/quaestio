@@ -49,6 +49,7 @@ const SERVICE_PRESETS = {
       button: [
         'button[data-testid="send-button"]',
         'button[aria-label*="Send"]',
+        'button[class*="send"]',
         'button[type="submit"]'
       ]
     }
@@ -68,11 +69,15 @@ const SERVICE_PRESETS = {
         '[role="textbox"][contenteditable="true"]'
       ],
       button: [
+        'button[aria-label*="Ask"]',
         'button[aria-label*="Submit"]',
         'button[aria-label*="Send"]',
+        'button[aria-label*="query"]',
         'button[data-testid*="submit"]',
         'button[data-testid*="send"]',
-        'button[type="submit"]'
+        'button[type="submit"]',
+        'button.bg-super',
+        'button.bg-sideBar'
       ]
     }
   }
