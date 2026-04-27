@@ -345,13 +345,13 @@
       white-space: nowrap;
       flex: 1;
     }
-    #side-panel-wrapper { display: flex; flex-shrink: 0; position: relative; height: calc(100% - var(--bottom-panel-height, 100px)); }
+    #side-panel-wrapper { display: flex; flex-shrink: 0; position: relative; height: calc(100% - var(--bottom-panel-height, 100px)); overflow: visible; }
     #side-panel {
       width: 420px; min-width: 300px; max-width: 45vw;
       background: #2a2a2a; border-left: 2px solid #444;
       display: flex; flex-direction: column; overflow: hidden;
       transition: transform 0.3s ease;
-      position: relative;
+      position: relative; height: calc(100% + var(--bottom-panel-height, 100px));
     }
     #side-panel.collapsed {
       transform: translateX(100%);
@@ -1221,10 +1221,14 @@
       box-shadow: none !important;
       color: rgba(244, 239, 228, 0.38);
       display: inline-flex;
+      align-items: center;
+      justify-content: center;
       font-size: 0;
       line-height: 1;
       transform: translateY(-50%);
     }
+
+
     #toggle-merge-panel-btn.side-grid-chevron-btn::before {
       content: '';
       width: 9px;
