@@ -2504,6 +2504,7 @@ function updateExpandedSlotControls() {
 function renderSplitSlotLayout() {
   const hasSplitSlot = !!leftSplitSlot || !!rightSplitSlot;
   webviewGridEl?.classList.toggle('split-slot', hasSplitSlot);
+  webviewGridEl?.classList.toggle('both-split', !!leftSplitSlot && !!rightSplitSlot);
   webviewGridEl?.classList.toggle('expanded-slot', false);
 
   SLOTS.forEach(candidateSlot => {

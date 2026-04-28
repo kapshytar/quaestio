@@ -112,9 +112,7 @@
       align-items: center; gap: 6px; border-bottom: 1px solid #333; min-height: 28px;
     }
     .webview-header.hidden { display: none; }
-    .webview-container.expanded .webview-header.hidden,
-    .webview-container.split-left .webview-header.hidden,
-    .webview-container.split-right .webview-header.hidden { display: flex; }
+
     .service-select {
       background: #333; border: 1px solid #555; border-radius: 3px;
       color: #ccc; font-size: 10px; padding: 2px 4px; cursor: pointer; min-width: 70px;
@@ -1260,6 +1258,11 @@
     }
     #toggle-address-bar-btn.center-grid-chevron-btn.address-open::before {
       transform: rotate(-135deg);
+    }
+    #webview-grid.both-split #toggle-address-bar-btn.center-grid-chevron-btn,
+    #webview-grid.expanded-slot #toggle-address-bar-btn.center-grid-chevron-btn {
+      top: 0;
+      transform: translate(-50%, 0);
     }
     #toggle-merge-panel-btn.side-grid-chevron-btn {
       position: absolute;
