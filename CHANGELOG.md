@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.3.6
+
+- tint the iPhone saved-session `More`/`Hide` affordance with the same blue accent used by the other clients
+
+## 2.3.5
+
+- add `More`/`Hide` expansion for long iPhone saved-session names so iOS matches the shared 3-line session-list UI contract
+
+## 2.3.4
+
+- cap iPhone saved-session names at 3 visual lines in the Sessions picker, matching the cross-client session-list UI contract
+
+## 2.3.3
+
+- add icon refresh controls for iOS/Android Projects and Sessions pickers
+- cache mobile remote Projects/Sessions list refreshes for up to one day so opening pickers does not eagerly hit the backend unless manually refreshed
+- guard manual refresh actions with a short single-flight cooldown so repeated taps do not dispatch duplicate backend loads
+
 ## 2.3.2
 
 - apply the minimal public Quaestio branding layer to Android and iOS visible app labels while keeping package IDs, bundle IDs, project names, and bridge names unchanged

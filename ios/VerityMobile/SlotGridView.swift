@@ -116,9 +116,36 @@ struct SlotGridView: View {
     @State private var showsSettingsQuickMenu = false
     @State private var sessionSearchText = ""
     @State private var composerHeight: CGFloat = 22
+    @State private var projectRefreshLocked = false
+    @State private var sessionsRefreshLocked = false
+    @State private var expandedSessionTitleIds: Set<String> = []
 
     private var selectedSlot: SlotState? {
         appState.slots.first { $0.id == appState.selectedSlotId } ?? appState.slots.first
+    }
+
+    private func shouldShowSessionTitleMore(_ title: String) -> Bool {
+        title.count > 90 || title.filter(\.isNewline).count >= 3
+    }
+
+    private func refreshProjectsWithCooldown() {
+        guard !projectRefreshLocked else { return }
+        projectRefreshLocked = true
+        Task {
+            await appState.loadProjectTree(forceRefresh: true)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await MainActor.run { projectRefreshLocked = false }
+        }
+    }
+
+    private func refreshSessionsWithCooldown() {
+        guard !sessionsRefreshLocked else { return }
+        sessionsRefreshLocked = true
+        Task {
+            await appState.loadSessions(forceRefresh: true)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await MainActor.run { sessionsRefreshLocked = false }
+        }
     }
 
     var body: some View {
@@ -377,8 +404,9 @@ struct SlotGridView: View {
                 Section("Projects") {
                     if appState.projectTreeNodes.isEmpty {
                         Button("Load Projects") {
-                            Task { await appState.loadProjectTree() }
+                            refreshProjectsWithCooldown()
                         }
+                        .disabled(projectRefreshLocked)
                     } else {
                         ForEach(flattenProjects(appState.projectTreeNodes)) { node in
                             Button {
@@ -399,6 +427,16 @@ struct SlotGridView: View {
             }
             .navigationTitle("Projects")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        refreshProjectsWithCooldown()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(projectRefreshLocked)
+                    .accessibilityLabel("Refresh projects")
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Close") { showsProjectSheet = false }
                 }
@@ -449,8 +487,9 @@ struct SlotGridView: View {
                         }
                     } else if appState.availableSessions.isEmpty {
                         Button("Load Sessions") {
-                            Task { await appState.loadSessions() }
+                            refreshSessionsWithCooldown()
                         }
+                        .disabled(sessionsRefreshLocked)
                     } else if filteredSessions.isEmpty {
                         ContentUnavailableView(
                             "No Matching Sessions",
@@ -460,27 +499,50 @@ struct SlotGridView: View {
                         .foregroundStyle(AppTheme.textSecondary)
                     } else {
                         ForEach(filteredSessions) { session in
-                            Button {
-                                appState.loadSession(session)
-                                showsSessionSheet = false
-                            } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        Text(session.sessionId.map { "S\($0)" } ?? "S-")
-                                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                            .foregroundStyle(AppTheme.actionFill)
-                                        Text(appState.displaySessionName(session))
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundStyle(AppTheme.textPrimary)
-                                            .multilineTextAlignment(.leading)
-                                    }
+                            let sessionTitle = appState.displaySessionName(session)
+                            let isExpanded = expandedSessionTitleIds.contains(session.id)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Button {
+                                    appState.loadSession(session)
+                                    showsSessionSheet = false
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Text(session.sessionId.map { "S\($0)" } ?? "S-")
+                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                .foregroundStyle(AppTheme.actionFill)
+                                            Text(sessionTitle)
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundStyle(AppTheme.textPrimary)
+                                                .multilineTextAlignment(.leading)
+                                                .lineLimit(isExpanded ? nil : 3)
+                                                .truncationMode(.tail)
+                                        }
 
-                                    Text(formattedSessionTimestamp(session.timestamp))
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(AppTheme.textSecondary)
+                                        Text(formattedSessionTimestamp(session.timestamp))
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundStyle(AppTheme.textSecondary)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .buttonStyle(.plain)
+
+                                if shouldShowSessionTitleMore(sessionTitle) {
+                                    Button {
+                                        if isExpanded {
+                                            expandedSessionTitleIds.remove(session.id)
+                                        } else {
+                                            expandedSessionTitleIds.insert(session.id)
+                                        }
+                                    } label: {
+                                        Text(isExpanded ? "▴ Hide" : "▾ More")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(Color(red: 0.56, green: 0.69, blue: 1.0))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }
@@ -488,9 +550,13 @@ struct SlotGridView: View {
             .navigationTitle("Sessions")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Refresh") {
-                        Task { await appState.loadSessions() }
+                    Button {
+                        refreshSessionsWithCooldown()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
                     }
+                    .disabled(sessionsRefreshLocked)
+                    .accessibilityLabel("Refresh sessions")
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -502,6 +568,7 @@ struct SlotGridView: View {
             }
             .onDisappear {
                 sessionSearchText = ""
+                expandedSessionTitleIds.removeAll()
             }
         }
     }

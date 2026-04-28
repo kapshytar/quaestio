@@ -62,6 +62,10 @@ final class MobileAppState: ObservableObject {
     private static let slotUserAgentPresetsDefaultsKey = "verity.mobile.slotUserAgentPresets"
     private static let lastUserPromptDefaultsKey = "verity.mobile.lastUserPrompt"
     private static let globalPhoneZoomPercentDefaultsKey = "verity.mobile.globalPhoneZoomPercent"
+    private static let projectTreeDefaultsKey = "verity.mobile.projectTree"
+    private static let projectTreeLoadedAtDefaultsKey = "verity.mobile.projectTreeLoadedAt"
+    private static let sessionsLoadedAtDefaultsKey = "verity.mobile.sessionsLoadedAt"
+    private static let remoteListCacheTTL: TimeInterval = 24 * 60 * 60
     private static let defaultMergeAggregationPolicy = MergeAggregationPolicy(
         maxChecks: 12,
         waitIntervalMs: 2500,
@@ -113,6 +117,7 @@ final class MobileAppState: ObservableObject {
             self.lastUserPrompt = parallelState.sourcePrompt
         }
         self.activeProjectId = nil
+        self.projectTreeNodes = Self.loadPersistedProjectTree()
         self.sessionIndicatorText = Self.makeSessionIndicator(from: parallelState)
         if !hasActiveSessionLink() {
             self.slots = Self.slotsResetToPresetURLs(slots: self.slots, presets: presets)
@@ -224,7 +229,11 @@ final class MobileAppState: ObservableObject {
         statusMessage = "Cleared active session"
     }
 
-    func loadProjectTree() async {
+    func loadProjectTree(forceRefresh: Bool = false) async {
+        if !forceRefresh, !projectTreeNodes.isEmpty, Self.isFreshRemoteListCache(Self.loadPersistedProjectTreeLoadedAt()) {
+            return
+        }
+
         let rpcBaseURL = KeyObfuscation.getSupabaseRPCURL(nil)
         let apiKey = KeyObfuscation.getSupabaseAPIKey(nil)
         guard !rpcBaseURL.isEmpty, !apiKey.isEmpty else {
@@ -234,21 +243,27 @@ final class MobileAppState: ObservableObject {
 
         do {
             projectTreeNodes = try await fetchProjectTree(rpcBaseURL: rpcBaseURL, apiKey: apiKey)
+            Self.persistProjectTree(projectTreeNodes)
+            Self.persistProjectTreeLoadedAt(Date())
             statusMessage = projectTreeNodes.isEmpty ? "No projects found" : "Loaded \(projectTreeNodes.count) root project(s)"
         } catch {
             statusMessage = error.localizedDescription
-            projectTreeNodes = []
+            if projectTreeNodes.isEmpty {
+                projectTreeNodes = Self.loadPersistedProjectTree()
+            }
         }
     }
 
     func loadProjectTreeIfNeeded() async {
-        guard projectTreeNodes.isEmpty else { return }
         await loadProjectTree()
     }
 
-    func loadSessions() async {
+    func loadSessions(forceRefresh: Bool = false) async {
         let localSessions = sessionManager.getAllSessions()
         availableSessions = sortSessionsForDisplay(localSessions)
+        if !forceRefresh, Self.isFreshRemoteListCache(Self.loadPersistedSessionsLoadedAt()) {
+            return
+        }
 
         let rpcBaseURL = KeyObfuscation.getSupabaseRPCURL(nil)
         let apiKey = KeyObfuscation.getSupabaseAPIKey(nil)
@@ -274,11 +289,11 @@ final class MobileAppState: ObservableObject {
         }
 
         availableSessions = sortSessionsForDisplay(sessions)
+        Self.persistSessionsLoadedAt(Date())
         statusMessage = sessions.isEmpty ? "No saved sessions" : ""
     }
 
     func loadSessionsIfNeeded() async {
-        guard availableSessions.isEmpty else { return }
         await loadSessions()
     }
 
@@ -944,6 +959,41 @@ final class MobileAppState: ObservableObject {
         for slot in validSlots {
             presets[slot.id] = defaultUserAgentPreset(for: slot.serviceId)
         }
+    }
+
+    private static func isFreshRemoteListCache(_ date: Date?) -> Bool {
+        guard let date else { return false }
+        return Date().timeIntervalSince(date) < remoteListCacheTTL
+    }
+
+    private static func loadPersistedProjectTree() -> [ProjectTreeNode] {
+        guard let data = UserDefaults.standard.data(forKey: projectTreeDefaultsKey) else { return [] }
+        return (try? JSONDecoder().decode([ProjectTreeNode].self, from: data)) ?? []
+    }
+
+    private static func persistProjectTree(_ nodes: [ProjectTreeNode]) {
+        guard let data = try? JSONEncoder().encode(nodes) else { return }
+        UserDefaults.standard.set(data, forKey: projectTreeDefaultsKey)
+    }
+
+    private static func loadPersistedProjectTreeLoadedAt() -> Date? {
+        let value = UserDefaults.standard.double(forKey: projectTreeLoadedAtDefaultsKey)
+        guard value > 0 else { return nil }
+        return Date(timeIntervalSince1970: value)
+    }
+
+    private static func persistProjectTreeLoadedAt(_ date: Date) {
+        UserDefaults.standard.set(date.timeIntervalSince1970, forKey: projectTreeLoadedAtDefaultsKey)
+    }
+
+    private static func loadPersistedSessionsLoadedAt() -> Date? {
+        let value = UserDefaults.standard.double(forKey: sessionsLoadedAtDefaultsKey)
+        guard value > 0 else { return nil }
+        return Date(timeIntervalSince1970: value)
+    }
+
+    private static func persistSessionsLoadedAt(_ date: Date) {
+        UserDefaults.standard.set(date.timeIntervalSince1970, forKey: sessionsLoadedAtDefaultsKey)
     }
 
     private static func loadPersistedSlots() -> [SlotState]? {

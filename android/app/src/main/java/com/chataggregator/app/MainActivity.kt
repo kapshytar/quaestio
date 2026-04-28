@@ -79,6 +79,11 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         private const val SEND_STAGGER_MS = 150L
         private const val SEND_DEBOUNCE_MS = 500L
         private const val WEBVIEW_CACHE_MAX_BYTES = 100L * 1024L * 1024L // 100 MB
+        private const val REMOTE_LIST_CACHE_TTL_MS = 24L * 60L * 60L * 1000L
+        private const val REMOTE_LIST_PREFS = "remote_list_cache"
+        private const val PROJECT_TREE_CACHE_PREF = "project_tree"
+        private const val PROJECT_TREE_LOADED_AT_PREF = "project_tree_loaded_at"
+        private const val SESSIONS_LOADED_AT_PREF = "sessions_loaded_at"
         private const val CHEAT_UNLOCK_SHA256 = "1bda832333f390e87d3683d9a73f8613fd92cf062790cfe7349efd41e9b89594"
         private const val CHEAT_DEBUG_SHA256 = "51c55c26253022764f0fb1780249cdd4a4fa809e679c79e6b550af4ee571318f"
     }
@@ -111,6 +116,10 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     private lateinit var projectPanelScrimView: View
     private lateinit var projectListContainerView: LinearLayout
     private var projectTreeNodes: List<ProjectTreeNode> = emptyList()
+    private var projectTreeLoadedAtMs: Long = 0L
+    private var sessionsLoadedAtMs: Long = 0L
+    @Volatile private var projectRefreshInFlight: Boolean = false
+    @Volatile private var sessionsRefreshInFlight: Boolean = false
     private val expandedProjectNodeIds = mutableSetOf<String>()
     private var pendingProjectSelectionArmed: Boolean = false
     private var pendingProjectSelectionId: String? = null
@@ -660,14 +669,84 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         updateContextChips()
     }
 
-    private fun showProjectDialog() {
+    private fun isFreshRemoteListCache(loadedAtMs: Long): Boolean {
+        return loadedAtMs > 0L && System.currentTimeMillis() - loadedAtMs < REMOTE_LIST_CACHE_TTL_MS
+    }
+
+    private fun remoteListPrefs() = getSharedPreferences(REMOTE_LIST_PREFS, Context.MODE_PRIVATE)
+
+    private fun loadPersistedProjectTree(): List<ProjectTreeNode> {
+        val raw = remoteListPrefs().getString(PROJECT_TREE_CACHE_PREF, null) ?: return emptyList()
+        return runCatching {
+            Gson().fromJson(raw, Array<ProjectTreeNode>::class.java)?.toList().orEmpty()
+        }.getOrDefault(emptyList())
+    }
+
+    private fun persistProjectTree(nodes: List<ProjectTreeNode>) {
+        remoteListPrefs()
+            .edit()
+            .putString(PROJECT_TREE_CACHE_PREF, Gson().toJson(nodes))
+            .putLong(PROJECT_TREE_LOADED_AT_PREF, System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun persistedProjectTreeLoadedAtMs(): Long {
+        return remoteListPrefs().getLong(PROJECT_TREE_LOADED_AT_PREF, 0L)
+    }
+
+    private fun persistedSessionsLoadedAtMs(): Long {
+        return remoteListPrefs().getLong(SESSIONS_LOADED_AT_PREF, 0L)
+    }
+
+    private fun persistSessionsLoadedAt() {
+        remoteListPrefs()
+            .edit()
+            .putLong(SESSIONS_LOADED_AT_PREF, System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun releaseProjectRefreshLock() {
+        Handler(Looper.getMainLooper()).postDelayed({
+            projectRefreshInFlight = false
+        }, 3000L)
+    }
+
+    private fun releaseSessionsRefreshLock() {
+        Handler(Looper.getMainLooper()).postDelayed({
+            sessionsRefreshInFlight = false
+        }, 3000L)
+    }
+
+    private fun loadProjectTreeCached(forceRefresh: Boolean = false): List<ProjectTreeNode> {
+        if (!forceRefresh && projectTreeNodes.isNotEmpty() && isFreshRemoteListCache(projectTreeLoadedAtMs)) {
+            return projectTreeNodes
+        }
+        if (!forceRefresh && isFreshRemoteListCache(persistedProjectTreeLoadedAtMs())) {
+            val persisted = loadPersistedProjectTree()
+            if (persisted.isNotEmpty()) {
+                projectTreeNodes = persisted
+                projectTreeLoadedAtMs = persistedProjectTreeLoadedAtMs()
+                return persisted
+            }
+        }
+        return loadProjectTreeFromApi().also {
+            projectTreeNodes = it
+            projectTreeLoadedAtMs = System.currentTimeMillis()
+            persistProjectTree(it)
+        }
+    }
+
+    private fun showProjectDialog(forceRefresh: Boolean = false) {
+        if (forceRefresh) {
+            if (projectRefreshInFlight) return
+            projectRefreshInFlight = true
+        }
         setContextChipLoading(binding.chipProjects, true, "Loading…")
         thread {
             try {
-                val projectTree = loadProjectTreeFromApi()
+                val projectTree = loadProjectTreeCached(forceRefresh)
                 runOnUiThread {
                     setContextChipLoading(binding.chipProjects, false)
-                    projectTreeNodes = projectTree
                     ensureExpandedProjectNodes(projectTree)
                     showProjectDialogWithData(projectTree)
                 }
@@ -676,6 +755,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                     setContextChipLoading(binding.chipProjects, false)
                     Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
+            } finally {
+                if (forceRefresh) releaseProjectRefreshLock()
             }
         }
     }
@@ -725,6 +806,20 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(6), 0, dp(6))
         }
+
+        val refreshRow = TextView(this).apply {
+            text = "↻"
+            gravity = android.view.Gravity.CENTER
+            textSize = 20f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.action_primary))
+            setPadding(0, dp(8), 0, dp(10))
+            contentDescription = "Refresh projects"
+            setOnClickListener {
+                dialog?.dismiss()
+                showProjectDialog(forceRefresh = true)
+            }
+        }
+        listContainer.addView(refreshRow)
 
         addProjectDialogRow(listContainer, "No Project", activeProjectId == null, depth = 0, hasChildren = false) {
             setActiveProject(null)
@@ -847,11 +942,10 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
         thread {
             try {
-                val projectTree = loadProjectTreeFromApi()
+                val projectTree = loadProjectTreeCached()
                 runOnUiThread {
                     if (!isProjectPanelVisible) return@runOnUiThread
                     if (projectTree.isNotEmpty()) {
-                        projectTreeNodes = projectTree
                         ensureExpandedProjectNodes(projectTree)
                         renderProjectPanel(projectTree)
                         updateContextChips()
@@ -2651,34 +2745,55 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         }
     }
 
-    private fun showSessionsDialog() {
+    private fun showSessionsDialog(forceRefresh: Boolean = false) {
+        if (forceRefresh) {
+            if (sessionsRefreshInFlight) return
+            sessionsRefreshInFlight = true
+        }
         setContextChipLoading(binding.chipSessions, true, "Loading…")
         val rpcUrl = SettingsManager.getDreamTrackerRpcUrl(this)
         val apiKey = SettingsManager.getDreamTrackerApiKey(this)
         Log.i(TAG, "[SESSION] showSessionsDialog rpcUrl=${rpcUrl.isNotBlank()} apiKey=${apiKey.isNotBlank()}")
+        val localSessions = sessionManager.getAllSessions()
+        val cachedSessionsLoadedAtMs = maxOf(sessionsLoadedAtMs, persistedSessionsLoadedAtMs())
+        if (!forceRefresh && localSessions.isNotEmpty() && isFreshRemoteListCache(cachedSessionsLoadedAtMs)) {
+            setContextChipLoading(binding.chipSessions, false)
+            showSessionsDialogWithData(localSessions)
+            return
+        }
         if (rpcUrl.isNotBlank() && apiKey.isNotBlank()) {
             thread {
-                Log.i(TAG, "[SESSION] showSessionsDialog background thread started")
-                val localSessions = sessionManager.getAllSessions()
-                val remoteSessions = runBlocking {
-                    Log.i(TAG, "[SESSION] calling loadSessionsFromDatabase...")
-                    sessionManager.loadSessionsFromDatabase(rpcUrl, apiKey)
-                }
-                Log.i(TAG, "[SESSION] remoteSessions count=${remoteSessions.size}")
-                val sessions = if (remoteSessions.isNotEmpty()) {
-                    sessionManager.replaceSessions(remoteSessions)
-                    remoteSessions
-                } else {
-                    val mergedSessions = mergeSessions(remoteSessions, localSessions)
-                    if (mergedSessions.isNotEmpty()) {
-                        sessionManager.replaceSessions(mergedSessions)
+                try {
+                    Log.i(TAG, "[SESSION] showSessionsDialog background thread started")
+                    val remoteSessions = runBlocking {
+                        Log.i(TAG, "[SESSION] calling loadSessionsFromDatabase...")
+                        sessionManager.loadSessionsFromDatabase(rpcUrl, apiKey)
                     }
-                    if (mergedSessions.isNotEmpty()) mergedSessions else localSessions
-                }
-                runOnUiThread {
-                    setContextChipLoading(binding.chipSessions, false)
-                    Log.i(TAG, "[SESSION] showing dialog with ${sessions.size} sessions")
-                    showSessionsDialogWithData(sessions)
+                    Log.i(TAG, "[SESSION] remoteSessions count=${remoteSessions.size}")
+                    val sessions = if (remoteSessions.isNotEmpty()) {
+                        sessionManager.replaceSessions(remoteSessions)
+                        remoteSessions
+                    } else {
+                        val mergedSessions = mergeSessions(remoteSessions, localSessions)
+                        if (mergedSessions.isNotEmpty()) {
+                            sessionManager.replaceSessions(mergedSessions)
+                        }
+                        if (mergedSessions.isNotEmpty()) mergedSessions else localSessions
+                    }
+                    runOnUiThread {
+                        sessionsLoadedAtMs = System.currentTimeMillis()
+                        persistSessionsLoadedAt()
+                        setContextChipLoading(binding.chipSessions, false)
+                        Log.i(TAG, "[SESSION] showing dialog with ${sessions.size} sessions")
+                        showSessionsDialogWithData(sessions)
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        setContextChipLoading(binding.chipSessions, false)
+                        Toast.makeText(this@MainActivity, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                } finally {
+                    if (forceRefresh) releaseSessionsRefreshLock()
                 }
             }
             return
@@ -2686,6 +2801,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         Log.i(TAG, "[SESSION] rpcUrl/apiKey missing, showing local sessions only")
         setContextChipLoading(binding.chipSessions, false)
         showSessionsDialogWithData(sessionManager.getAllSessions())
+        if (forceRefresh) releaseSessionsRefreshLock()
     }
 
     private fun showSessionsDialogWithData(sessions: List<SessionSnapshot>) {
@@ -2830,12 +2946,28 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), 0)
         }
+        var dialog: AlertDialog? = null
         val surface = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = AppCompatResources.getDrawable(this@MainActivity, R.drawable.bg_dialog_surface)
             clipToOutline = true
             setPadding(dp(14), dp(14), dp(14), dp(10))
         }
+        surface.addView(TextView(this).apply {
+            text = "↻"
+            gravity = android.view.Gravity.CENTER
+            textSize = 20f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.action_primary))
+            setPadding(0, 0, 0, dp(10))
+            contentDescription = "Refresh sessions"
+            setOnClickListener {
+                dialog?.dismiss()
+                showSessionsDialog(forceRefresh = true)
+            }
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
         surface.addView(searchInput, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
@@ -2875,7 +3007,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             override fun afterTextChanged(s: Editable?) = Unit
         })
 
-        val dialog = AlertDialog.Builder(this, R.style.ServiceDialogTheme)
+        dialog = AlertDialog.Builder(this, R.style.ServiceDialogTheme)
             .setTitle(R.string.sessions_title)
             .setView(contentLayout)
             .setNeutralButton(R.string.sessions_clear_active) { _, _ ->
@@ -2886,8 +3018,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
-        styleDialogWindow(dialog)
-        dialog.setOnDismissListener {
+        dialog?.let { styleDialogWindow(it) }
+        dialog?.setOnDismissListener {
             setContextChipLoading(binding.chipSessions, false)
         }
 
@@ -2912,7 +3044,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 Log.i(TAG, "[SESSION] pendingUrls after stage: ${synchronized(pendingSessionUrls) { pendingSessionUrls.toMap() }}")
                 scheduleSlotLoading(forceReload = true)
                 updateSessionIndicator()
-                dialog.dismiss()
+                dialog?.dismiss()
             }
         }
 
@@ -2937,7 +3069,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                     sessionsAdapter.notifyDataSetChanged()
                     Toast.makeText(this, "Deleted: ${session.name}", Toast.LENGTH_SHORT).show()
                     if (filteredSessions.isEmpty() && mutableSessions.isEmpty()) {
-                        dialog.dismiss()
+                        dialog?.dismiss()
                     }
                 }
                 .setNegativeButton(android.R.string.cancel, null)

@@ -105,6 +105,12 @@ if command -v adb >/dev/null 2>&1; then
 fi
 echo
 
+echo "-- Android wireless debugging hint --"
+echo "Preferred Wi-Fi path is Android Wireless debugging TLS high port, not legacy :5555."
+echo "Use: adb mdns services; adb connect <phone-ip>:<wireless-debug-port>"
+echo "If Mac cannot reach the phone IP (No route to host), stay on USB; that is network isolation."
+echo
+
 echo "-- JDK pin --"
 if [ -f "$ANDROID_GRADLE_PROPERTIES" ]; then
   rg -n "^org\\.gradle\\.java\\.home=" "$ANDROID_GRADLE_PROPERTIES" || echo "warn no org.gradle.java.home pin"

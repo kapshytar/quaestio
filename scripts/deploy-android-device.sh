@@ -58,7 +58,12 @@ resolve_device_serial() {
   fi
 
   if [ "${#serials[@]}" -eq 0 ]; then
-    echo "No Android devices are available in adb. Attach USB or connect a wireless debugging endpoint first." >&2
+    echo "No Android devices are available in adb." >&2
+    echo "Preferred order on this Mac:" >&2
+    echo "  1. USB (most reliable)" >&2
+    echo "  2. Android Wireless debugging TLS endpoint: adb mdns services; adb connect <phone-ip>:<high-port>" >&2
+    echo "  3. Legacy adb tcpip 5555 only if it actually accepts connections" >&2
+    echo "See docs/handoff/INTEGRATIONS_AND_KEYS.md and android/docs/CODEX_INSTALL_PLAYBOOK.md." >&2
     exit 1
   fi
 
