@@ -4,6 +4,11 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.108.2
+- add icon refresh controls for desktop Projects and Sessions lists
+- cache remote Projects/Sessions list loads for up to one day so startup/opening panels does not eagerly hit the database unless the user explicitly refreshes
+- guard refresh actions with a short single-flight cooldown so double-clicks do not dispatch duplicate database loads
+
 ## 1.108.1
 - apply the minimal public Quaestio branding layer to desktop visible titles and labels while keeping internal identifiers unchanged
 - add the subtle `Quaestio veritatis` italic line between Run Merge and the merge status

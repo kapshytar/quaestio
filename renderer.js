@@ -154,6 +154,7 @@ const projectPanelEl = document.getElementById('project-panel');
 const projectPanelScrimEl = document.getElementById('project-panel-scrim');
 const projectPanelCloseBtn = document.getElementById('project-panel-close');
 const projectTreeEl = document.getElementById('project-tree');
+const refreshProjectsBtn = document.getElementById('refresh-projects-btn');
 const aboutModalEl = document.getElementById('about-modal');
 const aboutCloseBtn = document.getElementById('about-close-btn');
 const aboutAppNameEl = document.getElementById('about-app-name');
@@ -191,6 +192,14 @@ let isProjectPanelVisible = false;
 let isProjectTreeLoaded = false;
 const expandedProjectNodeIds = new Set();
 let projectSlotUrlLoadGeneration = 0;
+const REMOTE_LIST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const PROJECT_TREE_CACHE_KEY = 'chat-aggregator-project-tree';
+const PROJECT_TREE_CACHE_META_KEY = 'chat-aggregator-project-tree-meta';
+const REFRESH_COOLDOWN_MS = 3000;
+let projectRefreshInFlight = false;
+let projectRefreshLockedUntil = 0;
+let sessionsRefreshInFlight = false;
+let sessionsRefreshLockedUntil = 0;
 let desktopAboutInfoCache = null;
 const AGGREGATED_SESSION_ID_KEY = 'aggregated-ingest-session-id';
 const AGGREGATED_SESSION_CONTEXT_KEY = 'aggregated-ingest-session-context';
@@ -1997,27 +2006,75 @@ function setProjectPanelVisible(visible) {
   document.body.classList.toggle('project-panel-open', isProjectPanelVisible);
 }
 
-async function loadAndRenderProjectTree() {
-  if (!window.electronAPI || typeof window.electronAPI.listProjectTreeData !== 'function') {
-    projectTreeNodes = [];
+function isFreshRemoteListCache(timestamp) {
+  const value = Number(timestamp || 0);
+  return Number.isFinite(value) && value > 0 && Date.now() - value < REMOTE_LIST_CACHE_TTL_MS;
+}
+
+function readJsonCache(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function writeJsonCache(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (_) {}
+}
+
+function readCachedProjectTree() {
+  const nodes = readJsonCache(PROJECT_TREE_CACHE_KEY, []);
+  const meta = readJsonCache(PROJECT_TREE_CACHE_META_KEY, {});
+  return {
+    nodes: Array.isArray(nodes) ? nodes : [],
+    fetchedAt: Number(meta?.fetchedAt || 0)
+  };
+}
+
+function writeCachedProjectTree(nodes) {
+  writeJsonCache(PROJECT_TREE_CACHE_KEY, Array.isArray(nodes) ? nodes : []);
+  writeJsonCache(PROJECT_TREE_CACHE_META_KEY, { fetchedAt: Date.now() });
+}
+
+async function loadAndRenderProjectTree(options = {}) {
+  const forceRefresh = options?.forceRefresh === true;
+  const cached = readCachedProjectTree();
+  if (!forceRefresh && cached.nodes.length > 0 && isFreshRemoteListCache(cached.fetchedAt)) {
+    projectTreeNodes = cached.nodes;
+    ensureExpandedProjectNodes(projectTreeNodes);
     renderProjectPanel(projectTreeNodes);
+    isProjectTreeLoaded = true;
+    return;
+  }
+
+  if (!window.electronAPI || typeof window.electronAPI.listProjectTreeData !== 'function') {
+    projectTreeNodes = cached.nodes;
+    renderProjectPanel(projectTreeNodes);
+    isProjectTreeLoaded = true;
     return;
   }
   try {
     const response = await window.electronAPI.listProjectTreeData();
     if (!response || response.ok !== true) {
-      projectTreeNodes = [];
+      projectTreeNodes = cached.nodes;
       renderProjectPanel(projectTreeNodes);
+      isProjectTreeLoaded = true;
       return;
     }
     projectTreeNodes = buildProjectTreeNodes(response.tags, response.tagParents);
     ensureExpandedProjectNodes(projectTreeNodes);
     renderProjectPanel(projectTreeNodes);
+    writeCachedProjectTree(projectTreeNodes);
     isProjectTreeLoaded = true;
   } catch (error) {
     console.warn('[projects] load failed:', error?.message || error);
-    projectTreeNodes = [];
+    projectTreeNodes = cached.nodes;
     renderProjectPanel(projectTreeNodes);
+    isProjectTreeLoaded = true;
   }
 }
 
@@ -2395,6 +2452,30 @@ if (projectSelectorBtn) {
 }
 if (projectPanelCloseBtn) {
   projectPanelCloseBtn.addEventListener('click', hideProjectPanel);
+}
+if (refreshProjectsBtn) {
+  refreshProjectsBtn.addEventListener('click', async () => {
+    const now = Date.now();
+    if (projectRefreshInFlight || now < projectRefreshLockedUntil) return;
+    projectRefreshInFlight = true;
+    projectRefreshLockedUntil = now + REFRESH_COOLDOWN_MS;
+    const originalText = refreshProjectsBtn.textContent || '↻';
+    refreshProjectsBtn.disabled = true;
+    refreshProjectsBtn.textContent = '…';
+    try {
+      await loadAndRenderProjectTree({ forceRefresh: true });
+      refreshProjectsBtn.textContent = '✓';
+    } catch (error) {
+      console.warn('[projects] refresh failed:', error?.message || error);
+      refreshProjectsBtn.textContent = '!';
+    } finally {
+      setTimeout(() => {
+        projectRefreshInFlight = false;
+        refreshProjectsBtn.disabled = false;
+        refreshProjectsBtn.textContent = originalText;
+      }, Math.max(0, projectRefreshLockedUntil - Date.now()));
+    }
+  });
 }
 if (projectPanelScrimEl) {
   projectPanelScrimEl.addEventListener('click', hideProjectPanel);
@@ -5603,6 +5684,7 @@ async function runMerge(isClarification = false, clarificationText = '', previou
 
 // ========== SESSION MANAGEMENT ==========
   const SESSIONS_KEY = 'chat-aggregator-sessions';
+  const SESSIONS_META_KEY = 'chat-aggregator-sessions-meta';
   const MAX_SESSIONS = 1000;
   let sessionsNotice = { text: '', kind: 'info' };
   let sessionsSearchQuery = '';
@@ -5722,6 +5804,7 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
         const cachedSessions = await loadSessionsList({ preferCache: true });
         const sessions = mergeSessionSnapshots([result], cachedSessions);
         localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+        writeJsonCache(SESSIONS_META_KEY, { fetchedAt: Date.now() });
         sessionsListMemoryCache = sessions;
       await updateSessionsUI();
       return result;
@@ -5743,6 +5826,7 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
   const sessions = mergeSessionSnapshots([snapshot], cachedSessions);
 
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  writeJsonCache(SESSIONS_META_KEY, { fetchedAt: Date.now() });
   sessionsListMemoryCache = sessions;
   setSessionsNotice('Saved to local cache only.', 'warn');
   await updateSessionsUI();
@@ -5770,6 +5854,13 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
       return sessionsListMemoryCache;
     }
 
+    const sessionsMeta = readJsonCache(SESSIONS_META_KEY, {});
+    if (!forceRefresh && Array.isArray(cachedSessions) && cachedSessions.length > 0 && isFreshRemoteListCache(sessionsMeta?.fetchedAt)) {
+      sessionsListMemoryCache = cachedSessions;
+      setSessionsNotice('Loaded from local cache. Use refresh for latest.', 'info');
+      return sessionsListMemoryCache;
+    }
+
   // Try to load from database first
   if (window.electronAPI?.loadSessions) {
     try {
@@ -5780,12 +5871,14 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
         // Database is the source of truth when available. Replace local cache so
         // deleted/stale rows do not linger in the Sessions tab.
           localStorage.setItem(SESSIONS_KEY, JSON.stringify(normalizedSessions));
+          writeJsonCache(SESSIONS_META_KEY, { fetchedAt: Date.now() });
           sessionsListMemoryCache = normalizedSessions;
           setSessionsNotice('Loaded from database.', 'ok');
           return normalizedSessions;
         }
       if (Array.isArray(dbSessions) && dbSessions.length === 0) {
         localStorage.setItem(SESSIONS_KEY, JSON.stringify([]));
+        writeJsonCache(SESSIONS_META_KEY, { fetchedAt: Date.now() });
         sessionsListMemoryCache = [];
         setSessionsNotice('Database returned 0 sessions.', 'info');
         return [];
@@ -5928,6 +6021,7 @@ async function loadSession(sessionId) {
     // Update local cache
     const filtered = sessions.filter((s) => s.id !== sessionId);
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(filtered));
+    writeJsonCache(SESSIONS_META_KEY, { fetchedAt: Date.now() });
     sessionsListMemoryCache = filtered;
     await updateSessionsUI();
   }
@@ -6124,20 +6218,25 @@ async function initSessionsTab() {
 
   document.querySelectorAll('.refresh-sessions-action').forEach((refreshSessionsBtn) => {
     refreshSessionsBtn.addEventListener('click', async () => {
-      const originalText = 'Refresh';
+      const now = Date.now();
+      if (sessionsRefreshInFlight || now < sessionsRefreshLockedUntil) return;
+      sessionsRefreshInFlight = true;
+      sessionsRefreshLockedUntil = now + REFRESH_COOLDOWN_MS;
+      const originalText = refreshSessionsBtn.textContent || '↻';
       refreshSessionsBtn.disabled = true;
-      refreshSessionsBtn.textContent = 'Refreshing...';
+      refreshSessionsBtn.textContent = '…';
       try {
         await updateSessionsUI({ forceRefresh: true });
-        refreshSessionsBtn.textContent = 'Refreshed';
+        refreshSessionsBtn.textContent = '✓';
       } catch (error) {
         console.error('[refreshSessionsBtn] refresh failed:', error);
-        refreshSessionsBtn.textContent = 'Refresh failed';
+        refreshSessionsBtn.textContent = '!';
       } finally {
         setTimeout(() => {
+          sessionsRefreshInFlight = false;
           refreshSessionsBtn.disabled = false;
           refreshSessionsBtn.textContent = originalText;
-        }, 1200);
+        }, Math.max(0, sessionsRefreshLockedUntil - Date.now()));
       }
     });
   });

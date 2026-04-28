@@ -298,7 +298,7 @@
     #project-panel-header {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 8px;
       padding: 12px 12px 10px;
       border-bottom: 1px solid #3a3a3a;
       background: #1f1f1f;
@@ -308,6 +308,16 @@
       font-weight: 700;
       letter-spacing: 0.02em;
       color: #d7d7d7;
+      flex: 1;
+    }
+    .icon-refresh-btn {
+      width: 28px;
+      min-width: 28px;
+      height: 28px;
+      min-height: 28px;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1;
     }
     #project-panel-close {
       border: 1px solid #4a4a4a;
@@ -1678,11 +1688,11 @@
           <span id="sessions-popup-title">Sessions</span>
           <button class="control-btn" id="sessions-popup-close" title="Close">x</button>
         </div>
-        <div id="sessions-popup-actions">
-          <button class="control-btn save-session-action">Save Current</button>
-          <button class="control-btn reset-session-action">Reset</button>
-          <button class="control-btn refresh-sessions-action">Refresh</button>
-        </div>
+      <div id="sessions-popup-actions">
+        <button class="control-btn save-session-action">Save Current</button>
+        <button class="control-btn reset-session-action">Reset</button>
+          <button class="control-btn icon-refresh-btn refresh-sessions-action" title="Refresh sessions" aria-label="Refresh sessions">&#10227;</button>
+      </div>
         <input class="sessions-search sessions-search-input" type="text" placeholder="Search by session id or title...">
         <div id="sessions-popup-list" class="sessions-list"></div>
       </div>
@@ -1698,6 +1708,7 @@
     <button class="control-btn left-grid-chevron-btn" id="project-selector-btn" title="Projects" aria-label="Projects"></button>
     <div id="project-panel-header">
       <span id="project-panel-title">Projects</span>
+      <button class="control-btn icon-refresh-btn" id="refresh-projects-btn" title="Refresh projects" aria-label="Refresh projects">&#10227;</button>
       <button id="project-panel-close" title="Close projects">x</button>
     </div>
     <div id="project-tree"></div>
@@ -1789,7 +1800,7 @@
               <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
                 <button class="control-btn save-session-action" id="save-session-btn" style="flex:1;">Save Current</button>
                 <button class="control-btn reset-session-action" id="reset-session-btn">Reset</button>
-                <button class="control-btn refresh-sessions-action" id="refresh-sessions-btn">Refresh</button>
+                <button class="control-btn icon-refresh-btn refresh-sessions-action" id="refresh-sessions-btn" title="Refresh sessions" aria-label="Refresh sessions">&#10227;</button>
               </div>
               <div style="margin-bottom:8px;">
                 <input id="sessions-search-input" class="sessions-search sessions-search-input" type="text" placeholder="Search by session id or title...">
