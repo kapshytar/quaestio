@@ -4,6 +4,11 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.108.0
+- replace the desktop Projects text button with a left-aligned side-panel chevron that inherits project color from the database
+- fix the desktop center address-bar chevron to properly hide address bars in split and full modes
+- shift the desktop address-bar chevron to the top edge when in full mode or when both sides are in split mode
+
 ## 1.107.28
 - smooth desktop right-panel and bottom-tools transitions and mask WebView resize flashes during panel layout changes
 
