@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.2
+
+- apply the minimal public Quaestio branding layer to Android and iOS visible app labels while keeping package IDs, bundle IDs, project names, and bridge names unchanged
+
 ## 2.3.1
 
 - align DeepSeek selectors with the desktop reference by adding the generic textarea fallback and contenteditable fallbacks to the shared mobile service presets
