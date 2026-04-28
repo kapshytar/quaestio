@@ -1,7 +1,7 @@
 {
   "name": "verity",
-  "version": "1.108.0",
-  "description": "Verity - multi-AI chat aggregator",
+  "version": "1.108.1",
+  "description": "Quaestio - multi-AI chat aggregator",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -36,7 +36,7 @@
   },
   "build": {
     "appId": "com.verity.app",
-    "productName": "Verity",
+    "productName": "Quaestio",
     "directories": {
       "output": "dist"
     },

@@ -6,7 +6,7 @@ const { execFileSync } = require('child_process');
 
 const APP_DATA_PATH = app.getPath('appData');
 const FIXED_USER_DATA_PATH = path.join(APP_DATA_PATH, 'chat-aggregator');
-app.setName('Verity');
+app.setName('Quaestio');
 
 // NOTE:
 // Full profile-directory merge (including Local State / Network DBs) can break
@@ -1105,7 +1105,7 @@ ipcMain.handle('dream-open-session-window', async (_event, session) => {
         backgroundThrottling: true
       },
       backgroundColor: '#1a1a1a',
-      title: `Verity — ${session?.name || 'Session'}`,
+      title: `Quaestio — ${session?.name || 'Session'}`,
       icon: path.join(__dirname, IS_MAC ? 'icon.png' : 'icon.ico')
     });
     // Pass session as query param so the new window can restore it
@@ -1354,7 +1354,7 @@ async function createWindow() {
       backgroundThrottling: true
     },
     backgroundColor: '#1a1a1a',
-    title: 'Verity (alpha)',
+    title: 'Quaestio (alpha)',
     icon: path.join(__dirname, IS_MAC ? 'icon.png' : 'icon.ico')
   });
 

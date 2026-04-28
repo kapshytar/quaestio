@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo Chat Aggregator - Quick Start
+echo Quaestio - Quick Start
 echo ========================================
 echo.
 
@@ -14,6 +14,6 @@ if not exist "node_modules\" (
     echo.
 )
 
-echo [2/2] Starting Chat Aggregator...
+echo [2/2] Starting Quaestio...
 echo.
 call npm start

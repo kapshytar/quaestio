@@ -4,7 +4,7 @@ unset ELECTRON_RUN_AS_NODE
 NPM_CACHE_DIR="${TMPDIR:-/tmp}/verity-npm-cache"
 
 echo "========================================"
-echo "Verity - Quick Start"
+echo "Quaestio - Quick Start"
 echo "========================================"
 echo ""
 
@@ -18,6 +18,6 @@ else
     echo ""
 fi
 
-echo "[2/2] Starting Verity..."
+echo "[2/2] Starting Quaestio..."
 echo ""
 env -u ELECTRON_RUN_AS_NODE npm start

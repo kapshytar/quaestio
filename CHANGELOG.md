@@ -4,6 +4,10 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.108.1
+- apply the minimal public Quaestio branding layer to desktop visible titles and labels while keeping internal identifiers unchanged
+- add the subtle `Quaestio veritatis` italic line between Run Merge and the merge status
+
 ## 1.108.0
 - replace the desktop Projects text button with a left-aligned side-panel chevron that inherits project color from the database
 - fix the desktop center address-bar chevron to properly hide address bars in split and full modes
