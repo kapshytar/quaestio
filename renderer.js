@@ -1951,7 +1951,7 @@ function updateProjectSelectorAppearance() {
   const activeNode = activeProjectId ? findProjectNodeById(projectTreeNodes, activeProjectId) : null;
   const activeProjectColor = String(activeNode?.color || '').trim();
   const activeProjectName = String(activeNode?.name || '').trim();
-  const displayName = activeProjectId ? (activeProjectName || 'Project') : 'Projects';
+  const displayName = activeProjectId ? (activeProjectName || 'Project') : '';
   const selectorColor = activeProjectId && activeProjectColor ? activeProjectColor : '';
 
   [projectSelectorBtn, projectToolbarBtn].forEach((button) => {
@@ -6105,8 +6105,9 @@ function renderSessionsIntoContainer(container, sessions) {
       const service = slotConfigMap[s] || 'unknown';
       return service.replace(/_api$/, '').toUpperCase();
     }).join(', ');
+    const sessionKey = String(session.id || '');
     const sessionTitle = String(session.name || activeSlots || '(no slots)');
-    const expanded = expandedSessionTitleIds.has(session.id);
+    const expanded = expandedSessionTitleIds.has(sessionKey);
 
     item.innerHTML = `
       <div class="session-item-header">
@@ -6114,7 +6115,7 @@ function renderSessionsIntoContainer(container, sessions) {
           <span class="session-item-id">#${displaySessionId}</span>
           <span class="session-item-title ${expanded ? 'expanded' : ''}">${sessionTitle}</span>
         </div>
-        <button class="session-item-chevron" data-session-toggle="${session.id}" style="display:none;"></button>
+        <button class="session-item-chevron" data-session-toggle="${sessionKey}" style="display:none;"></button>
       </div>
       <div class="session-item-time">${timeStr}</div>
       <div class="session-item-actions">
