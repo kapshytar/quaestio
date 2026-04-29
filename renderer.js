@@ -150,10 +150,13 @@ const toggleAddressBarBtn = document.getElementById('toggle-address-bar-btn');
 const collapseBtn = document.getElementById('collapse-toolbar');
 const togglesContainer = document.getElementById('toggles');
 const projectSelectorBtn = document.getElementById('project-selector-btn');
+const projectToolbarBtn = document.getElementById('project-toolbar-btn');
+const activeProjectNameEl = document.getElementById('active-project-name');
 const projectPanelEl = document.getElementById('project-panel');
 const projectPanelScrimEl = document.getElementById('project-panel-scrim');
 const projectPanelCloseBtn = document.getElementById('project-panel-close');
 const projectTreeEl = document.getElementById('project-tree');
+const projectPanelFooterEl = document.getElementById('project-panel-footer');
 const refreshProjectsBtn = document.getElementById('refresh-projects-btn');
 const aboutModalEl = document.getElementById('about-modal');
 const aboutCloseBtn = document.getElementById('about-close-btn');
@@ -1932,6 +1935,40 @@ function ensureExpandedProjectNodes(nodes) {
   walk(Array.isArray(nodes) ? nodes : []);
 }
 
+function findProjectNodeById(nodes, projectId) {
+  const targetId = String(projectId || '').trim();
+  if (!targetId) return null;
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (!node) continue;
+    if (node.id === targetId) return node;
+    const child = findProjectNodeById(node.children, targetId);
+    if (child) return child;
+  }
+  return null;
+}
+
+function updateProjectSelectorAppearance() {
+  const activeNode = activeProjectId ? findProjectNodeById(projectTreeNodes, activeProjectId) : null;
+  const activeProjectColor = String(activeNode?.color || '').trim();
+  const activeProjectName = String(activeNode?.name || '').trim();
+  const displayName = activeProjectId ? (activeProjectName || 'Project') : 'Projects';
+  const selectorColor = activeProjectId && activeProjectColor ? activeProjectColor : '';
+
+  [projectSelectorBtn, projectToolbarBtn].forEach((button) => {
+    if (!button) return;
+    button.classList.toggle('active', !!activeProjectId);
+    button.style.color = selectorColor;
+  });
+
+  if (activeProjectNameEl) {
+    activeProjectNameEl.textContent = displayName;
+  }
+  if (projectToolbarBtn) {
+    projectToolbarBtn.title = activeProjectId ? `Project: ${displayName}` : 'Projects';
+    projectToolbarBtn.setAttribute('aria-label', projectToolbarBtn.title);
+  }
+}
+
 function renderProjectTreeNode(container, node, depth) {
   const hasChildren = Array.isArray(node.children) && node.children.length > 0;
   const isExpanded = expandedProjectNodeIds.has(node.id);
@@ -1975,6 +2012,18 @@ function renderProjectTreeNode(container, node, depth) {
 function renderProjectPanel(nodes = projectTreeNodes) {
   if (!projectTreeEl) return;
   projectTreeEl.innerHTML = '';
+  if (projectPanelFooterEl) projectPanelFooterEl.innerHTML = '';
+
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.padding = '8px 10px';
+    empty.style.color = '#888';
+    empty.style.fontSize = '12px';
+    empty.textContent = 'No projects found';
+    projectTreeEl.appendChild(empty);
+  } else {
+    nodes.forEach((node) => renderProjectTreeNode(projectTreeEl, node, 0));
+  }
 
   const noProjectRow = document.createElement('div');
   noProjectRow.className = `project-tree-row${!activeProjectId ? ' selected' : ''}`;
@@ -1984,19 +2033,11 @@ function renderProjectPanel(nodes = projectTreeNodes) {
     await setActiveProject(null);
     hideProjectPanel();
   });
-  projectTreeEl.appendChild(noProjectRow);
-
-  if (!Array.isArray(nodes) || nodes.length === 0) {
-    const empty = document.createElement('div');
-    empty.style.padding = '8px 10px';
-    empty.style.color = '#888';
-    empty.style.fontSize = '12px';
-    empty.textContent = 'No projects found';
-    projectTreeEl.appendChild(empty);
-    return;
+  if (projectPanelFooterEl) {
+    projectPanelFooterEl.appendChild(noProjectRow);
+  } else {
+    projectTreeEl.appendChild(noProjectRow);
   }
-
-  nodes.forEach((node) => renderProjectTreeNode(projectTreeEl, node, 0));
 }
 
 function setProjectPanelVisible(visible) {
@@ -2047,6 +2088,7 @@ async function loadAndRenderProjectTree(options = {}) {
     projectTreeNodes = cached.nodes;
     ensureExpandedProjectNodes(projectTreeNodes);
     renderProjectPanel(projectTreeNodes);
+    updateProjectSelectorAppearance();
     isProjectTreeLoaded = true;
     return;
   }
@@ -2054,6 +2096,7 @@ async function loadAndRenderProjectTree(options = {}) {
   if (!window.electronAPI || typeof window.electronAPI.listProjectTreeData !== 'function') {
     projectTreeNodes = cached.nodes;
     renderProjectPanel(projectTreeNodes);
+    updateProjectSelectorAppearance();
     isProjectTreeLoaded = true;
     return;
   }
@@ -2062,18 +2105,21 @@ async function loadAndRenderProjectTree(options = {}) {
     if (!response || response.ok !== true) {
       projectTreeNodes = cached.nodes;
       renderProjectPanel(projectTreeNodes);
+      updateProjectSelectorAppearance();
       isProjectTreeLoaded = true;
       return;
     }
     projectTreeNodes = buildProjectTreeNodes(response.tags, response.tagParents);
     ensureExpandedProjectNodes(projectTreeNodes);
     renderProjectPanel(projectTreeNodes);
+    updateProjectSelectorAppearance();
     writeCachedProjectTree(projectTreeNodes);
     isProjectTreeLoaded = true;
   } catch (error) {
     console.warn('[projects] load failed:', error?.message || error);
     projectTreeNodes = cached.nodes;
     renderProjectPanel(projectTreeNodes);
+    updateProjectSelectorAppearance();
     isProjectTreeLoaded = true;
   }
 }
@@ -2094,30 +2140,7 @@ function hideProjectPanel() {
 async function setActiveProject(projectId) {
   const normalizedId = projectId ? String(projectId).trim() : '';
   activeProjectId = normalizedId || null;
-  
-  let activeProjectColor = '';
-  if (activeProjectId) {
-    const findColor = (nodes) => {
-      for (const node of nodes) {
-        if (node.id === activeProjectId) return node.color;
-        if (node.children) {
-          const childColor = findColor(node.children);
-          if (childColor) return childColor;
-        }
-      }
-      return '';
-    };
-    activeProjectColor = findColor(projectTreeNodes);
-  }
-
-  if (projectSelectorBtn) {
-    projectSelectorBtn.classList.toggle('active', !!activeProjectId);
-    if (activeProjectId && activeProjectColor) {
-      projectSelectorBtn.style.color = activeProjectColor;
-    } else {
-      projectSelectorBtn.style.color = '';
-    }
-  }
+  updateProjectSelectorAppearance();
   renderProjectPanel(projectTreeNodes);
 
   const loadGen = ++projectSlotUrlLoadGeneration;
@@ -2441,14 +2464,19 @@ document.querySelectorAll('.service-select').forEach(select => {
   });
 });
 
-if (projectSelectorBtn) {
-  projectSelectorBtn.addEventListener('click', () => {
+function toggleProjectPanel() {
     if (isProjectPanelVisible) {
       hideProjectPanel();
     } else {
       showProjectPanel();
     }
-  });
+}
+
+if (projectSelectorBtn) {
+  projectSelectorBtn.addEventListener('click', toggleProjectPanel);
+}
+if (projectToolbarBtn) {
+  projectToolbarBtn.addEventListener('click', toggleProjectPanel);
 }
 if (projectPanelCloseBtn) {
   projectPanelCloseBtn.addEventListener('click', hideProjectPanel);

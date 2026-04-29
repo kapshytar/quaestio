@@ -168,6 +168,28 @@
     #bottom-toolbar-row { display: flex; gap: 8px; align-items: center; }
     #toggles { display: flex; gap: 8px; align-items: center; flex: 1; flex-wrap: wrap; min-width: 0; }
     #toggles.hidden { display: none !important; }
+    .project-toolbar-btn {
+      gap: 6px;
+      max-width: 220px;
+      padding: 0 10px;
+      color: #cfd6df;
+    }
+    .project-toolbar-btn.active {
+      border-color: color-mix(in srgb, currentColor 55%, #555);
+      background: color-mix(in srgb, currentColor 18%, #333);
+    }
+    .project-toolbar-icon {
+      width: 15px;
+      height: 15px;
+      flex: 0 0 15px;
+      color: currentColor;
+    }
+    #active-project-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .toggle {
       display: flex; align-items: center; gap: 4px; padding: 3px 8px;
       background: #333; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; cursor: pointer;
@@ -334,6 +356,14 @@
       padding: 8px 6px 12px;
       overflow-y: auto;
       flex: 1;
+    }
+    #project-panel-footer {
+      padding: 8px 8px 10px;
+      border-top: 1px solid #3a3a3a;
+      background: rgba(31, 31, 31, 0.72);
+    }
+    #project-panel-footer .project-tree-row {
+      min-height: 32px;
     }
     .project-tree-row {
       display: flex;
@@ -1671,6 +1701,13 @@
           <div class="toggle" draggable="true" data-slot="slot-2" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-2" checked><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
           <div class="toggle" draggable="true" data-slot="slot-3" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-3" checked><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
           <div class="toggle" draggable="true" data-slot="slot-4" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-4" checked><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
+          <button class="control-btn project-toolbar-btn" id="project-toolbar-btn" title="Projects" aria-label="Projects">
+            <svg class="project-toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3.5 6.5h6l2 2h9v9a2 2 0 0 1-2 2h-15v-13Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+              <path d="M3.5 8.5h17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <span id="active-project-name">Projects</span>
+          </button>
           <button class="control-btn" id="import-cookies-btn">Import Cookies</button>
           <button class="control-btn" id="incognito-mode-btn" title="Use provider-native temporary chat where available">Temp mode</button>
           <div id="mobile-ua-toggle" title="Switch to mobile user-agent (loads lighter mobile pages)">
@@ -1712,6 +1749,7 @@
       <button id="project-panel-close" title="Close projects">x</button>
     </div>
     <div id="project-tree"></div>
+    <div id="project-panel-footer"></div>
   </aside>
 
   <!-- Side Panel Wrapper -->

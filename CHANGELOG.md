@@ -4,6 +4,11 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.108.3
+- restore the desktop Projects trigger beside the slot chips while keeping the left chevron as a duplicate sidebar toggle
+- show the active project name beside the Projects icon and tint both project triggers with the selected project database color
+- move the desktop `No Project` action to the bottom of the Projects sidebar
+
 ## 1.108.2
 - add icon refresh controls for desktop Projects and Sessions lists
 - cache remote Projects/Sessions list loads for up to one day so startup/opening panels does not eagerly hit the database unless the user explicitly refreshes
