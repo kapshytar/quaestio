@@ -4,7 +4,7 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
-## 1.108.5
+## 1.109.0
 - inherit project LLM slot URLs through the clicked Projects tree path, so shared subprojects can use different root-project links depending on the selected branch
 
 ## 1.108.4
