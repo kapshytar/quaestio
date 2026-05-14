@@ -410,13 +410,13 @@ struct SlotGridView: View {
                     } else {
                         ForEach(flattenProjects(appState.projectTreeNodes)) { node in
                             Button {
-                                appState.setActiveProject(node.id)
+                                appState.setActiveProject(node.project)
                                 showsProjectSheet = false
                             } label: {
                                 HStack {
                                     Text(String(repeating: "  ", count: node.depth) + node.name)
                                     Spacer()
-                                    if appState.activeProjectId == node.id {
+                                    if appState.activeProjectId == node.project.id && appState.activeProjectPathKey == node.project.pathKey {
                                         Image(systemName: "checkmark")
                                     }
                                 }
@@ -725,7 +725,7 @@ struct SlotGridView: View {
 
     private func flattenProjects(_ roots: [ProjectTreeNode], depth: Int = 0) -> [FlatProjectNode] {
         roots.flatMap { node in
-            [FlatProjectNode(id: node.id, name: node.name, depth: depth)] + flattenProjects(node.children, depth: depth + 1)
+            [FlatProjectNode(project: node, name: node.name, depth: depth)] + flattenProjects(node.children, depth: depth + 1)
         }
     }
 
@@ -1065,7 +1065,8 @@ struct SlotGridView: View {
 }
 
 private struct FlatProjectNode: Identifiable {
-    let id: String
+    var id: String { project.pathKey }
+    let project: ProjectTreeNode
     let name: String
     let depth: Int
 }

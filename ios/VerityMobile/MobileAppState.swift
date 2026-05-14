@@ -47,6 +47,7 @@ final class MobileAppState: ObservableObject {
     @Published var composerText: String = ""
     @Published var isSendingComposer: Bool = false
     @Published var activeProjectId: String? = nil
+    @Published var activeProjectPathKey: String? = nil
     @Published var projectTreeNodes: [ProjectTreeNode] = []
     @Published var availableSessions: [SessionSnapshot] = []
     @Published var isLoadingSessions: Bool = false
@@ -62,7 +63,7 @@ final class MobileAppState: ObservableObject {
     private static let slotUserAgentPresetsDefaultsKey = "verity.mobile.slotUserAgentPresets"
     private static let lastUserPromptDefaultsKey = "verity.mobile.lastUserPrompt"
     private static let globalPhoneZoomPercentDefaultsKey = "verity.mobile.globalPhoneZoomPercent"
-    private static let projectTreeDefaultsKey = "verity.mobile.projectTree"
+    private static let projectTreeDefaultsKey = "verity.mobile.projectTree.v2"
     private static let projectTreeLoadedAtDefaultsKey = "verity.mobile.projectTreeLoadedAt"
     private static let sessionsLoadedAtDefaultsKey = "verity.mobile.sessionsLoadedAt"
     private static let remoteListCacheTTL: TimeInterval = 24 * 60 * 60
@@ -117,6 +118,7 @@ final class MobileAppState: ObservableObject {
             self.lastUserPrompt = parallelState.sourcePrompt
         }
         self.activeProjectId = nil
+        self.activeProjectPathKey = nil
         self.projectTreeNodes = Self.loadPersistedProjectTree()
         self.sessionIndicatorText = Self.makeSessionIndicator(from: parallelState)
         if !hasActiveSessionLink() {
@@ -195,9 +197,31 @@ final class MobileAppState: ObservableObject {
     func setActiveProject(_ projectId: String?) {
         let normalized = projectId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedProjectId = (normalized?.isEmpty == false) ? normalized : nil
-        guard activeProjectId != resolvedProjectId else { return }
+        if let resolvedProjectId,
+           let node = findProjectNode(id: resolvedProjectId, pathKey: nil, nodes: projectTreeNodes) {
+            setActiveProject(node)
+            return
+        }
+        applyActiveProject(
+            id: resolvedProjectId,
+            pathKey: resolvedProjectId,
+            inheritedSlotURLs: [:]
+        )
+    }
 
-        activeProjectId = resolvedProjectId
+    func setActiveProject(_ project: ProjectTreeNode) {
+        applyActiveProject(
+            id: project.id,
+            pathKey: project.pathKey,
+            inheritedSlotURLs: project.slotURLs
+        )
+    }
+
+    private func applyActiveProject(id: String?, pathKey: String?, inheritedSlotURLs: [String: String]) {
+        guard activeProjectId != id || activeProjectPathKey != pathKey else { return }
+
+        activeProjectId = id
+        activeProjectPathKey = pathKey
         sessionManager.clearCurrentSessionLink(preservingProject: false)
         persistWorkspaceState()
         sessionManager.setActiveProjectId(activeProjectId)
@@ -205,12 +229,17 @@ final class MobileAppState: ObservableObject {
         let loadGeneration = projectSlotURLLoadGeneration + 1
         projectSlotURLLoadGeneration = loadGeneration
 
-        if let resolvedProjectId {
+        if let resolvedProjectId = id {
             statusMessage = "Project changed; loading slot URLs…"
             Task {
-                let serviceUrls = await loadProjectSlotURLsByService(projectId: resolvedProjectId)
+                let serviceUrls = inheritedSlotURLs.isEmpty
+                    ? await loadProjectSlotURLsByService(projectId: resolvedProjectId)
+                    : inheritedSlotURLs
                 await MainActor.run {
-                    guard self.projectSlotURLLoadGeneration == loadGeneration, self.activeProjectId == resolvedProjectId else { return }
+                    guard self.projectSlotURLLoadGeneration == loadGeneration,
+                          self.activeProjectId == resolvedProjectId,
+                          self.activeProjectPathKey == pathKey
+                    else { return }
                     self.applyProjectSlotURLs(serviceUrls)
                     self.statusMessage = "Project changed; session reset"
                 }
@@ -219,6 +248,7 @@ final class MobileAppState: ObservableObject {
         }
 
         applyProjectSlotURLs([:])
+        activeProjectPathKey = nil
         statusMessage = "Project cleared; session reset"
     }
 
@@ -1233,7 +1263,7 @@ final class MobileAppState: ObservableObject {
     private func fetchProjectTree(rpcBaseURL: String, apiKey: String) async throws -> [ProjectTreeNode] {
         let restBase = normalizeRestEndpoint(rpcBaseURL)
         async let tagsRaw: [ProjectTagRow] = getJSONArray(
-            endpoint: "\(restBase)/tags?select=id,name&order=name.asc",
+            endpoint: "\(restBase)/tags?select=id,name,slot_urls&order=name.asc",
             apiKey: apiKey,
             allow404: false
         )
@@ -1245,12 +1275,14 @@ final class MobileAppState: ObservableObject {
         let (tags, tagParents) = try await (tagsRaw, parentsRaw)
 
         var namesById: [String: String] = [:]
+        var slotURLsById: [String: [String: String]] = [:]
         for row in tags {
             guard
                 let id = row.id.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank,
                 let name = row.name.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
             else { continue }
             namesById[id] = name
+            slotURLsById[id] = parseProjectSlotURLs(row.slotURLs)
         }
         if namesById.isEmpty { return [] }
 
@@ -1284,17 +1316,29 @@ final class MobileAppState: ObservableObject {
                 .sorted { (namesById[$0] ?? "").localizedCaseInsensitiveCompare(namesById[$1] ?? "") == .orderedAscending }
         }
 
-        func buildNode(id: String, path: Set<String>) -> ProjectTreeNode {
+        func buildNode(
+            id: String,
+            path: Set<String>,
+            ancestorSlotURLs: [String: String],
+            pathKey: String
+        ) -> ProjectTreeNode {
             let nextPath = path.union([id])
+            let inheritedSlotURLs = ancestorSlotURLs.merging(slotURLsById[id] ?? [:]) { _, child in child }
             let childNodes = (childrenByParent[id] ?? [])
                 .filter { !nextPath.contains($0) }
-                .map { buildNode(id: $0, path: nextPath) }
-            return ProjectTreeNode(id: id, name: namesById[id] ?? id, children: childNodes)
+                .map { buildNode(id: $0, path: nextPath, ancestorSlotURLs: inheritedSlotURLs, pathKey: "\(pathKey)>\($0)") }
+            return ProjectTreeNode(
+                id: id,
+                pathKey: pathKey,
+                name: namesById[id] ?? id,
+                slotURLs: inheritedSlotURLs,
+                children: childNodes
+            )
         }
 
         let roots = (childrenByParent[nil] ?? Array(namesById.keys))
             .sorted { (namesById[$0] ?? "").localizedCaseInsensitiveCompare(namesById[$1] ?? "") == .orderedAscending }
-        return roots.map { buildNode(id: $0, path: []) }
+        return roots.map { buildNode(id: $0, path: [], ancestorSlotURLs: [:], pathKey: $0) }
     }
 
     private func normalizeRestEndpoint(_ baseInput: String) -> String {
@@ -1354,6 +1398,20 @@ final class MobileAppState: ObservableObject {
         } catch {
             return [:]
         }
+    }
+
+    private func parseProjectSlotURLs(_ slotObject: [String: JSONValue]?) -> [String: String] {
+        guard let slotObject else { return [:] }
+        var result: [String: String] = [:]
+        for (key, value) in slotObject {
+            let parsed = parseProjectSlotURL(value)
+            if !parsed.isEmpty {
+                let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                result[normalizedKey] = parsed
+                result[normalizedKey.lowercased()] = parsed
+            }
+        }
+        return result
     }
 
     private func parseProjectSlotURL(_ value: JSONValue) -> String {
@@ -1534,10 +1592,22 @@ final class MobileAppState: ObservableObject {
 
     private func findProjectName(id: String, nodes: [ProjectTreeNode]) -> String? {
         for node in nodes {
-            if node.id == id {
+            if node.id == id && (activeProjectPathKey == nil || activeProjectPathKey == node.pathKey) {
                 return node.name.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("Projects")
             }
             if let nested = findProjectName(id: id, nodes: node.children) {
+                return nested
+            }
+        }
+        return nil
+    }
+
+    private func findProjectNode(id: String, pathKey: String?, nodes: [ProjectTreeNode]) -> ProjectTreeNode? {
+        for node in nodes {
+            if node.id == id && (pathKey == nil || pathKey == node.pathKey) {
+                return node
+            }
+            if let nested = findProjectNode(id: id, pathKey: pathKey, nodes: node.children) {
                 return nested
             }
         }

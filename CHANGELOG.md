@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.7
+
+- inherit project LLM slot URLs through the clicked Projects tree path on Android and iOS, so shared subprojects can use different root-project links depending on the selected branch
+
+
 ## 2.3.6
 
 - tint the iPhone saved-session `More`/`Hide` affordance with the same blue accent used by the other clients

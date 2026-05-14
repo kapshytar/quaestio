@@ -95,13 +95,47 @@ struct SlotDebugEvent: Identifiable, Hashable {
 
 struct ProjectTreeNode: Identifiable, Hashable, Codable {
     let id: String
+    let pathKey: String
     let name: String
+    let slotURLs: [String: String]
     let children: [ProjectTreeNode]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case pathKey
+        case name
+        case slotURLs
+        case children
+    }
+
+    init(id: String, pathKey: String, name: String, slotURLs: [String: String], children: [ProjectTreeNode]) {
+        self.id = id
+        self.pathKey = pathKey
+        self.name = name
+        self.slotURLs = slotURLs
+        self.children = children
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        pathKey = try container.decodeIfPresent(String.self, forKey: .pathKey) ?? id
+        name = try container.decode(String.self, forKey: .name)
+        slotURLs = try container.decodeIfPresent([String: String].self, forKey: .slotURLs) ?? [:]
+        children = try container.decodeIfPresent([ProjectTreeNode].self, forKey: .children) ?? []
+    }
 }
 
 struct ProjectTagRow: Decodable, Sendable {
     let id: String
     let name: String
+    let slotURLs: [String: JSONValue]?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case slotURLs = "slot_urls"
+    }
 }
 
 struct ProjectTagParentRow: Decodable, Sendable {

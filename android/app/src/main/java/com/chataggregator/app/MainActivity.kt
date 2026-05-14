@@ -81,7 +81,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         private const val WEBVIEW_CACHE_MAX_BYTES = 100L * 1024L * 1024L // 100 MB
         private const val REMOTE_LIST_CACHE_TTL_MS = 24L * 60L * 60L * 1000L
         private const val REMOTE_LIST_PREFS = "remote_list_cache"
-        private const val PROJECT_TREE_CACHE_PREF = "project_tree"
+        private const val PROJECT_TREE_CACHE_PREF = "project_tree_v2"
         private const val PROJECT_TREE_LOADED_AT_PREF = "project_tree_loaded_at"
         private const val SESSIONS_LOADED_AT_PREF = "sessions_loaded_at"
         private const val CHEAT_UNLOCK_SHA256 = "1bda832333f390e87d3683d9a73f8613fd92cf062790cfe7349efd41e9b89594"
@@ -90,7 +90,9 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
     private data class ProjectTreeNode(
         val id: String,
+        val pathKey: String = "",
         val name: String,
+        val slotUrls: Map<String, String> = emptyMap(),
         val children: List<ProjectTreeNode>,
     )
 
@@ -111,6 +113,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     private val pendingSessionUrls = mutableMapOf<Int, String>()
     @Volatile private var lastScrapeMeta: List<Map<String, Any?>> = emptyList()
     private var activeProjectId: String? = null
+    private var activeProjectPathKey: String? = null
     private var isProjectPanelVisible = false
     private lateinit var projectPanelView: View
     private lateinit var projectPanelScrimView: View
@@ -122,7 +125,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     @Volatile private var sessionsRefreshInFlight: Boolean = false
     private val expandedProjectNodeIds = mutableSetOf<String>()
     private var pendingProjectSelectionArmed: Boolean = false
-    private var pendingProjectSelectionId: String? = null
+    private var pendingProjectSelectionNode: ProjectTreeNode? = null
     @Volatile private var lastProjectFetchError: String? = null
     @Volatile private var projectSlotUrlLoadGeneration: Long = 0L
     @Volatile private var activeProjectSlotUrls: Map<String, String> = emptyMap()
@@ -653,6 +656,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
     private fun setupProjectSelector() {
         activeProjectId = null
+        activeProjectPathKey = null
         updateProjectSelectorAppearance()
         projectPanelView = findViewById(R.id.projectPanel)
         projectPanelScrimView = findViewById(R.id.projectPanelScrim)
@@ -822,7 +826,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         listContainer.addView(refreshRow)
 
         addProjectDialogRow(listContainer, "No Project", activeProjectId == null, depth = 0, hasChildren = false) {
-            setActiveProject(null)
+            setActiveProject(projectId = null)
             dialog?.dismiss()
         }
 
@@ -852,10 +856,10 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
     private fun renderProjectDialogNode(container: LinearLayout, node: ProjectTreeNode, depth: Int, onComplete: () -> Unit) {
         val hasChildren = node.children.isNotEmpty()
-        val selected = activeProjectId == node.id
+        val selected = activeProjectId == node.id && (activeProjectPathKey == null || activeProjectPathKey == node.pathKey)
 
         addProjectDialogRow(container, node.name, selected, depth, hasChildren) {
-            setActiveProject(node.id)
+            setActiveProject(node)
             onComplete()
         }
 
@@ -1003,17 +1007,24 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
     private fun queueProjectSelectionAndClose(projectId: String?) {
         pendingProjectSelectionArmed = false
-        pendingProjectSelectionId = null
+        pendingProjectSelectionNode = null
         setActiveProject(projectId)
+        hideProjectPanel()
+    }
+
+    private fun queueProjectSelectionAndClose(node: ProjectTreeNode?) {
+        pendingProjectSelectionArmed = false
+        pendingProjectSelectionNode = null
+        setActiveProject(node)
         hideProjectPanel()
     }
 
     private fun applyPendingProjectSelectionIfNeeded() {
         if (!pendingProjectSelectionArmed) return
         pendingProjectSelectionArmed = false
-        val projectId = pendingProjectSelectionId
-        pendingProjectSelectionId = null
-        setActiveProject(projectId)
+        val projectNode = pendingProjectSelectionNode
+        pendingProjectSelectionNode = null
+        setActiveProject(projectNode)
     }
 
     private fun renderProjectPanel(projects: List<ProjectTreeNode>) {
@@ -1040,7 +1051,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 setBackgroundColor(Color.TRANSPARENT)
             }
             setOnClickListener {
-                queueProjectSelectionAndClose(null)
+                queueProjectSelectionAndClose(projectId = null)
             }
         }
         container.addView(noProjectView)
@@ -1053,8 +1064,9 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
     private fun renderProjectTreeNode(container: LinearLayout, node: ProjectTreeNode, depth: Int) {
         val hasChildren = node.children.isNotEmpty()
-        val isExpanded = expandedProjectNodeIds.contains(node.id)
-        val selected = activeProjectId == node.id
+        val nodeKey = node.pathKey.ifBlank { node.id }
+        val isExpanded = expandedProjectNodeIds.contains(nodeKey)
+        val selected = activeProjectId == node.id && (activeProjectPathKey == null || activeProjectPathKey == nodeKey)
 
         val row = LinearLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -1083,8 +1095,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
             if (hasChildren) {
                 setOnClickListener {
-                    if (expandedProjectNodeIds.contains(node.id)) expandedProjectNodeIds.remove(node.id)
-                    else expandedProjectNodeIds.add(node.id)
+                    if (expandedProjectNodeIds.contains(nodeKey)) expandedProjectNodeIds.remove(nodeKey)
+                    else expandedProjectNodeIds.add(nodeKey)
                     renderProjectPanel(projectTreeNodes)
                 }
             }
@@ -1109,7 +1121,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         row.addView(title)
 
         row.setOnClickListener {
-            queueProjectSelectionAndClose(node.id)
+            queueProjectSelectionAndClose(node)
         }
         container.addView(row)
 
@@ -1125,7 +1137,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         fun walk(list: List<ProjectTreeNode>) {
             list.forEach { node ->
                 if (node.children.isNotEmpty()) {
-                    expandedProjectNodeIds.add(node.id)
+                    expandedProjectNodeIds.add(node.pathKey.ifBlank { node.id })
                     walk(node.children)
                 }
             }
@@ -1145,19 +1157,21 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         }
 
         val restBaseUrl = normalizeRestEndpoint(rpcUrl)
-        val tagsUrl = "$restBaseUrl/tags?select=id,name&order=name.asc"
+        val tagsUrl = "$restBaseUrl/tags?select=id,name,slot_urls&order=name.asc"
         val tagParentsUrl = "$restBaseUrl/tag_parents?select=tag_id,parent_id"
 
         val tags = fetchJsonArray(tagsUrl, apiKey, shouldSetError = true) ?: return emptyList()
         val tagParents = fetchJsonArray(tagParentsUrl, apiKey, allow404 = true) ?: JsonArray()
 
         val namesById = linkedMapOf<String, String>()
+        val slotUrlsById = mutableMapOf<String, Map<String, String>>()
         for (element in tags) {
             val obj = element.asJsonObject
             val id = obj.get("id")?.asString?.trim().orEmpty()
             val name = obj.get("name")?.asString?.trim().orEmpty()
             if (id.isBlank() || name.isBlank()) continue
             namesById[id] = name
+            slotUrlsById[id] = parseProjectSlotUrls(obj.get("slot_urls"))
         }
         if (namesById.isEmpty()) return emptyList()
 
@@ -1201,14 +1215,22 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             childIds.addAll(sortedDistinct)
         }
 
-        fun buildNode(nodeId: String, path: Set<String>): ProjectTreeNode {
+        fun buildNode(
+            nodeId: String,
+            path: Set<String>,
+            ancestorSlotUrls: Map<String, String>,
+            pathKey: String,
+        ): ProjectTreeNode {
             val nextPath = path + nodeId
+            val inheritedSlotUrls = ancestorSlotUrls + slotUrlsById[nodeId].orEmpty()
             val childNodes = (childrenByParent[nodeId] ?: emptyList())
                 .filter { childId -> !nextPath.contains(childId) }
-                .map { childId -> buildNode(childId, nextPath) }
+                .map { childId -> buildNode(childId, nextPath, inheritedSlotUrls, "$pathKey>$childId") }
             return ProjectTreeNode(
                 id = nodeId,
+                pathKey = pathKey,
                 name = namesById[nodeId].orEmpty(),
+                slotUrls = inheritedSlotUrls,
                 children = childNodes,
             )
         }
@@ -1220,7 +1242,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
         return rootIds
             .distinct()
-            .map { rootId -> buildNode(rootId, emptySet()) }
+            .map { rootId -> buildNode(rootId, emptySet(), emptyMap(), rootId) }
     }
 
     private fun fetchJsonArray(
@@ -1299,15 +1321,26 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
     fun setActiveProject(projectId: String?) {
         val normalizedProjectId = projectId?.trim()?.takeIf { it.isNotBlank() }
-        if (activeProjectId == normalizedProjectId) return
+        val node = normalizedProjectId?.let { findProjectNode(projectTreeNodes, it, null) }
+        setActiveProject(node ?: normalizedProjectId?.let {
+            ProjectTreeNode(id = it, pathKey = it, name = it, children = emptyList())
+        })
+    }
+
+    private fun setActiveProject(projectNode: ProjectTreeNode?) {
+        val normalizedProjectId = projectNode?.id?.trim()?.takeIf { it.isNotBlank() }
+        val normalizedPathKey = projectNode?.pathKey?.trim()?.takeIf { it.isNotBlank() } ?: normalizedProjectId
+        if (activeProjectId == normalizedProjectId && activeProjectPathKey == normalizedPathKey) return
 
         activeProjectId = normalizedProjectId
+        activeProjectPathKey = normalizedPathKey
         SettingsManager.clearParallelIngestState(this)
         updateProjectSelectorAppearance()
         updateSessionIndicator()
 
         val loadGen = ++projectSlotUrlLoadGeneration
         if (normalizedProjectId.isNullOrBlank()) {
+            activeProjectPathKey = null
             activeProjectSlotUrls = emptyMap()
             stageSessionUrlsForLoading(emptyMap())
             scheduleSlotLoading(forceReload = true)
@@ -1316,8 +1349,12 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         }
 
         thread {
-            val serviceUrls = loadProjectSlotUrlsByService(normalizedProjectId)
-            if (projectSlotUrlLoadGeneration != loadGen || activeProjectId != normalizedProjectId) {
+            val serviceUrls = if (projectNode.slotUrls.isNotEmpty()) {
+                projectNode.slotUrls
+            } else {
+                loadProjectSlotUrlsByService(normalizedProjectId)
+            }
+            if (projectSlotUrlLoadGeneration != loadGen || activeProjectId != normalizedProjectId || activeProjectPathKey != normalizedPathKey) {
                 return@thread
             }
             activeProjectSlotUrls = serviceUrls
@@ -1336,7 +1373,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             }
 
             runOnUiThread {
-                if (projectSlotUrlLoadGeneration != loadGen || activeProjectId != normalizedProjectId) {
+                if (projectSlotUrlLoadGeneration != loadGen || activeProjectId != normalizedProjectId || activeProjectPathKey != normalizedPathKey) {
                     return@runOnUiThread
                 }
                 stageSessionUrlsForLoading(slotOverrides)
@@ -1392,6 +1429,20 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             Log.w(TAG, "Failed to load project slot_urls id=$projectId: ${e.message}")
             emptyMap()
         }
+    }
+
+    private fun parseProjectSlotUrls(slotElement: JsonElement?): Map<String, String> {
+        if (slotElement == null || slotElement.isJsonNull || !slotElement.isJsonObject) return emptyMap()
+        val result = mutableMapOf<String, String>()
+        for ((key, value) in slotElement.asJsonObject.entrySet()) {
+            val url = parseProjectSlotUrl(value)
+            if (url.isNotBlank()) {
+                val normalizedKey = key.trim()
+                result[normalizedKey] = url
+                result[normalizedKey.lowercase()] = url
+            }
+        }
+        return result
     }
 
     private fun parseProjectSlotUrl(value: JsonElement?): String {
@@ -2528,8 +2579,17 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
     private fun findProjectName(nodes: List<ProjectTreeNode>, projectId: String): String? {
         nodes.forEach { node ->
-            if (node.id == projectId) return node.name
+            if (node.id == projectId && (activeProjectPathKey == null || activeProjectPathKey == node.pathKey)) return node.name
             val nested = findProjectName(node.children, projectId)
+            if (nested != null) return nested
+        }
+        return null
+    }
+
+    private fun findProjectNode(nodes: List<ProjectTreeNode>, projectId: String, pathKey: String?): ProjectTreeNode? {
+        nodes.forEach { node ->
+            if (node.id == projectId && (pathKey == null || pathKey == node.pathKey)) return node
+            val nested = findProjectNode(node.children, projectId, pathKey)
             if (nested != null) return nested
         }
         return null
