@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.110.0
+
+- pending summary
+
+
 Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
