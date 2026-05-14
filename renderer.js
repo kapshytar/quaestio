@@ -5308,7 +5308,6 @@ async function collectNowAggregation(manual = true) {
   const loadedQuestionPrompt = hasLoadedQuestionContext
     ? String(restoredContext?.source_prompt || activeSessionPrompt || '').trim()
     : '';
-  let sourcePrompt = pendingPrompt;
   const scraping = window.AggregationControl?.SLOT_STATUS?.SCRAPING || 'scraping';
   const collected = window.AggregationControl?.SLOT_STATUS?.COLLECTED || 'collected';
   const error = window.AggregationControl?.SLOT_STATUS?.ERROR || 'error';
@@ -5323,7 +5322,7 @@ async function collectNowAggregation(manual = true) {
   renderAggregationSummary(enabledSlots);
   setMergeStatus(manual ? 'Collecting latest replies and re-ingesting...' : 'Collecting latest replies...', 'running');
   mergeLog(manual ? 'Collect now requested' : 'Auto aggregation collecting latest replies', 'info', {
-    sourcePrompt,
+    sourcePrompt: pendingPrompt,
     sessionIdHint: ingestContext.sessionIdHint || null,
     sessionFingerprint: ingestContext.sessionFingerprint || null,
     enabledSlots
@@ -5336,8 +5335,18 @@ async function collectNowAggregation(manual = true) {
     allowDirectFallback: false,
     persist: false
   });
-  if (!sourcePrompt) {
-    sourcePrompt = scrapedPrompt || loadedQuestionPrompt;
+  let sourcePrompt = pendingPrompt;
+  // If the loaded root already represents the current question, prefer that branch
+  // over any stale pending prompt when deciding what to re-ingest.
+  if (manual && hasLoadedQuestionContext) {
+    const pendingMatchesLoaded = promptsReferToSameQuestion(pendingPrompt, loadedQuestionPrompt);
+    if (!pendingMatchesLoaded) {
+      sourcePrompt = scrapedPrompt || loadedQuestionPrompt || pendingPrompt;
+    } else {
+      sourcePrompt = pendingPrompt || scrapedPrompt || loadedQuestionPrompt;
+    }
+  } else {
+    sourcePrompt = pendingPrompt || scrapedPrompt || loadedQuestionPrompt;
   }
   if (sourcePrompt) {
     rememberResolvedSourcePrompt(sourcePrompt);

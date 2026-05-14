@@ -40,6 +40,7 @@
   - explicit pending prompt from a fresh send
   - fresh DOM-derived `prompt_candidate` from the open chats
   - loaded-session stored prompt only as a fallback
+- When a current root is already loaded for the active branch, manual `Collect now` prefers that loaded branch over any stale pending prompt if they disagree
 - Desktop `Sessions` UI now supports:
   - search by `session_id`
   - search by title

@@ -4,6 +4,9 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.109.2
+- make desktop manual Collect now prefer the currently loaded question context when the pending prompt is stale, so re-ingest does not reuse an older branch title
+
 ## 1.109.1
 - make Claude reply collection on desktop prefer the DOM path before clipboard fallback, so merge ingest stops carrying clipboard-shaped formatting noise into the database
 
