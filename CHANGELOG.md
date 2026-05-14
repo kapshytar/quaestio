@@ -4,6 +4,9 @@ Parent / entry point:
 - Start from [../VERITY_MAP.md](../VERITY_MAP.md)
 - Repo state and current contracts live in [CURRENT_STATE.md](./CURRENT_STATE.md)
 
+## 1.108.5
+- inherit project LLM slot URLs through the clicked Projects tree path, so shared subprojects can use different root-project links depending on the selected branch
+
 ## 1.108.4
 - keep the desktop Projects toolbar trigger icon-only until a project is selected
 - fix desktop Sessions `More` expansion by normalizing session title expansion keys

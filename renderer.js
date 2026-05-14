@@ -189,6 +189,7 @@ let searchSession = { query: '', scope: 'global' };
 const mergeSearchState = { query: '', marks: [], index: -1 };
 let searchDebounceTimer = null;
 let activeProjectId = null;
+let activeProjectPathKey = null;
 let activeProjectSlotUrls = {};
 let projectTreeNodes = [];
 let isProjectPanelVisible = false;
@@ -196,7 +197,7 @@ let isProjectTreeLoaded = false;
 const expandedProjectNodeIds = new Set();
 let projectSlotUrlLoadGeneration = 0;
 const REMOTE_LIST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const PROJECT_TREE_CACHE_KEY = 'chat-aggregator-project-tree';
+const PROJECT_TREE_CACHE_KEY = 'chat-aggregator-project-tree-v2';
 const PROJECT_TREE_CACHE_META_KEY = 'chat-aggregator-project-tree-meta';
 const REFRESH_COOLDOWN_MS = 3000;
 let projectRefreshInFlight = false;
@@ -1850,15 +1851,33 @@ async function loadProjectSlotUrls(projectId) {
   return response.slotUrls;
 }
 
+function normalizeProjectSlotUrls(rawSlotUrls) {
+  if (!rawSlotUrls || typeof rawSlotUrls !== 'object') return {};
+  const slotUrls = {};
+  Object.entries(rawSlotUrls).forEach(([rawKey, rawValue]) => {
+    const key = String(rawKey || '').trim();
+    if (!key) return;
+    const url = typeof rawValue === 'string'
+      ? rawValue.trim()
+      : String(rawValue?.url || rawValue?.href || '').trim();
+    if (!url) return;
+    slotUrls[key] = url;
+    slotUrls[key.toLowerCase()] = url;
+  });
+  return slotUrls;
+}
+
 function buildProjectTreeNodes(tags, tagParents) {
   const namesById = new Map();
   const colorsById = new Map();
+  const slotUrlsById = new Map();
   (Array.isArray(tags) ? tags : []).forEach((row) => {
     const id = String(row?.id || '').trim();
     const name = String(row?.name || '').trim();
     if (!id || !name) return;
     namesById.set(id, name);
     if (row?.color) colorsById.set(id, String(row.color).trim());
+    slotUrlsById.set(id, normalizeProjectSlotUrls(row?.slot_urls || row?.slotUrls || {}));
   });
   if (namesById.size === 0) return [];
 
@@ -1897,16 +1916,22 @@ function buildProjectTreeNodes(tags, tagParents) {
     childrenByParent.set(parentId, deduped);
   });
 
-  const buildNode = (nodeId, pathSet) => {
+  const buildNode = (nodeId, pathSet, ancestorSlotUrls = {}, pathKey = nodeId) => {
     const nextPath = new Set(pathSet);
     nextPath.add(nodeId);
+    const inheritedSlotUrls = {
+      ...ancestorSlotUrls,
+      ...(slotUrlsById.get(nodeId) || {})
+    };
     const childNodes = (childrenByParent.get(nodeId) || [])
       .filter((childId) => !nextPath.has(childId))
-      .map((childId) => buildNode(childId, nextPath));
+      .map((childId) => buildNode(childId, nextPath, inheritedSlotUrls, `${pathKey}>${childId}`));
     return { 
       id: nodeId, 
+      pathKey,
       name: namesById.get(nodeId) || '', 
       color: colorsById.get(nodeId) || '',
+      slotUrls: inheritedSlotUrls,
       children: childNodes 
     };
   };
@@ -1920,7 +1945,7 @@ function buildProjectTreeNodes(tags, tagParents) {
       return an.localeCompare(bn);
     });
 
-  return Array.from(new Set(finalRootIds)).map((rootId) => buildNode(rootId, new Set()));
+  return Array.from(new Set(finalRootIds)).map((rootId) => buildNode(rootId, new Set(), {}, rootId));
 }
 
 function ensureExpandedProjectNodes(nodes) {
@@ -1928,7 +1953,7 @@ function ensureExpandedProjectNodes(nodes) {
   const walk = (list) => {
     list.forEach((node) => {
       if (!node || !Array.isArray(node.children) || node.children.length === 0) return;
-      expandedProjectNodeIds.add(node.id);
+      expandedProjectNodeIds.add(node.pathKey || node.id);
       walk(node.children);
     });
   };
@@ -1947,8 +1972,20 @@ function findProjectNodeById(nodes, projectId) {
   return null;
 }
 
+function findProjectNodeByPathKey(nodes, pathKey) {
+  const targetKey = String(pathKey || '').trim();
+  if (!targetKey) return null;
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (!node) continue;
+    if ((node.pathKey || node.id) === targetKey) return node;
+    const child = findProjectNodeByPathKey(node.children, targetKey);
+    if (child) return child;
+  }
+  return null;
+}
+
 function updateProjectSelectorAppearance() {
-  const activeNode = activeProjectId ? findProjectNodeById(projectTreeNodes, activeProjectId) : null;
+  const activeNode = activeProjectId ? findProjectNodeByPathKey(projectTreeNodes, activeProjectPathKey) || findProjectNodeById(projectTreeNodes, activeProjectId) : null;
   const activeProjectColor = String(activeNode?.color || '').trim();
   const activeProjectName = String(activeNode?.name || '').trim();
   const displayName = activeProjectId ? (activeProjectName || 'Project') : '';
@@ -1971,8 +2008,9 @@ function updateProjectSelectorAppearance() {
 
 function renderProjectTreeNode(container, node, depth) {
   const hasChildren = Array.isArray(node.children) && node.children.length > 0;
-  const isExpanded = expandedProjectNodeIds.has(node.id);
-  const isSelected = activeProjectId === node.id;
+  const nodeKey = node.pathKey || node.id;
+  const isExpanded = expandedProjectNodeIds.has(nodeKey);
+  const isSelected = activeProjectId === node.id && (!activeProjectPathKey || activeProjectPathKey === nodeKey);
 
   const row = document.createElement('div');
   row.className = `project-tree-row${isSelected ? ' selected' : ''}`;
@@ -1985,8 +2023,8 @@ function renderProjectTreeNode(container, node, depth) {
   if (hasChildren) {
     chevron.addEventListener('click', (event) => {
       event.stopPropagation();
-      if (expandedProjectNodeIds.has(node.id)) expandedProjectNodeIds.delete(node.id);
-      else expandedProjectNodeIds.add(node.id);
+      if (expandedProjectNodeIds.has(nodeKey)) expandedProjectNodeIds.delete(nodeKey);
+      else expandedProjectNodeIds.add(nodeKey);
       renderProjectPanel(projectTreeNodes);
     });
   }
@@ -1998,7 +2036,7 @@ function renderProjectTreeNode(container, node, depth) {
   row.appendChild(name);
 
   row.addEventListener('click', async () => {
-    await setActiveProject(node.id);
+    await setActiveProject(node);
     hideProjectPanel();
   });
 
@@ -2137,14 +2175,20 @@ function hideProjectPanel() {
   setProjectPanelVisible(false);
 }
 
-async function setActiveProject(projectId) {
-  const normalizedId = projectId ? String(projectId).trim() : '';
+async function setActiveProject(project) {
+  const projectNode = project && typeof project === 'object' ? project : null;
+  const normalizedId = projectNode
+    ? String(projectNode.id || '').trim()
+    : project ? String(project).trim() : '';
+  const normalizedPathKey = projectNode ? String(projectNode.pathKey || projectNode.id || '').trim() : normalizedId;
   activeProjectId = normalizedId || null;
+  activeProjectPathKey = activeProjectId ? normalizedPathKey : null;
   updateProjectSelectorAppearance();
   renderProjectPanel(projectTreeNodes);
 
   const loadGen = ++projectSlotUrlLoadGeneration;
   if (!activeProjectId) {
+    activeProjectPathKey = null;
     activeProjectSlotUrls = {};
     SLOTS.forEach((slot) => {
       const serviceId = String(slotConfig[slot] || '').trim();
@@ -2158,8 +2202,13 @@ async function setActiveProject(projectId) {
     return;
   }
 
-  const slotUrls = await loadProjectSlotUrls(activeProjectId);
-  if (loadGen !== projectSlotUrlLoadGeneration || activeProjectId !== normalizedId) return;
+  const inheritedSlotUrls = projectNode?.slotUrls && typeof projectNode.slotUrls === 'object'
+    ? projectNode.slotUrls
+    : {};
+  const slotUrls = Object.keys(inheritedSlotUrls).length > 0
+    ? inheritedSlotUrls
+    : await loadProjectSlotUrls(activeProjectId);
+  if (loadGen !== projectSlotUrlLoadGeneration || activeProjectId !== normalizedId || activeProjectPathKey !== normalizedPathKey) return;
   activeProjectSlotUrls = slotUrls;
   applyProjectOverridesToVisibleSlots();
 }
