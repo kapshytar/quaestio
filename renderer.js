@@ -5025,7 +5025,9 @@ async function collectLatestRepliesFromEnabledSlots() {
     const serviceId = detectServiceByUrl(currentUrl) || slotConfig[slot] || slot;
     const serviceName = SERVICE_PRESETS[serviceId]?.name || labels[slot]?.textContent || slot;
 
-    const preferDomFirst = serviceId === 'gemini' || serviceId === 'grok';
+    // Claude copy buttons sometimes capture wrapper noise or partial formatting,
+    // while the DOM extractor is stable enough to prefer first on desktop.
+    const preferDomFirst = serviceId === 'gemini' || serviceId === 'grok' || serviceId === 'claude';
     let copied = null;
     let reply = '';
     let domReply = null;
