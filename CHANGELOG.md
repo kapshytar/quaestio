@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.3.7
+## 2.4.0
 
 - inherit project LLM slot URLs through the clicked Projects tree path on Android and iOS, so shared subprojects can use different root-project links depending on the selected branch
 
