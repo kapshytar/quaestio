@@ -110,6 +110,47 @@ function detectServiceByUrl(url) {
   return null;
 }
 
+function serviceIconMarkup(serviceId, faviconUrl) {
+  const sid = String(serviceId || '').trim().toLowerCase();
+
+  if (faviconUrl) {
+    return `<img src="${faviconUrl}" alt="${sid}" style="width:100%;height:100%;object-fit:contain;border-radius:3px;" draggable="false">`;
+  }
+
+  const meta = {
+    chatgpt: { bg: '#10a37f', fg: '#ffffff', glyph: 'C' },
+    claude: { bg: '#d97706', fg: '#ffffff', glyph: 'A' },
+    gemini: { bg: '#2563eb', fg: '#ffffff', glyph: 'G' },
+    grok: { bg: '#7c3aed', fg: '#ffffff', glyph: 'X' },
+    deepseek: { bg: '#0f766e', fg: '#ffffff', glyph: 'D' },
+    perplexity: { bg: '#0f172a', fg: '#ffffff', glyph: 'P' }
+  }[sid] || { bg: '#756858', fg: '#f4efe4', glyph: '?' };
+
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="1.5" y="1.5" width="21" height="21" rx="6" fill="${meta.bg}"/>
+      <circle cx="12" cy="12" r="8.4" fill="rgba(255,255,255,0.12)"/>
+      <text x="12" y="16" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="800" fill="${meta.fg}">${meta.glyph}</text>
+    </svg>
+  `;
+}
+
+function updateSlotToggleIcon(slot, serviceId = slotConfig[slot]) {
+  const toggle = toggles[slot];
+  const icon = toggle?.closest('.toggle')?.querySelector('.toggle-icon');
+  if (!toggle || !icon) return;
+
+  const sid = String(serviceId || '').trim().toLowerCase();
+  const faviconUrl = slotFavicons[slot] || null;
+  const markup = serviceIconMarkup(sid, faviconUrl);
+  if (icon.dataset.serviceId === sid && icon.dataset.faviconUrl === (faviconUrl || '') && icon.dataset.iconMarkup === markup) return;
+
+  icon.dataset.serviceId = sid;
+  icon.dataset.faviconUrl = faviconUrl || '';
+  icon.dataset.iconMarkup = markup;
+  icon.innerHTML = markup;
+}
+
 // ========== GET ELEMENTS ==========
 const webviews = {};
 const toggles = {};
@@ -121,6 +162,7 @@ const webviewReady = {};
 const pendingNavigation = {};
 const incognitoEnsureTimers = {};
 const incognitoEnsureState = {};
+const slotFavicons = {};
 let expandedSlot = null;
 let leftSplitSlot = null;
 let rightSplitSlot = null;
@@ -2272,6 +2314,7 @@ SLOTS.forEach(slot => {
   if (!toggles[slot]) return;
   toggles[slot].checked = slotEnabledState[slot] !== false;
   updateSlotToggleVisualState(slot);
+  updateSlotToggleIcon(slot, slotConfig[slot]);
   updateSlotWindowVisualState(slot);
   toggles[slot].addEventListener('change', () => {
     slotEnabledState[slot] = !!toggles[slot].checked;
@@ -2455,6 +2498,7 @@ function initSlot(slot) {
 
   // Update toggle label
   updateSlotLabel(slot, serviceId);
+  updateSlotToggleIcon(slot, serviceId);
 
   // Load URL
   const preset = SERVICE_PRESETS[serviceId];
@@ -2491,6 +2535,7 @@ document.querySelectorAll('.service-select').forEach(select => {
     slotConfig[slot] = serviceId;
     saveSlotConfig(slotConfig);
     updateSlotLabel(slot, serviceId);
+    updateSlotToggleIcon(slot, serviceId);
 
     const projectOverride = resolveActiveProjectUrlForSlot(slot, serviceId);
     const preset = SERVICE_PRESETS[serviceId];
@@ -2769,6 +2814,7 @@ document.querySelectorAll('.webview-header').forEach(header => {
       slotConfig[slot] = detected;
       saveSlotConfig(slotConfig);
       updateSlotLabel(slot, detected);
+      updateSlotToggleIcon(slot, detected);
     }
   });
 
@@ -2984,6 +3030,15 @@ document.querySelectorAll('.webview-header').forEach(header => {
 
     updateNavButtons();
     scheduleNativeIncognitoEnsure(slot, 'dom-ready');
+  });
+
+  webview.addEventListener('page-favicon-updated', (e) => {
+    const urls = e.favicons || [];
+    const best = urls.find(u => /\.png|\.svg/i.test(u)) || urls[0];
+    if (best && best !== slotFavicons[slot]) {
+      slotFavicons[slot] = best;
+      updateSlotToggleIcon(slot, slotConfig[slot]);
+    }
   });
 
   // Update nav buttons on load
@@ -6033,10 +6088,12 @@ async function loadSession(sessionId) {
       if (select && select.value !== serviceId) {
         select.value = serviceId;
       }
+      updateSlotToggleIcon(slot, serviceId);
     }
 
     if (!slotEnabled[slot]) {
       updateSlotLabel(slot, serviceId || slotConfig[slot]);
+      updateSlotToggleIcon(slot, serviceId || slotConfig[slot]);
       return;
     }
 
@@ -6055,6 +6112,7 @@ async function loadSession(sessionId) {
       if (urlInput) urlInput.value = url;
     }
     updateSlotLabel(slot, serviceId || slotConfig[slot]);
+    updateSlotToggleIcon(slot, serviceId || slotConfig[slot]);
   });
   saveSlotConfig(slotConfig);
 

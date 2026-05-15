@@ -47,6 +47,7 @@
   - expand/collapse for long session titles
   - resetting the current local session/aggregated-note context without deleting saved database sessions
 - Desktop session list interaction is cached in-memory after refresh so the sessions dialog feels immediate during local filtering/toggling.
+- Desktop slot chips are icon-only now: the checkbox glyph is hidden, the current service icon is an inline SVG badge, and disabled slots dim to a colorless state matching mobile.
 - Desktop webview headers now have per-slot focused view controls:
   - `Split` expands a slot within its own side while preserving the opposite side
   - `Full` expands one slot to the whole webview workspace

@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.111.0
+
+- fix desktop slot chips: service icons now show real favicons captured from the live webview via `page-favicon-updated`, falling back to letter-badge SVG before any page loads
+- fix root cause of icons never rendering: `toggles[slot]` was the checkbox `<input>`, not the `.toggle` wrapper, so `.querySelector('.toggle-icon')` always returned null — fixed with `closest('.toggle')`
+- hide checkbox glyph: added `position: relative` to `.toggle` and `appearance: none` + `overflow: hidden` to `.toggle input`
+
+## 1.110.3
+
+- switch the desktop slot chips to inline SVG icons so they render reliably without relying on image loading
+
+## 1.110.2
+
+- replace the desktop slot-chip checkboxes with icon-only chips and make the service icons deterministic so they always render
+
+## 1.110.1
+
+- add service icons to the desktop slot chips and gray them out when the slot is disabled
+
 ## 1.110.0
 
 - pending summary

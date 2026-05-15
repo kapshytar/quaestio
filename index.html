@@ -195,7 +195,25 @@
       display: flex; align-items: center; gap: 4px; padding: 3px 8px;
       background: #333; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; cursor: pointer;
       transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, opacity 0.2s, backdrop-filter 0.2s;
-      font-size: 11px;
+      font-size: 11px; position: relative;
+    }
+    .toggle-icon {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .toggle-icon svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+      transition: filter 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
     }
     .toggle:hover { background: #3a3a3a; }
     .toggle.inactive {
@@ -218,10 +236,28 @@
       border-color: rgba(255,255,255,0.11);
       opacity: 0.86;
     }
+    .toggle.inactive .toggle-icon svg {
+      filter: grayscale(1) saturate(0) brightness(0.96);
+      opacity: 0.68;
+    }
+    .toggle:not(.inactive) .toggle-icon svg {
+      filter: none;
+      opacity: 1;
+    }
+    .toggle input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+      clip-path: inset(50%);
+      overflow: hidden;
+      appearance: none;
+      -webkit-appearance: none;
+    }
     .toggle[draggable="true"] { cursor: grab; }
     .toggle.dragging { opacity: 0.55; outline: 1px dashed #77a7ff; }
     .toggle.drag-over { background: #26466f; outline: 1px solid #77a7ff; }
-    .toggle input { width: 14px; height: 14px; cursor: pointer; accent-color: #0066ff; }
     .toggle label { cursor: pointer; user-select: none; font-size: 11px; font-weight: 500; }
     .toggle.inactive label, .toggle.inactive .status { opacity: 0.72; }
     .status { margin-left: 2px; font-size: 11px; min-width: 12px; text-align: center; color: #888; }
@@ -1160,16 +1196,22 @@
       opacity: 0.72;
       box-shadow: none;
     }
+    .toggle-icon {
+      width: 14px;
+      height: 14px;
+      flex-basis: 14px;
+      border-radius: 3px;
+    }
     .toggle.dragging,
     .toggle.drag-over {
       outline-color: var(--accent-strong);
       background: rgba(216, 180, 95, 0.14);
     }
-    .toggle input {
-      width: 12px;
-      height: 12px;
-      accent-color: var(--accent);
+    .toggle.inactive .toggle-icon svg {
+      filter: grayscale(1) saturate(0) brightness(0.96);
+      opacity: 0.66;
     }
+    .toggle input { width: 1px; height: 1px; }
     .toggle label,
     .status,
     #mobile-ua-label,
@@ -1697,11 +1739,11 @@
     </div>
     <div id="bottom-panel">
       <div id="bottom-toolbar-row">
-        <div id="toggles">
-          <div class="toggle" draggable="true" data-slot="slot-1" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-1" checked><label for="toggle-slot-1" id="label-slot-1">Slot 1</label><span class="status" id="status-slot-1"></span></div>
-          <div class="toggle" draggable="true" data-slot="slot-2" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-2" checked><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
-          <div class="toggle" draggable="true" data-slot="slot-3" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-3" checked><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
-          <div class="toggle" draggable="true" data-slot="slot-4" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-4" checked><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
+      <div id="toggles">
+          <div class="toggle" draggable="true" data-slot="slot-1" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-1" checked><span class="toggle-icon" aria-hidden="true"></span><label for="toggle-slot-1" id="label-slot-1">Slot 1</label><span class="status" id="status-slot-1"></span></div>
+          <div class="toggle" draggable="true" data-slot="slot-2" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-2" checked><span class="toggle-icon" aria-hidden="true"></span><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
+          <div class="toggle" draggable="true" data-slot="slot-3" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-3" checked><span class="toggle-icon" aria-hidden="true"></span><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
+          <div class="toggle" draggable="true" data-slot="slot-4" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-4" checked><span class="toggle-icon" aria-hidden="true"></span><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
           <button class="control-btn project-toolbar-btn" id="project-toolbar-btn" title="Projects" aria-label="Projects">
             <svg class="project-toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3.5 6.5h6l2 2h9v9a2 2 0 0 1-2 2h-15v-13Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
