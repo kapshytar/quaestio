@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.3
+
+- refresh iOS and Android launcher icons with the new Quaestio Q artwork, including dark appearance variants for system theme-aware launchers
+
+
 Active changelog. Older entries (2.3.6 and below) live in
 [CHANGELOG_ARCHIVE.md](./CHANGELOG_ARCHIVE.md). When this file grows past ~50
 lines, move the oldest minor block down to the archive in the same shape.
