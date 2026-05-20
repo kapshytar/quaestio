@@ -100,6 +100,20 @@ logs = rest(
     },
 )
 
+# Trim long fields so smoke-check stays cheap to read (especially in agent
+# sessions where every byte of output counts). Pass INGEST_SMOKE_FULL=1 to
+# disable truncation when a full payload is genuinely needed.
+import os
+TITLE_MAX = 0 if os.environ.get("INGEST_SMOKE_FULL") else 100
+
+def trim(value, max_len=TITLE_MAX):
+    if not value:
+        return value or "-"
+    s = str(value)
+    if max_len <= 0 or len(s) <= max_len:
+        return s
+    return s[:max_len] + f"…(+{len(s)-max_len})"
+
 print_section("Latest Root / Session Notes")
 if not notes:
     print("No notes found.")
@@ -108,7 +122,7 @@ else:
         print(
             f"{row.get('updated_at')} | type={row.get('note_type')} | "
             f"S{row.get('note_session_id')} | {row.get('origin_platform_code')} | "
-            f"{row.get('title')} | {row.get('id')}"
+            f"{trim(row.get('title'))} | {row.get('id')}"
         )
 
 print_section("Latest Ingest Debug Logs")
@@ -136,7 +150,7 @@ else:
         title = payload.get("title") or "-"
         print(
             f"{row.get('created_at')} | {row.get('step')} | providers=[{providers}] | "
-            f"status={status} | note={note_id} | title={title}"
+            f"status={status} | note={note_id} | title={trim(title)}"
         )
 
 print_section("Latest Provider Snapshot")

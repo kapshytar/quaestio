@@ -563,6 +563,139 @@ final class MobileAppState: ObservableObject {
         }
     }
 
+    /// Persists a finished merge or clarification response to the dream-tracker DB.
+    /// If no aggregated root exists for the current question, this method first
+    /// bootstraps one via Collect Now, then attaches the merge to that root.
+    /// Mirrors Android's sendMergeNoteToDreamTracker / sendClarificationNoteToDreamTracker
+    /// flow (kept in sync via tools/ingest-parity-check.sh).
+    // ingest-parity: BOOTSTRAP_BEFORE_MERGE
+    // `prebuiltResponses` lets the caller reuse the same scrape result that fed
+    // the LLM merge call, so the bootstrap path does not re-scrape (which could
+    // pick up a different / staler reply set than the one the merge actually
+    // summarized). Pass nil only when no fresh scrape is available (e.g. cold
+    // entry points outside MergeView.runMerge).
+    func persistMergeMarkdown(
+        _ markdown: String,
+        sourcePrompt: String,
+        isClarification: Bool,
+        prebuiltResponses: [String: String]? = nil
+    ) async -> Bool {
+        let trimmedMarkdown = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMarkdown.isEmpty else {
+            appendIngestEvent("merge-persist abort empty-markdown")
+            return false
+        }
+
+        let rpcBaseURL = KeyObfuscation.getSupabaseRPCURL(nil)
+        let apiKey = KeyObfuscation.getSupabaseAPIKey(nil)
+        guard !rpcBaseURL.isEmpty, !apiKey.isEmpty else {
+            appendIngestEvent("merge-persist abort no-credentials")
+            return false
+        }
+
+        // ingest-parity: BOOTSTRAP_BEFORE_MERGE
+        // Merge cannot attach to a question root that does not exist yet, and must
+        // not silently attach to a stale root from a previous question in the same
+        // logical session. If either is missing, run Collect Now first so the
+        // merge lands on the correct aggregated root.
+        var sessionId = currentQuestionSessionId()
+        var aggregatedNoteId = currentQuestionAggregatedNoteId()
+        let storedPrompt = sessionManager.getParallelIngestState().sourcePrompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let promptMatchesLoadedRoot = !storedPrompt.isEmpty
+            && promptsReferToSameQuestion(sourcePrompt, storedPrompt)
+        let needsBootstrap = sessionId == nil
+            || aggregatedNoteId == nil
+            || !promptMatchesLoadedRoot
+
+        if needsBootstrap {
+            if let prebuilt = prebuiltResponses, !prebuilt.isEmpty {
+                // Reuse the scrape that fed the LLM merge instead of triggering a
+                // second scrape pass against potentially-different slot DOM state.
+                // This is what keeps the aggregated root content consistent with
+                // what the merge actually summarized.
+                appendIngestEvent("merge-persist bootstrap reuse-responses (count=\(prebuilt.count) session=\(sessionId.map(String.init) ?? "-") note=\(aggregatedNoteId ?? "-") match=\(promptMatchesLoadedRoot))")
+                do {
+                    let result = try await ingestCollectedResponses(
+                        prompt: sourcePrompt,
+                        responses: prebuilt,
+                        replaceExisting: false,
+                        aggregatedNoteId: nil
+                    )
+                    sessionId = result.sessionId ?? sessionId
+                    aggregatedNoteId = result.noteId ?? aggregatedNoteId
+                } catch {
+                    appendIngestEvent("merge-persist bootstrap reuse-failed • \(error.localizedDescription)")
+                }
+            } else {
+                appendIngestEvent("merge-persist bootstrap collect-now (session=\(sessionId.map(String.init) ?? "-") note=\(aggregatedNoteId ?? "-") match=\(promptMatchesLoadedRoot))")
+                if let bootstrap = await manualCollectCurrentQuestion() {
+                    sessionId = bootstrap.sessionId ?? sessionId
+                    aggregatedNoteId = bootstrap.noteId ?? aggregatedNoteId
+                }
+            }
+        }
+
+        guard let resolvedSessionId = sessionId else {
+            appendIngestEvent("merge-persist abort no-session-after-bootstrap")
+            return false
+        }
+
+        let traceId = sessionManager.ensureTraceId()
+        let sequence = sessionManager.nextSequence()
+        let kind = isClarification ? "clarification" : "merge"
+        let idempotencyKey = AggregatedIngestClient.buildIdempotencyKey(
+            kind: kind,
+            sessionIdOrTmp: String(resolvedSessionId),
+            sequence: sequence,
+            traceId: traceId
+        )
+
+        let trimmedPrompt = sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = String(trimmedPrompt.prefix(120)).ifEmpty(isClarification ? "Clarification" : "Merge")
+
+        do {
+            if isClarification {
+                let payload = ClarificationIngestPayload(
+                    sessionId: resolvedSessionId,
+                    title: title,
+                    promptText: trimmedPrompt,
+                    markdown: trimmedMarkdown
+                )
+                _ = try await AggregatedIngestClient.sendClarification(
+                    rpcBaseURL: rpcBaseURL,
+                    apiKey: apiKey,
+                    payload: payload,
+                    traceId: traceId,
+                    idempotencyKey: idempotencyKey,
+                    detailedLogging: true
+                )
+                appendIngestEvent("clarification-persist ok session=\(resolvedSessionId)")
+            } else {
+                let payload = MergeIngestPayload(
+                    sessionId: resolvedSessionId,
+                    aggregatedNoteId: aggregatedNoteId,
+                    title: title,
+                    promptText: trimmedPrompt,
+                    markdown: trimmedMarkdown
+                )
+                _ = try await AggregatedIngestClient.sendMerge(
+                    rpcBaseURL: rpcBaseURL,
+                    apiKey: apiKey,
+                    payload: payload,
+                    traceId: traceId,
+                    idempotencyKey: idempotencyKey,
+                    detailedLogging: true
+                )
+                appendIngestEvent("merge-persist ok session=\(resolvedSessionId) note=\(aggregatedNoteId ?? "-")")
+            }
+            return true
+        } catch {
+            appendIngestEvent("\(kind)-persist failed • \(error.localizedDescription)")
+            return false
+        }
+    }
+
     func appendClarificationUserTurn(_ text: String) {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return }
@@ -1621,6 +1754,11 @@ final class MobileAppState: ObservableObject {
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
     }
 
+    // ingest-parity: STRIP_PROMPT_REPLY_WRAPPER
+    // Removes mobile DOM "You said .. <Provider> responded/said .." wrapper from a
+    // raw prompt candidate so the response body cannot bleed into an aggregated
+    // note title. Mirrors Android's normalizeCollectedPromptCandidate (kept in
+    // sync via tools/ingest-parity-check.sh).
     private func normalizeCollectedPromptCandidate(_ value: String) -> String {
         value
             .replacingOccurrences(
@@ -1629,12 +1767,12 @@ final class MobileAppState: ObservableObject {
                 options: [.regularExpression, .caseInsensitive]
             )
             .replacingOccurrences(
-                of: #"\s*##\s*(?:chatgpt|gemini|claude|grok|perplexity)\s+said\b[\s\S]*$"#,
+                of: #"\s*##\s*(?:chatgpt|gemini|claude|grok|perplexity)\s+(?:said|responded|replied|answered)\b[\s\S]*$"#,
                 with: "",
                 options: [.regularExpression, .caseInsensitive]
             )
             .replacingOccurrences(
-                of: #"\s*(?:chatgpt|gemini|claude|grok|perplexity)\s+said\b[\s\S]*$"#,
+                of: #"\s*(?:\([^)]{0,60}\)\s*)?(?:\d{1,2}:\d{2}(?:\s*[AP]M)?\s*)?(?:\d+\s*/\s*\d+\s*)?(?:chatgpt|gemini|claude|grok|perplexity)\s+(?:said|responded|replied|answered|ответил[аи]?|написал[аи]?)\b[\s\S]*$"#,
                 with: "",
                 options: [.regularExpression, .caseInsensitive]
             )

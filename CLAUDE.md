@@ -1,36 +1,22 @@
 # chat-aggregator-mobile - Working Notes
 
-## Purpose
+Repo entry: see `../VERITY_MAP.md` and `./CURRENT_STATE.md`.
 
-This repo is the future shared mobile monorepo for:
+## Layout
 
-- Android
-- iOS
-- shared JS injection/scrape logic
-
-## Current Reality
-
-- Android source of truth is still the sibling repo `../chat-aggregator-android`.
-- This repo currently holds only scaffold/docs/placeholders.
-- Do not claim Android has been migrated here until the code actually lives under `android/`.
+- `android/` — active Android source. The sibling `../chat-aggregator-android` repo is frozen legacy; do not edit it.
+- `ios/VerityMobile/` — iOS source (Xcode project generated from `project.yml` via `xcodegen`).
+- `shared/js/` — WebView injection (`sendMessage.js`, `scrapeReply.js`, `extractLatestAssistantRaw.js`, `mergeStreamParser.js`, `attachFile.js`). Both clients consume these as bundled assets.
+- `shared/contracts/` — JSON specs + cross-client rule docs (`servicePresets.json`, `mergeConfig.json`, `streamParserConfig.json`, `QUESTION_IDENTITY_RULES.md`).
 
 ## Priority Rules
 
-- Keep migration incremental and reversible.
-- Prefer moving shared JS/contracts before moving full native project structures.
-- Preserve current Android shipping behavior while the monorepo is still forming.
-- Avoid inventing shared abstractions before there is duplicated logic to justify them.
+- When a bug spans both clients, fix both in the same change or extract to `shared/`. Drift between Android and iOS implementations of "same semantics" has repeatedly produced regressions — see [feedback_unify_cross_client_logic](../../.claude/projects/-Users-v-Verity/memory/feedback_unify_cross_client_logic.md) and the cross-client parity rituals in `tools/`.
+- Do not invent new shared abstractions without two existing duplicates to justify them.
+- Canonical scripts: `./scripts/deploy-ios-device.sh`, `./scripts/deploy-android-device.sh`, `./scripts/mobile-doctor.sh`, `./scripts/ingest-smoke-check.sh`.
 
-## Planned Shared Areas
+## Non-Shared Areas
 
-- `shared/js/sendMessage.js`
-- `shared/js/scrapeReply.js`
-- `shared/contracts/` for payload schemas and integration notes
-
-## Planned Non-Shared Areas
-
-- Android UI and lifecycle glue
-- iOS UI and lifecycle glue
-- billing/subscription code
-- platform-specific cookie import flows
-
+- Native UI + lifecycle glue (Android `MainActivity`/`Fragment*`, iOS `*View.swift`/`MobileAppState`).
+- Billing / subscription code.
+- Platform-specific cookie / login flows.

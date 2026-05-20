@@ -916,8 +916,17 @@
             bottom: candidate?.bottom || 0
           }
           : findPromptCandidateForReply(candidate?.el);
-        const allowWebKitPromptMismatch = isIOSWebKit && ['chatgpt', 'gemini'].includes(serviceId);
-        if (sourcePrompt && promptCandidate?.raw && !promptMatchesCurrentSource(promptCandidate.raw) && !allowWebKitPromptMismatch) {
+        // ingest-parity: STRIP_PROMPT_REPLY_WRAPPER (sister rule: reply freshness)
+        // If we DID extract a prompt candidate and it does not match the current
+        // source prompt, the selected reply is stale -- reject regardless of
+        // platform. The previous WebKit-wide bypass let chatgpt/gemini on iOS
+        // ingest assistant blocks from earlier questions in the same chat
+        // (observed in S180: first Collect Now grabbed the prior answer because
+        // the new one was still generating). The bypass below now only applies
+        // to the "no candidate extracted at all" case, which is the original
+        // Angular custom-element issue on Safari/WebKit.
+        const allowWebKitMissingCandidate = isIOSWebKit && ['chatgpt', 'gemini'].includes(serviceId);
+        if (sourcePrompt && promptCandidate?.raw && !promptMatchesCurrentSource(promptCandidate.raw)) {
           return {
             success: false,
             error: 'Selected reply belongs to a previous prompt',
@@ -932,7 +941,7 @@
         // are not always accessible the same way as in Chromium.
         // ChatGPT/Gemini on iPhone/WebKit can expose a stale "You said" block as the nearest user node
         // even when the selected reply is current, so do not hard-require DOM prompt scope there.
-        const requireScopedPromptCandidate = requirePromptMatch || (sourcePrompt && ['chatgpt', 'grok'].includes(serviceId) && !allowWebKitPromptMismatch);
+        const requireScopedPromptCandidate = requirePromptMatch || (sourcePrompt && ['chatgpt', 'grok'].includes(serviceId) && !allowWebKitMissingCandidate);
         if (sourcePrompt && requireScopedPromptCandidate && !promptCandidate) {
           return {
             success: false,

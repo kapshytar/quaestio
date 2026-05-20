@@ -445,6 +445,18 @@ struct MergeView: View {
             }
             appState.finishMergeConversation(with: result.text)
             appState.statusMessage = "Merge completed with \(responses.count) source reply(s)"
+            // ingest-parity: BOOTSTRAP_BEFORE_MERGE
+            // Pass the same `responses` we just fed the LLM so the bootstrap
+            // path does not re-scrape and risk picking up a different reply set.
+            let persisted = await appState.persistMergeMarkdown(
+                result.text,
+                sourcePrompt: sourcePrompt,
+                isClarification: false,
+                prebuiltResponses: responses
+            )
+            if !persisted {
+                appState.statusMessage = "Merge LLM ok, DB persist failed"
+            }
         } catch {
             appState.mergeOutput = "Merge failed: \(error.localizedDescription)"
             appState.statusMessage = "Merge failed"
@@ -494,6 +506,12 @@ struct MergeView: View {
             appState.finishMergeConversation(with: result.text)
             appState.mergeClarificationText = ""
             appState.statusMessage = "Clarification completed"
+            // ingest-parity: BOOTSTRAP_BEFORE_MERGE
+            _ = await appState.persistMergeMarkdown(
+                result.text,
+                sourcePrompt: clarification,
+                isClarification: true
+            )
         } catch {
             appState.mergeOutput = "Clarification failed: \(error.localizedDescription)"
             appState.statusMessage = "Clarification failed"

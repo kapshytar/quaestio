@@ -2073,6 +2073,11 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         return normalized
     }
 
+    // ingest-parity: STRIP_PROMPT_REPLY_WRAPPER
+    // Removes mobile DOM "You said .. <Provider> responded/said .." wrapper from a
+    // raw prompt candidate so the response body cannot bleed into an aggregated
+    // note title. Mirrors iOS's normalizeCollectedPromptCandidate (kept in sync
+    // via tools/ingest-parity-check.sh).
     private fun normalizeCollectedPromptCandidate(value: String): String {
         return value
             .replace(
@@ -2084,14 +2089,14 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             )
             .replace(
                 Regex(
-                    "\\s*##\\s*(?:chatgpt|gemini|claude|grok|perplexity)\\s+said\\b[\\s\\S]*$",
+                    "\\s*##\\s*(?:chatgpt|gemini|claude|grok|perplexity)\\s+(?:said|responded|replied|answered)\\b[\\s\\S]*$",
                     RegexOption.IGNORE_CASE
                 ),
                 ""
             )
             .replace(
                 Regex(
-                    "\\s*(?:chatgpt|gemini|claude|grok|perplexity)\\s+said\\b[\\s\\S]*$",
+                    "\\s*(?:\\([^)]{0,60}\\)\\s*)?(?:\\d{1,2}:\\d{2}(?:\\s*[AP]M)?\\s*)?(?:\\d+\\s*/\\s*\\d+\\s*)?(?:chatgpt|gemini|claude|grok|perplexity)\\s+(?:said|responded|replied|answered|ответил[аи]?|написал[аи]?)\\b[\\s\\S]*$",
                     RegexOption.IGNORE_CASE
                 ),
                 ""
@@ -3648,11 +3653,22 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 val normalizedMarkdown = normalizeMergeMarkdownForIngest(markdown)
                 var sessionId = getCurrentQuestionSessionId()
                 var aggregatedNoteId = getCurrentQuestionAggregatedNoteId()
-                if (sessionId == null && sourceResponses.isNotEmpty()) {
+                // ingest-parity: BOOTSTRAP_BEFORE_MERGE
+                // Merge must not attach to a stale aggregated root from a previous
+                // question in the same logical session. Bootstrap a fresh root when
+                // either (a) no session/root exists yet, or (b) the loaded root's
+                // prompt no longer matches the current question. Without this guard
+                // a fresh user prompt sent into an existing session ends up with the
+                // merge child wired to the OLD question root (observed in S180).
+                val loadedRootPrompt = SettingsManager.getParallelIngestSourcePrompt(this).trim()
+                val promptMatchesLoadedRoot = loadedRootPrompt.isNotBlank()
+                    && promptsReferToSameQuestion(promptText, loadedRootPrompt)
+                val needsBootstrap = (sessionId == null || aggregatedNoteId == null || !promptMatchesLoadedRoot)
+                if (needsBootstrap && sourceResponses.isNotEmpty()) {
                     if (detailed) {
                         Log.d(
                             TAG,
-                            "merge ingest bootstrap: no current root/session, creating aggregated note first prompt=${promptText.take(120)} responses=${sourceResponses.size}"
+                            "merge ingest bootstrap: session=$sessionId root=$aggregatedNoteId match=$promptMatchesLoadedRoot prompt=${promptText.take(120)} responses=${sourceResponses.size}"
                         )
                     }
                     val bootstrapResult = ingestCollectedResponses(
