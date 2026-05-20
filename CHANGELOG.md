@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.4
+
+- replace iOS and Android launcher icons with finalized platform exports for both light and dark system appearances
+
+
 ## 2.4.3
 
 - refresh iOS and Android launcher icons with the new Quaestio Q artwork, including dark appearance variants for system theme-aware launchers
