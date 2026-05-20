@@ -679,9 +679,52 @@ async function deleteSessionViaRestFallback(target) {
     const noteRows = await callSupabaseRestGet(`notes?select=id,parent_id,note_session_id&id=eq.${encodeFilterValue(noteId)}&limit=1`);
     const note = Array.isArray(noteRows) && noteRows.length > 0 ? noteRows[0] : null;
     if (note?.id) {
-      const parentId = note.parent_id ?? null;
-      await callSupabaseRestPatch(`notes?parent_id=eq.${encodeFilterValue(note.id)}`, { parent_id: parentId });
-      await callSupabaseRestDelete(`notes?id=eq.${encodeFilterValue(note.id)}`);
+      const allRows = await callSupabaseRestGet('notes?select=id,parent_id,note_type,note_session_id');
+      const childIdsByParent = new Map();
+      const rowsById = new Map();
+      (Array.isArray(allRows) ? allRows : []).forEach((row) => {
+        const parentId = String(row?.parent_id || '').trim();
+        const id = String(row?.id || '').trim();
+        if (!id) return;
+        rowsById.set(id, row);
+        if (parentId) {
+          const list = childIdsByParent.get(parentId) || [];
+          list.push(id);
+          childIdsByParent.set(parentId, list);
+        }
+      });
+
+      const subtreeIds = new Set([String(note.id)]);
+      const stack = [String(note.id)];
+      while (stack.length > 0) {
+        const current = stack.pop();
+        (childIdsByParent.get(current) || []).forEach((childId) => {
+          if (subtreeIds.has(childId)) return;
+          subtreeIds.add(childId);
+          stack.push(childId);
+        });
+      }
+
+      const deleteIds = new Set(
+        [...subtreeIds].filter((id) => {
+          const row = rowsById.get(id);
+          return id === String(note.id) || row?.note_type === 2 || row?.note_type === 3;
+        })
+      );
+      const preservedIds = [...subtreeIds].filter((id) => !deleteIds.has(id));
+      const rootParentId = note.parent_id ?? null;
+      for (const preservedId of preservedIds) {
+        const row = rowsById.get(preservedId);
+        const parentId = String(row?.parent_id || '').trim();
+        if (parentId && deleteIds.has(parentId)) {
+          await callSupabaseRestPatch(`notes?id=eq.${encodeFilterValue(preservedId)}`, { parent_id: rootParentId });
+        }
+      }
+
+      const filter = [...deleteIds].map(encodeFilterValue).join(',');
+      if (filter) {
+        await callSupabaseRestDelete(`notes?id=in.(${filter})`);
+      }
     }
 
     await callSupabaseRestDelete(`aggregator_sessions?note_id=eq.${encodeFilterValue(noteId)}`);

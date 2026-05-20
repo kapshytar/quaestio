@@ -4730,6 +4730,21 @@ async function getLatestAssistantReply(slot) {
       return candidates[0];
     }
 
+    function isRejectedServiceCandidate(el) {
+      if (serviceId !== 'grok' || !el) return false;
+
+      // Grok aligns user turns to the right (items-end) and assistant turns
+      // to the left (items-start). Its generic response wrappers can
+      // match both, so reject the user-side bubble before ranking.
+      let node = el;
+      for (let depth = 0; node && depth < 6; depth += 1, node = node.parentElement) {
+        const className = String(node.className || '').toLowerCase();
+        if (className.includes('items-start')) return false;
+        if (className.includes('items-end')) return true;
+      }
+      return false;
+    }
+
     const selectorEntries = [
       ['[data-testid*="conversation-turn"]', '[data-testid*="conversation-turn"]'],
       ['[data-testid*="message-content"]', '[data-testid*="message-content"]'],
@@ -4751,6 +4766,7 @@ async function getLatestAssistantReply(slot) {
         document.querySelectorAll(sel).forEach((el) => {
           if (!visible(el)) return;
           if (isComposerElement(el)) return;
+          if (isRejectedServiceCandidate(el)) return;
           const raw = extractStructuredText(el);
           const flat = flatText(raw);
           if (flat.length < 20 || isMetadataLikeText(flat)) return;
@@ -4773,6 +4789,7 @@ async function getLatestAssistantReply(slot) {
     if (candidates.length === 0) {
       Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
         if (isComposerElement(el)) return;
+        if (isRejectedServiceCandidate(el)) return;
         const raw = extractStructuredText(el);
         const flat = flatText(raw);
         if (flat.length < 20 || isMetadataLikeText(flat)) return;

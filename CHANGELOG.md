@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.111.2
+
+- make desktop session deletion remove the note-backed question root plus merge/clarification children, while preserving other child notes by reparenting them to the previous parent
+
+## 1.111.1
+
+- fix Grok desktop DOM scraping to reject right-aligned user bubbles before ranking response candidates, so a still-loading Grok answer cannot ingest the user's prompt as the Grok slot
+
 ## 1.111.0
 
 - fix desktop slot chips: service icons now show real favicons captured from the live webview via `page-favicon-updated`, falling back to letter-badge SVG before any page loads
