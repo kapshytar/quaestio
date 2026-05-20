@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, session, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, session, clipboard, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -31,6 +31,23 @@ let mainWindow;
 let googleAuthWindow = null;
 const IS_MAC = process.platform === 'darwin';
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+function getAppIconPath() {
+  const suffix = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+  const ext = IS_MAC ? 'png' : 'ico';
+  return path.join(__dirname, `icon-${suffix}.${ext}`);
+}
+
+function refreshDockIcon() {
+  if (IS_MAC && app.dock) {
+    app.dock.setIcon(getAppIconPath());
+  }
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed() && typeof win.setIcon === 'function') {
+      win.setIcon(getAppIconPath());
+    }
+  });
+}
 
 const DESKTOP_USER_AGENT = IS_MAC
   ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`
@@ -1149,7 +1166,7 @@ ipcMain.handle('dream-open-session-window', async (_event, session) => {
       },
       backgroundColor: '#1a1a1a',
       title: `Quaestio — ${session?.name || 'Session'}`,
-      icon: path.join(__dirname, IS_MAC ? 'icon.png' : 'icon.ico')
+      icon: getAppIconPath()
     });
     // Pass session as query param so the new window can restore it
     const encoded = encodeURIComponent(JSON.stringify(session));
@@ -1398,7 +1415,7 @@ async function createWindow() {
     },
     backgroundColor: '#1a1a1a',
     title: 'Quaestio (alpha)',
-    icon: path.join(__dirname, IS_MAC ? 'icon.png' : 'icon.ico')
+    icon: getAppIconPath()
   });
 
   mainWindow = window;
@@ -1713,6 +1730,9 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(() => {
+    refreshDockIcon();
+    nativeTheme.on('updated', refreshDockIcon);
+
     Promise.resolve()
       .then(() => migrateLegacyPartitionsToShared())
       .catch((err) => console.warn('[CookieMigration] Unexpected error:', err.message))

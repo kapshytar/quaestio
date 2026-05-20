@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.111.3
+
+- refresh the desktop app icon set with the new Quaestio Q artwork, including light and dark runtime variants for theme-aware window/dock icons
+
 ## 1.111.2
 
 - make desktop session deletion remove the note-backed question root plus merge/clarification children, while preserving other child notes by reparenting them to the previous parent

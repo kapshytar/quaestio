@@ -1,6 +1,6 @@
 {
   "name": "verity",
-  "version": "1.111.2",
+  "version": "1.111.3",
   "description": "Quaestio - multi-AI chat aggregator",
   "main": "main.js",
   "scripts": {

@@ -62,6 +62,12 @@
 - debug-runs/ is now a local forensic workspace. Trace artifacts stay local and are not tracked by git.
 - Merge panel labels use plain ASCII text to avoid codepage-dependent UI garbage on Windows.
 - Desktop is currently the scrape reference implementation; do not reintroduce shared scraper experiments here without proving parity first.
+- Routine desktop verification is `../rituals/check-desktop.sh` from the workspace root, not `npm run build`.
+- `npm run build` runs `electron-builder` and is a packaging/release step:
+  it can write `dist/`, sign app bundles, touch `~/Library/Caches/electron`,
+  and download Electron runtime zips even when Electron is already installed as
+  an npm dependency. Do not run or escalate it unless a packaged artifact is
+  explicitly needed.
 
 ## Stable Scrape Behavior
 
