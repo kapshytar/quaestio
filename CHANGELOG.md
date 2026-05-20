@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.111.4
+
+- replace the macOS desktop icon PNGs with finalized Icon Kitchen exports so the Quaestio Q app icon matches native macOS launcher styling
+
 ## 1.111.3
 
 - refresh the desktop app icon set with the new Quaestio Q artwork, including light and dark runtime variants for theme-aware window/dock icons
