@@ -21,4 +21,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSessionWindow: (session) => ipcRenderer.invoke('dream-open-session-window', session),
   listProjectTreeData: () => ipcRenderer.invoke('dream-list-project-tree-data'),
   getProjectSlotUrls: (projectId) => ipcRenderer.invoke('dream-get-project-slot-urls', projectId),
+  onAppBackgroundModeChanged: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, backgrounded) => callback(Boolean(backgrounded));
+    ipcRenderer.on('app-background-mode-changed', listener);
+    return () => ipcRenderer.removeListener('app-background-mode-changed', listener);
+  },
+  setAppBackgroundWorkActive: (busy) =>
+    ipcRenderer.send('app-background-work-state-changed', Boolean(busy)),
 });

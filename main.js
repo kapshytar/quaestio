@@ -29,6 +29,10 @@ const { importCookiesFromJSON } = require('./cookie-import-simple');
 
 let mainWindow;
 let googleAuthWindow = null;
+let webviewsBackgrounded = false;
+let rendererHasActiveWebviewWork = false;
+const lowPowerFrozenWebContents = new Set();
+const lowPowerAttachedWebContents = new Set();
 const IS_MAC = process.platform === 'darwin';
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -125,23 +129,85 @@ function getDesktopAboutInfo() {
   };
 }
 
-// Throttle all webviews when app is minimized/hidden to save CPU
-function setAllWebviewsBackgrounded(backgrounded) {
+function getAllGuestWebContents() {
+  const { webContents } = require('electron');
+  return webContents.getAllWebContents().filter((wc) => wc.getType() === 'webview');
+}
+
+async function setWebContentsLifecycle(wc, state) {
+  if (!wc || wc.isDestroyed()) return false;
+  if (!wc.debugger.isAttached()) {
+    wc.debugger.attach('1.3');
+    lowPowerAttachedWebContents.add(wc.id);
+  }
+  await wc.debugger.sendCommand('Page.setWebLifecycleState', { state });
+  return true;
+}
+
+async function freezeIdleWebview(wc) {
+  if (!wc || wc.isDestroyed() || lowPowerFrozenWebContents.has(wc.id)) return;
   try {
-    const { webContents } = require('electron');
-    const allContents = webContents.getAllWebContents();
-    for (const wc of allContents) {
-      if (wc.getType() === 'webview') {
-        // Electron's built-in throttling: slows timers, rAF, etc. when backgrounded
-        wc.setBackgroundThrottling(true);
-        // Mute audio when minimized (optional comfort)
-        wc.setAudioMuted(backgrounded);
+    await setWebContentsLifecycle(wc, 'frozen');
+    lowPowerFrozenWebContents.add(wc.id);
+  } catch (err) {
+    console.warn(`[Throttle] Freeze skipped for webview ${wc.id}:`, err?.message || err);
+  }
+}
+
+async function resumeFrozenWebview(wc) {
+  if (!wc || wc.isDestroyed() || !lowPowerFrozenWebContents.has(wc.id)) return;
+  try {
+    await setWebContentsLifecycle(wc, 'active');
+  } catch (err) {
+    console.warn(`[Throttle] Resume skipped for webview ${wc.id}:`, err?.message || err);
+  } finally {
+    lowPowerFrozenWebContents.delete(wc.id);
+    try {
+      if (lowPowerAttachedWebContents.has(wc.id) && wc.debugger.isAttached()) wc.debugger.detach();
+    } catch (_) {}
+    lowPowerAttachedWebContents.delete(wc.id);
+  }
+}
+
+function broadcastBackgroundMode() {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) {
+      win.webContents.send('app-background-mode-changed', webviewsBackgrounded);
+    }
+  });
+}
+
+async function applyWebviewsPowerState() {
+  try {
+    const guestContents = getAllGuestWebContents();
+    const shouldFreeze = webviewsBackgrounded && !rendererHasActiveWebviewWork;
+    const frameRate = webviewsBackgrounded ? 1 : 60;
+
+    for (const wc of guestContents) {
+      wc.setBackgroundThrottling(true);
+      if (typeof wc.setFrameRate === 'function') {
+        wc.setFrameRate(frameRate);
+      }
+      wc.setAudioMuted(webviewsBackgrounded);
+
+      if (shouldFreeze) {
+        await freezeIdleWebview(wc);
+      } else {
+        await resumeFrozenWebview(wc);
       }
     }
-    console.log(`[Throttle] Webviews backgrounded=${backgrounded}, count=${allContents.filter(w => w.getType() === 'webview').length}`);
+
+    console.log(`[Throttle] Webviews backgrounded=${webviewsBackgrounded}, busy=${rendererHasActiveWebviewWork}, frozen=${shouldFreeze}, count=${guestContents.length}`);
   } catch (err) {
     console.warn('[Throttle] Error:', err.message);
   }
+}
+
+// Throttle or freeze all webviews when app is minimized/hidden to save CPU/GPU.
+function setAllWebviewsBackgrounded(backgrounded) {
+  webviewsBackgrounded = !!backgrounded;
+  broadcastBackgroundMode();
+  applyWebviewsPowerState();
 }
 const MAX_COOKIE_IMPORT_SIZE_BYTES = 5 * 1024 * 1024;
 const DREAM_RPC_PATHS = {
@@ -1280,6 +1346,13 @@ ipcMain.handle('app-get-about-info', async () => {
   }
 });
 
+ipcMain.on('app-background-work-state-changed', (_event, busy) => {
+  rendererHasActiveWebviewWork = Boolean(busy);
+  if (webviewsBackgrounded) {
+    applyWebviewsPowerState();
+  }
+});
+
 ipcMain.handle('import-cookies', async (event, jsonContent) => {
   console.log('Received import-cookies IPC message');
 
@@ -1423,17 +1496,25 @@ async function createWindow() {
   window.loadFile('index.html');
 
   // ---- Throttle webviews when window is hidden/minimized to save CPU ----
+  const restoreForegroundPowerState = () => {
+    setAllWebviewsBackgrounded(false);
+  };
+
   window.on('minimize', () => {
     setAllWebviewsBackgrounded(true);
   });
   window.on('restore', () => {
-    setAllWebviewsBackgrounded(false);
+    restoreForegroundPowerState();
   });
   window.on('hide', () => {
     setAllWebviewsBackgrounded(true);
   });
   window.on('show', () => {
-    setAllWebviewsBackgrounded(false);
+    restoreForegroundPowerState();
+  });
+  window.on('focus', () => {
+    mainWindow = window;
+    restoreForegroundPowerState();
   });
 
   window.webContents.on('console-message', (event) => {
@@ -1447,10 +1528,6 @@ async function createWindow() {
     console.log(`[renderer][${levelTag}] ${event.message}`);
   });
 
-  window.on('focus', () => {
-    mainWindow = window;
-  });
-
   window.on('closed', () => {
     if (mainWindow === window) {
       mainWindow = getPrimaryWindow();
@@ -1462,6 +1539,18 @@ async function createWindow() {
     webviewCounter++;
     const slotTag = `slot-${webviewCounter}`;
     webviewContents.setUserAgent(DESKTOP_USER_AGENT);
+    webviewContents.setBackgroundThrottling(true);
+    if (typeof webviewContents.setFrameRate === 'function') {
+      webviewContents.setFrameRate(webviewsBackgrounded ? 1 : 60);
+    }
+    webviewContents.setAudioMuted(webviewsBackgrounded);
+    if (webviewsBackgrounded && !rendererHasActiveWebviewWork) {
+      freezeIdleWebview(webviewContents);
+    }
+    webviewContents.on('destroyed', () => {
+      lowPowerFrozenWebContents.delete(webviewContents.id);
+      lowPowerAttachedWebContents.delete(webviewContents.id);
+    });
 
     webviewContents.on('console-message', (event) => {
       if (event.level === 'warning' || event.level === 'error') {

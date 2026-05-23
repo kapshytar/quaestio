@@ -166,6 +166,23 @@ const slotFavicons = {};
 let expandedSlot = null;
 let leftSplitSlot = null;
 let rightSplitSlot = null;
+let appBackgrounded = false;
+
+function applyAppBackgroundMode(backgrounded) {
+  appBackgrounded = !!backgrounded;
+  document.documentElement.classList.toggle('app-backgrounded', appBackgrounded);
+  document.body?.classList.toggle('app-backgrounded', appBackgrounded);
+
+  SLOTS.forEach(slot => {
+    const webview = webviews[slot];
+    if (!webview) return;
+    try {
+      webview.setAudioMuted?.(appBackgrounded);
+    } catch (_) {
+      // Some Electron versions expose muting only on the backing WebContents.
+    }
+  });
+}
 
 SLOTS.forEach(slot => {
   webviews[slot] = document.getElementById(`webview-${slot}`);
@@ -209,6 +226,8 @@ const aboutGitMetaEl = document.getElementById('about-git-meta');
 const aboutChangelogListEl = document.getElementById('about-changelog-list');
 const aboutChangelogEmptyEl = document.getElementById('about-changelog-empty');
 const webviewGridEl = document.getElementById('webview-grid');
+
+window.electronAPI?.onAppBackgroundModeChanged?.(applyAppBackgroundMode);
 
 // Merge panel elements (populated after DOM ready)
 let mergeProviderSelect, mergeApiKeyInput, mergeEndpointInput, mergeModelInput;
@@ -262,6 +281,8 @@ let activeIngestTraceId = '';
 let ingestSequenceCounter = 0;
 let ingestSequenceBySourceMessageId = new Map();
 const lastDomScrapeDebugBySlot = new Map();
+let activeSendCount = 0;
+let lastReportedBackgroundWorkActive = null;
 let activeSessionFingerprint = '';
 let activeSessionId = null; // in-memory session_id � set immediately when RPC returns
 let activeAggregatedNoteId = null; // current question root note for manual Collect now overwrite
@@ -285,6 +306,28 @@ const slotAggregationStatuses = {};
 const AGGREGATION_WAIT_MAX_CHECKS = 12;
 const AGGREGATION_WAIT_INTERVAL_MS = 2500;
 const AGGREGATION_SETTLE_DELAY_MS = 1500;
+
+function hasActiveWebviewWork() {
+  const waitingStatus = window.AggregationControl?.SLOT_STATUS?.WAITING || 'waiting';
+  const scrapingStatus = window.AggregationControl?.SLOT_STATUS?.SCRAPING || 'scraping';
+  const sendingStatus = window.AggregationControl?.SLOT_STATUS?.SENDING || 'pending';
+  const pendingAggregationIsWaiting = !!aggregationControl.pendingAggregation?.waiting && !aggregationControl.paused;
+  const anySlotBusy = Object.values(slotAggregationStatuses).some((status) =>
+    status === waitingStatus || status === scrapingStatus || status === sendingStatus
+  );
+  return activeSendCount > 0
+    || mergeInProgress
+    || aggregationControl.hasPendingMerge()
+    || pendingAggregationIsWaiting
+    || anySlotBusy;
+}
+
+function reportBackgroundWorkState() {
+  const busy = hasActiveWebviewWork();
+  if (busy === lastReportedBackgroundWorkActive) return;
+  lastReportedBackgroundWorkActive = busy;
+  window.electronAPI?.setAppBackgroundWorkActive?.(busy);
+}
 
 function resizeMessageInput() {
   if (!messageInput) return;
@@ -3515,6 +3558,7 @@ function setStatus(slot, status, options = {}) {
       statusTimeouts[slot] = null;
     }, 4000);
   }
+  reportBackgroundWorkState();
 }
 
 function setAggregationSummary(text = '') {
@@ -3528,6 +3572,7 @@ function getSlotDisplayName(slot) {
 function setAggregationSlotStatus(slot, status) {
   slotAggregationStatuses[slot] = status;
   setStatus(slot, status, { temporary: false });
+  reportBackgroundWorkState();
 }
 
 function resetAggregationSlotStatuses(enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked)) {
@@ -3561,6 +3606,7 @@ function updateAggregationActionButtons() {
     const hasEnabledSlots = SLOTS.some((slot) => toggles[slot]?.checked);
     collectNowBtn.disabled = !hasEnabledSlots;
   }
+  reportBackgroundWorkState();
 }
 
 async function readAggregationStatuses(options = {}) {
@@ -3643,11 +3689,15 @@ function normalizeSelectors(rawSelectors) {
 }
 
 async function sendMessage(slot, text) {
+  activeSendCount += 1;
+  reportBackgroundWorkState();
   const webview = webviews[slot];
   const selector = normalizeSelectors(getSelectorsForSlot(slot));
 
   if (!webview || !selector) {
     setStatus(slot, window.AggregationControl?.SLOT_STATUS?.ERROR || 'error', { temporary: true });
+    activeSendCount = Math.max(0, activeSendCount - 1);
+    reportBackgroundWorkState();
     return;
   }
 
@@ -3914,6 +3964,9 @@ async function sendMessage(slot, text) {
   } catch (error) {
     console.error(`[${slot}] Exception:`, error);
     setStatus(slot, window.AggregationControl?.SLOT_STATUS?.ERROR || 'error', { temporary: true });
+  } finally {
+    activeSendCount = Math.max(0, activeSendCount - 1);
+    reportBackgroundWorkState();
   }
 }
 
@@ -3941,9 +3994,12 @@ async function sendToAll() {
   const sessionIdHint = Number.isInteger(activeSessionId) && activeSessionId > 0
     ? activeSessionId
     : (storedContext?.session_id || null);
+  const restoredNoteId = String(activeAggregatedNoteId || storedContext?.aggregated_note_id || '').trim() || null;
+  const restoredPrompt = String(storedContext?.source_prompt || '').trim();
+  const sameQuestionAsRestored = !!restoredNoteId
+    && promptsReferToSameQuestion(text, restoredPrompt);
 
   if (Number.isInteger(sessionIdHint) && sessionIdHint > 0) {
-    const restoredNoteId = String(activeAggregatedNoteId || storedContext?.aggregated_note_id || '').trim() || null;
     if (sessionFingerprint) {
       persistSessionContext(sessionIdHint, sessionFingerprint, restoredNoteId, storedContext?.source_prompt || activeSessionPrompt || null);
     } else {
@@ -3971,12 +4027,13 @@ async function sendToAll() {
     sourcePrompt: text,
     expectedSlotCount: enabledSlots.length,
     waiting: true,
-    forceNewRoot: true,
+    forceNewRoot: !sameQuestionAsRestored,
+    allowOverwriteExisting: sameQuestionAsRestored,
     ingestContext: {
       sessionFingerprint,
       sessionIdHint
     },
-    aggregatedNoteId: null,
+    aggregatedNoteId: sameQuestionAsRestored ? restoredNoteId : null,
     runId: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   };
   aggregationControl.beginPendingAggregation(pendingAggregation);
@@ -5127,8 +5184,16 @@ async function collectLatestRepliesFromEnabledSlots() {
         extractionMethod = 'dom';
       }
     }
+    let cleanedReply = sanitizeScrapedReply(serviceId, reply || '', sourcePrompt);
+    if (!isQualityReply(cleanedReply, sourcePrompt) && copied?.text && domReply?.raw) {
+      const domCleanedReply = sanitizeScrapedReply(serviceId, domReply.raw, sourcePrompt);
+      if (isQualityReply(domCleanedReply, sourcePrompt)) {
+        reply = domReply.raw;
+        cleanedReply = domCleanedReply;
+        extractionMethod = 'dom-fallback';
+      }
+    }
     const domDiagnostics = domReply?.diagnostics || lastDomScrapeDebugBySlot.get(slot) || null;
-    const cleanedReply = sanitizeScrapedReply(serviceId, reply || '', sourcePrompt);
     await appendTraceScrapeArtifact(traceId, slot, serviceId, serviceName, domDiagnostics, {
       extraction_method: extractionMethod,
       raw_chars: String(reply || '').length,
@@ -5316,11 +5381,13 @@ function setMergeStatus(text, type = 'idle') {
 function clearPendingAggregationState() {
   aggregationControl.clearPendingMerge();
   updateAggregationActionButtons();
+  reportBackgroundWorkState();
 }
 
 function clearPendingAutoAggregationState() {
   aggregationControl.clearPendingAggregation();
   updateAggregationActionButtons();
+  reportBackgroundWorkState();
 }
 
 function isSamePendingAggregation(runId) {
@@ -5426,6 +5493,7 @@ async function collectNowAggregation(manual = true) {
   let resolvedExistingAggregatedNoteId = existingAggregatedNoteId;
   let storedPrompt = loadedQuestionPrompt;
   const forceNewRoot = !!pending?.forceNewRoot;
+  const allowPendingOverwrite = !!pending?.allowOverwriteExisting;
 
   enabledSlots.forEach((slot) => {
     const serviceId = detectServiceByUrl(getWebviewCurrentUrl(slot)) || slotConfig[slot] || slot;
@@ -5447,7 +5515,7 @@ async function collectNowAggregation(manual = true) {
     ? promptsReferToSameQuestion(sourcePrompt, storedPrompt)
     : false;
   if (
-    manual
+    (manual || allowPendingOverwrite)
     && !forceNewRoot
     && sourcePrompt
     && Number.isInteger(ingestContext.sessionIdHint)
@@ -5473,7 +5541,7 @@ async function collectNowAggregation(manual = true) {
     }
   }
   const replaceExisting = !forceNewRoot
-    && manual
+    && (manual || allowPendingOverwrite)
     && Number.isInteger(ingestContext.sessionIdHint)
     && ingestContext.sessionIdHint > 0
     && !!resolvedExistingAggregatedNoteId
@@ -5604,6 +5672,7 @@ async function collectAndMaybeRunPendingMerge(manual = false) {
     setMergeStatus('No responses to merge. Send messages first.', 'error');
     mergeLog('No responses collected � nothing to merge', 'error');
     mergeInProgress = false;
+    reportBackgroundWorkState();
     if (runMergeBtn) runMergeBtn.disabled = false;
     if (clarificationSendBtn) clarificationSendBtn.disabled = false;
     clearPendingAggregationState();
@@ -5664,6 +5733,7 @@ async function executeMergeRequest(isClarification, clarificationText, previousS
   }
 
   mergeInProgress = false;
+  reportBackgroundWorkState();
   if (runMergeBtn) runMergeBtn.disabled = false;
   if (clarificationSendBtn) clarificationSendBtn.disabled = false;
   updateAggregationActionButtons();
@@ -5818,6 +5888,7 @@ async function runMerge(isClarification = false, clarificationText = '', previou
   mergeLog(`Provider: ${providerInfo}`, 'info');
 
   mergeInProgress = true;
+  reportBackgroundWorkState();
   setMergeStatus(isClarification ? 'Processing follow-up...' : 'Collecting responses...', 'running');
   if (runMergeBtn) runMergeBtn.disabled = true;
   if (isClarification && clarificationSendBtn) clarificationSendBtn.disabled = true;

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.111.9
+
+- fall back from ChatGPT copy extraction to DOM extraction when the copied text is only the user's prompt, so the assistant reply reaches aggregated ingest
+
+## 1.111.8
+
+- prevent duplicate desktop question roots when the same prompt is sent again in the same slot fingerprint by overwriting the known aggregated root instead of forcing a new one
+- keep desktop webviews fully active when the app merely loses focus on the same visible workspace; low-power mode now only follows real hide/minimize state
+
+## 1.111.7
+
+- refresh the desktop color system from the finalized Q app icons with a minimal dark glow palette and a softer light-theme palette
+- reduce desktop background GPU work by throttling webview frame rate and pausing local UI animation when the window loses focus
+- add an idle-only desktop low-power mode that freezes background webviews through Chromium lifecycle controls while preserving active sends, aggregation, and merge work
+
 ## 1.111.4
 
 - replace the macOS desktop icon PNGs with finalized Icon Kitchen exports so the Quaestio Q app icon matches native macOS launcher styling
