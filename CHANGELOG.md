@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.6
+
+- dismiss the native iOS composer keyboard when the user taps back into a slot WebView, so the iPhone page area is restored without blocking the web tap
+
+
 ## 2.4.5
 
 - prevent Android and iOS from reusing a stale saved ingest session when the current slot conversations no longer match the saved session snapshot; same-slot follow-up questions still keep the logical session but clear the exact active root before ingest

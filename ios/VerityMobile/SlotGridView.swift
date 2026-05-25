@@ -159,7 +159,9 @@ struct SlotGridView: View {
                 if let slot = selectedSlot {
                     let model = appState.webModel(for: slot.id)
 
-                    WebViewSlot(slot: slot, model: model)
+                    WebViewSlot(slot: slot, model: model) {
+                        dismissComposerInput()
+                    }
                         .id(slot.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .opacity(model.isDisplayReady ? 1 : 0.001)
@@ -850,6 +852,15 @@ struct SlotGridView: View {
     private func toggleSlotEnabled(_ slotId: Int) {
         guard let index = appState.slots.firstIndex(where: { $0.id == slotId }) else { return }
         appState.slots[index].isEnabled.toggle()
+    }
+
+    private func dismissComposerInput() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 
     private func tabAccent(for slot: SlotState) -> Color {
