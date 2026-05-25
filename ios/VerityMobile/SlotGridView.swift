@@ -116,6 +116,8 @@ struct SlotGridView: View {
     @State private var showsSettingsQuickMenu = false
     @State private var sessionSearchText = ""
     @State private var composerHeight: CGFloat = 22
+    @State private var collapsesBottomTrayForWebInput = false
+    @State private var isKeyboardVisible = false
     @State private var projectRefreshLocked = false
     @State private var sessionsRefreshLocked = false
     @State private var expandedSessionTitleIds: Set<String> = []
@@ -160,7 +162,7 @@ struct SlotGridView: View {
                     let model = appState.webModel(for: slot.id)
 
                     WebViewSlot(slot: slot, model: model) {
-                        dismissComposerInput()
+                        collapseBottomTrayForWebInput()
                     }
                         .id(slot.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -208,10 +210,18 @@ struct SlotGridView: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 4)
 
-            bottomPanel
-                .padding(.horizontal, 10)
-                .padding(.top, 4)
-                .padding(.bottom, 8)
+            Group {
+                if collapsesBottomTrayForWebInput {
+                    collapsedBottomTraySwipeZone
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else {
+                    bottomPanel
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, collapsesBottomTrayForWebInput ? 0 : 10)
+            .padding(.top, collapsesBottomTrayForWebInput ? 0 : 4)
+            .padding(.bottom, collapsesBottomTrayForWebInput ? 2 : 8)
         }
         .shellBackground()
         .navigationBarTitleDisplayMode(.inline)
@@ -226,10 +236,18 @@ struct SlotGridView: View {
         }
         .onChange(of: appState.selectedSlotId) { _, _ in
             showsSlotControlStrip = false
+            collapsesBottomTrayForWebInput = false
             syncSlotAddressDraft()
         }
         .onChange(of: appState.slots) { _, _ in
             syncSlotAddressDraft()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            isKeyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
+            collapsesBottomTrayForWebInput = false
         }
         .sheet(isPresented: $showsProjectSheet) {
             projectSheet
@@ -702,6 +720,21 @@ struct SlotGridView: View {
         .padding(.bottom, 4)
     }
 
+    private var collapsedBottomTraySwipeZone: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: 12)
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12)
+                    .onEnded { value in
+                        if value.translation.height < -10 {
+                            restoreBottomTray()
+                        }
+                    }
+            )
+    }
+
     private var contextCompactRow: some View {
         HStack(spacing: 8) {
             projectButton
@@ -854,13 +887,21 @@ struct SlotGridView: View {
         appState.slots[index].isEnabled.toggle()
     }
 
-    private func dismissComposerInput() {
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
+    private func collapseBottomTrayForWebInput() {
+        guard !collapsesBottomTrayForWebInput else { return }
+        collapsesBottomTrayForWebInput = true
+        Task {
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            await MainActor.run {
+                if !isKeyboardVisible {
+                    collapsesBottomTrayForWebInput = false
+                }
+            }
+        }
+    }
+
+    private func restoreBottomTray() {
+        collapsesBottomTrayForWebInput = false
     }
 
     private func tabAccent(for slot: SlotState) -> Color {

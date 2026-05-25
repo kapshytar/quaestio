@@ -26,7 +26,7 @@ struct WebViewSlot: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        private static let tapRecognizerName = "VerityDismissComposerTap"
+        private static let tapRecognizerName = "VerityHideComposerForWebTap"
         var onUserInteraction: (() -> Void)?
 
         init(onUserInteraction: (() -> Void)?) {
@@ -46,7 +46,9 @@ struct WebViewSlot: UIViewRepresentable {
         }
 
         @objc private func handleTap() {
-            onUserInteraction?()
+            DispatchQueue.main.async {
+                self.onUserInteraction?()
+            }
         }
 
         func gestureRecognizer(

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.5.0
+
+- ship the iOS WebView typing tray behavior: focusing a slot WebView collapses the native bottom controls to a minimal invisible swipe-up restore zone, preserving WebView keyboard focus while maximizing visible page area
+
+
+## 2.4.9
+
+- shrink the collapsed iOS bottom tray to an invisible 12pt swipe-up zone, removing the visible chevron handle so WebView typing keeps almost the whole screen
+
+
+## 2.4.8
+
+- collapse the full iOS bottom tray while typing inside a slot WebView and leave a compact chevron handle that can be tapped or swiped upward to restore the tray
+
+
+## 2.4.7
+
+- hide only the native iOS send-to-all composer while the user is typing inside a slot WebView, keeping the WebView keyboard/focus active and restoring the composer after the keyboard closes
+
+
 ## 2.4.6
 
 - dismiss the native iOS composer keyboard when the user taps back into a slot WebView, so the iPhone page area is restored without blocking the web tap
