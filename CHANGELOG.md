@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.5
+
+- prevent Android and iOS from reusing a stale saved ingest session when the current slot conversations no longer match the saved session snapshot; same-slot follow-up questions still keep the logical session but clear the exact active root before ingest
+
+
 ## 2.4.4
 
 - replace iOS and Android launcher icons with finalized platform exports for both light and dark system appearances

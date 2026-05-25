@@ -153,6 +153,7 @@ final class MobileAppState: ObservableObject {
         // Verity/docs/domains/SESSION_AND_INGEST_RULES.md.
         // Keep iOS behavior aligned with Android there; do not invent local rules here.
         let hadCurrentQuestionContext = currentQuestionSessionId() != nil && currentQuestionAggregatedNoteId() != nil
+        let contextMatchesCurrentSlots = hasCurrentQuestionContextForCurrentSlots()
         let loadedQuestionPrompt = sessionManager.getParallelIngestState().sourcePrompt
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .ifEmpty(lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -179,11 +180,11 @@ final class MobileAppState: ObservableObject {
         if successCount > 0 {
             lastUserPrompt = message
             persistLastUserPrompt(message)
-            if shouldResetQuestionContext {
-                sessionManager.startNewQuestionInCurrentSession(sourcePrompt: message)
-            } else if !hadCurrentQuestionContext {
+            if !hadCurrentQuestionContext || !contextMatchesCurrentSlots {
                 sessionManager.clearParallelIngestState()
                 sessionManager.rememberSourcePrompt(message)
+            } else if shouldResetQuestionContext {
+                sessionManager.startNewQuestionInCurrentSession(sourcePrompt: message)
             }
             updateSessionIndicator()
             composerText = ""
@@ -430,6 +431,11 @@ final class MobileAppState: ObservableObject {
         isManualCollecting = true
         defer { isManualCollecting = false }
 
+        if hasActiveSessionLink() && !hasCurrentQuestionContextForCurrentSlots() {
+            sessionManager.clearParallelIngestState()
+            sessionManager.rememberSourcePrompt(prompt)
+            updateSessionIndicator()
+        }
         let existingAggregatedNoteId = currentQuestionAggregatedNoteId()
         let existingSessionId = currentQuestionSessionId()
         let hasLoadedQuestionContext = existingAggregatedNoteId != nil && existingSessionId != nil
@@ -1284,6 +1290,25 @@ final class MobileAppState: ObservableObject {
         )
         updateSessionIndicator()
         return matching
+    }
+
+    private func hasCurrentQuestionContextForCurrentSlots() -> Bool {
+        let state = sessionManager.getParallelIngestState()
+        guard let activeSessionId = state.sessionId,
+              let activeNoteId = state.activeNoteId.nilIfBlank
+        else { return false }
+
+        let enabledSlotKeys = Set(slots.filter(\.isEnabled).map { "slot-\($0.id)" })
+        if enabledSlotKeys.isEmpty { return false }
+
+        let currentFingerprint = buildSessionFingerprint(slotURLs: currentSessionSnapshotSlotURLs(), slotKeys: enabledSlotKeys)
+        if currentFingerprint.isEmpty { return false }
+
+        return sessionManager.getAllSessions().contains { snapshot in
+            snapshot.sessionId == activeSessionId &&
+                (snapshot.noteId ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == activeNoteId &&
+                buildSessionFingerprint(slotURLs: snapshot.slotURLs, slotKeys: enabledSlotKeys) == currentFingerprint
+        }
     }
 
     private func buildSessionFingerprint(slotURLs: [String: String], slotKeys: Set<String>) -> String {

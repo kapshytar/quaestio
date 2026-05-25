@@ -1878,12 +1878,23 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
         val hadCurrentQuestionContext =
             getCurrentQuestionSessionId() != null && getCurrentQuestionAggregatedNoteId() != null
+        val contextMatchesCurrentSlots = hasCurrentQuestionContextForCurrentSlots()
+        val loadedQuestionPrompt = SettingsManager.getParallelIngestSourcePrompt(this).trim()
+        val sameQuestionAsLoaded = promptsReferToSameQuestion(text, loadedQuestionPrompt)
 
         SettingsManager.setLastUserPrompt(this, text)
-        SettingsManager.setParallelIngestSourcePrompt(this, text)
-        if (!hadCurrentQuestionContext) {
-            SettingsManager.clearParallelIngestState(this)
-            SettingsManager.setParallelIngestSourcePrompt(this, text)
+        when {
+            !hadCurrentQuestionContext || !contextMatchesCurrentSlots -> {
+                SettingsManager.clearParallelIngestState(this)
+                SettingsManager.setParallelIngestSourcePrompt(this, text)
+            }
+            !sameQuestionAsLoaded -> {
+                SettingsManager.clearParallelIngestActiveNoteId(this)
+                SettingsManager.setParallelIngestSourcePrompt(this, text)
+            }
+            else -> {
+                SettingsManager.setParallelIngestSourcePrompt(this, text)
+            }
         }
         if (SettingsManager.isDetailedLoggingEnabled(this)) {
             val bytes = text.toByteArray(Charsets.UTF_8)
@@ -2262,6 +2273,27 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         return matching
     }
 
+    private fun hasCurrentQuestionContextForCurrentSlots(): Boolean {
+        val activeSessionId = SettingsManager.getParallelIngestSessionId(this) ?: return false
+        val activeNoteId = SettingsManager.getParallelIngestActiveNoteId(this).trim()
+        if (activeNoteId.isBlank()) return false
+
+        val enabledSlotKeys = (0 until SlotManager.NUM_SLOTS)
+            .filter { slotManager.isSlotEnabled(it) }
+            .map { "slot-${it + 1}" }
+            .toSet()
+        if (enabledSlotKeys.isEmpty()) return false
+
+        val currentFingerprint = buildSessionFingerprint(collectCurrentSlotUrls(), enabledSlotKeys)
+        if (currentFingerprint.isBlank()) return false
+
+        return sessionManager.getAllSessions().any { snapshot ->
+            snapshot.sessionId == activeSessionId &&
+                snapshot.noteId == activeNoteId &&
+                buildSessionFingerprint(snapshot.slotUrls, enabledSlotKeys) == currentFingerprint
+        }
+    }
+
     private fun buildSessionFingerprint(slotUrls: Map<String, String>, slotKeys: Set<String>): String {
         val parts = slotKeys
             .sorted()
@@ -2344,7 +2376,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     ): AggregatedIngestResult? {
         val detailed = SettingsManager.isDetailedLoggingEnabled(this)
         try {
-            val existingSessionId = getCurrentQuestionSessionId()
+            val existingSessionId = SettingsManager.getParallelIngestSessionId(this)
+                ?: getCurrentQuestionSessionId()
             val externalChatId = SettingsManager.getParallelIngestExternalChatId(this)
                 .ifBlank {
                     UUID.randomUUID().toString().also {
@@ -2466,6 +2499,18 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             return
         }
 
+        if (
+            SettingsManager.getParallelIngestSessionId(this) != null &&
+            SettingsManager.getParallelIngestActiveNoteId(this).isNotBlank() &&
+            !hasCurrentQuestionContextForCurrentSlots()
+        ) {
+            val preservedPrompt = SettingsManager.getParallelIngestSourcePrompt(this)
+                .ifBlank { SettingsManager.getLastUserPrompt(this) }
+            SettingsManager.clearParallelIngestState(this)
+            if (preservedPrompt.isNotBlank()) {
+                SettingsManager.setParallelIngestSourcePrompt(this, preservedPrompt)
+            }
+        }
         val restoredContext = restoreStoredQuestionContextForCurrentSlots()
         val existingAggregatedNoteId = getCurrentQuestionAggregatedNoteId()
         val existingSessionId = getCurrentQuestionSessionId()
@@ -3651,7 +3696,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         thread {
             try {
                 val normalizedMarkdown = normalizeMergeMarkdownForIngest(markdown)
-                var sessionId = getCurrentQuestionSessionId()
+                var sessionId = SettingsManager.getParallelIngestSessionId(this)
+                    ?: getCurrentQuestionSessionId()
                 var aggregatedNoteId = getCurrentQuestionAggregatedNoteId()
                 // ingest-parity: BOOTSTRAP_BEFORE_MERGE
                 // Merge must not attach to a stale aggregated root from a previous
