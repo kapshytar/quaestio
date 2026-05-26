@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.1
+
+- repoint Supabase to the new Frankfurt project (eu-central-1) on both iOS and
+  Android, switching from the embedded service_role JWT to the publishable (anon)
+  key. Ingest/session RPCs are SECURITY DEFINER granted to anon, so the shipped
+  binaries no longer carry a secret key. Requires a rebuild/redeploy of both apps.
+
+
 ## 2.5.0
 
 - ship the iOS WebView typing tray behavior: focusing a slot WebView collapses the native bottom controls to a minimal invisible swipe-up restore zone, preserving WebView keyboard focus while maximizing visible page area

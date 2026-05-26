@@ -3,8 +3,10 @@ import Foundation
 enum KeyObfuscation {
     // Mirrors Android KeyObfuscation.getDeepSeekPreinstalledKey()
     private static let deepSeekEmbeddedKey = "***REMOVED***"
-    private static let supabaseRPCURL = "aHR0cHM6Ly9ianFrdmxzbmV1anJjZnB2Y3Z6Zi5zdXBhYmFzZS5jbw=="
-    private static let supabaseAPIKey = "ZXlKaGJHY2lPaUpJVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SnBjM01pT2lKemRYQmhZbUZ6WlNJc0luSmxaaUk2SW1KcWNXdDJiSE51WlhWcWNtTm1jSFpqZG5wbUlpd2ljbTlzWlNJNkluTmxjblpwWTJWZmNtOXNaU0lzSW1saGRDSTZNVGMzTVRjM09UY3lNeXdpWlhod0lqb3lNRGczTXpVMU56SXpmUS5OSlFWNFY4eVpfcURhUEtsYkRrYnctaVJiWWw4ZVBVa3AxS3BxRVUxSEJv"
+    // Frankfurt project (pphntxcslmbymvcwvhnr); publishable (anon) key, base64.
+    // RPCs are SECURITY DEFINER granted to anon, so no service_role in the binary.
+    private static let supabaseRPCURL = "aHR0cHM6Ly9wcGhudHhjc2xtYnltdmN3dmhuci5zdXBhYmFzZS5jbw=="
+    private static let supabaseAPIKey = "c2JfcHVibGlzaGFibGVfb2ZoZjRpZ1VMTGEyMHdhT3JJMzRwQV9MWHF6dnBoYg=="
 
     static func getDeepSeekPreinstalledKey() -> String {
         guard let data = Data(base64Encoded: deepSeekEmbeddedKey),

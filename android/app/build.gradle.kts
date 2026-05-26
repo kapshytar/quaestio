@@ -38,8 +38,10 @@ val signingStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 val signingKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
 val signingKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
 // Dream Tracker credentials are hardcoded by request.
-val dreamTrackerRpcUrl = "https://bjqkvlsneujrcfpvcvzf.supabase.co"
-val dreamTrackerApiKey = "***REMOVED-OLD-JWT***"
+// Frankfurt project (eu-central-1); publishable (anon) key — NOT service_role.
+// Ingest/session RPCs are SECURITY DEFINER granted to anon, so no secret ships.
+val dreamTrackerRpcUrl = "https://pphntxcslmbymvcwvhnr.supabase.co"
+val dreamTrackerApiKey = "sb_publishable_ofhf4igULLa20waOrI34pA_LXqzvphb"
 val dreamTrackerAppId = "chat-aggregator"
 val hasCustomSigning =
     !signingKeystorePath.isNullOrBlank() &&

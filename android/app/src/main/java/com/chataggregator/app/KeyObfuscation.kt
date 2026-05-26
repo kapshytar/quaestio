@@ -17,12 +17,13 @@ object KeyObfuscation {
     private const val DEEPSEEK_EMBEDDED_KEY = "***REMOVED***"
 
     // Supabase API credentials (Base64 encoded)
-    // Encoded from: https://bjqkvlsneujrcfpvcvzf.supabase.co
-    private const val SUPABASE_RPC_URL = "aHR0cHM6Ly9ianFrdmxzbmV1anJjZnB2Y3Z6Zi5zdXBhYmFzZS5jbw=="
+    // Frankfurt project (eu-central-1). Encoded from: https://pphntxcslmbymvcwvhnr.supabase.co
+    private const val SUPABASE_RPC_URL = "aHR0cHM6Ly9wcGhudHhjc2xtYnltdmN3dmhuci5zdXBhYmFzZS5jbw=="
 
-    // Supabase JWT Service Role Key (Base64 encoded) - for testing only
-    // Encoded from: ***REMOVED-OLD-JWT***
-    private const val SUPABASE_API_KEY = "ZXlKaGJHY2lPaUpJVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SnBjM01pT2lKemRYQmhZbUZ6WlNJc0luSmxaaUk2SW1KcWNXdDJiSE51WlhWcWNtTm1jSFpqZG5wbUlpd2ljbTlzWlNJNkluTmxjblpwWTJWZmNtOXNaU0lzSW1saGRDSTZNVGMzTVRjM09UY3lNeXdpWlhod0lqb3lNRGczTXpVMU56SXpmUS5OSlFWNFY4eVpfcURhUEtsYkRrYnctaVJiWWw4ZVBVa3AxS3BxRVUxSEJv"
+    // Supabase publishable (anon) key (Base64 encoded). NOT service_role: the
+    // ingest/session RPCs are SECURITY DEFINER granted to anon, so the shipped
+    // binary never carries a secret key. Encoded from: sb_publishable_ofhf4igULLa20waOrI34pA_LXqzvphb
+    private const val SUPABASE_API_KEY = "c2JfcHVibGlzaGFibGVfb2ZoZjRpZ1VMTGEyMHdhT3JJMzRwQV9MWHF6dnBoYg=="
 
     /**
      * Decode and return the embedded DeepSeek API key for testing.
