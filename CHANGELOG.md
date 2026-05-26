@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.111.10
+
+- repoint Supabase to the new Frankfurt project (eu-central-1) and switch from
+  the embedded service_role JWT to the publishable (anon) key. The ingest/session
+  RPCs are SECURITY DEFINER granted to anon, so the desktop no longer ships a
+  secret key. Restart the app to pick up the new endpoint.
+
 ## 1.111.9
 
 - fall back from ChatGPT copy extraction to DOM extraction when the copied text is only the user's prompt, so the assistant reply reaches aggregated ingest
