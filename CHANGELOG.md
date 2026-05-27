@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.111.11
+
+- repoint Supabase fallback URL and service role key to the new European server project (bjqkvlsneujrcfpvcvzf) so the desktop application correctly loads sessions and projects after migration
+
 ## 1.111.10
 
 - repoint Supabase to the new Frankfurt project (eu-central-1) and switch from
