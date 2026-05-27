@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.111.12
+
+- fix desktop Supabase fallback: 1.111.11 repointed it to the DELETED Sydney
+  project (`bjqkvlsneujrcfpvcvzf`, mislabeled "European") with a service_role
+  JWT, causing `fetch failed` on session load and `Ingest RPC failed`. Point it
+  at the real EU/Frankfurt project (`pphntxcslmbymvcwvhnr`) with the publishable
+  anon key. Restart the desktop to pick it up.
+
 ## 1.111.11
 
 - repoint Supabase fallback URL and service role key to the new European server project (bjqkvlsneujrcfpvcvzf) so the desktop application correctly loads sessions and projects after migration

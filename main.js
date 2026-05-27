@@ -229,10 +229,12 @@ const INGEST_DEBUG_SOURCE_PLATFORM_CODE = process.platform === 'win32'
       ? 'LNX'
       : 'WEB';
 const INGEST_DEBUG_APP_NAME = 'chat-aggregator-windows';
-const DEFAULT_SUPABASE_URL = 'https://bjqkvlsneujrcfpvcvzf.supabase.co';
+const DEFAULT_SUPABASE_URL = 'https://pphntxcslmbymvcwvhnr.supabase.co';
 // Publishable (anon) key — NOT service_role. The ingest/session RPCs are
 // SECURITY DEFINER and granted to anon, so the client never needs a secret key.
-const DEFAULT_SUPABASE_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJqcWt2bHNuZXVqcmNmcHZjdnpmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTc3OTcyMywiZXhwIjoyMDg3MzU1NzIzfQ.NJQV4V8yZ_qDaPKlbDkbw-iRbYl8ePUkp1KpqEU1HBo';
+// NOTE: bjqkvlsneujrcfpvcvzf = OLD Sydney project (DELETED). The new EU/Frankfurt
+// project is pphntxcslmbymvcwvhnr — do not revert this to the Sydney ref.
+const DEFAULT_SUPABASE_SERVICE_ROLE_KEY = 'sb_publishable_ofhf4igULLa20waOrI34pA_LXqzvphb';
 
 function parseEnvFile(filePath) {
   try {
