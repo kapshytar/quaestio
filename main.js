@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
+const authStore = require('./auth-store');
 
 const APP_DATA_PATH = app.getPath('appData');
 const FIXED_USER_DATA_PATH = path.join(APP_DATA_PATH, 'chat-aggregator');
@@ -298,6 +299,22 @@ loadSupabaseEnv();
     url: cfg.supabaseUrl,
     keyPrefix: cfg.serviceRoleKey ? `${cfg.serviceRoleKey.slice(0, 12)}...` : ''
   });
+  // serviceRoleKey here is actually the publishable/anon key (see comment at
+  // its definition). Auth uses it as the `apikey` for the token endpoint.
+  authStore.configure({ supabaseUrl: cfg.supabaseUrl, apikey: cfg.serviceRoleKey });
+}
+
+// Resolve the `Authorization: Bearer` token for Supabase calls: the signed-in
+// user's access token when available (so backend owner_id triggers attribute
+// rows to them), otherwise the publishable key (legacy anon behaviour).
+async function getAuthBearer(fallbackKey) {
+  try {
+    const token = await authStore.getValidAccessToken();
+    if (token) return token;
+  } catch (error) {
+    console.warn('[auth] token resolution failed; using publishable key:', error?.message || error);
+  }
+  return fallbackKey;
 }
 
 function getPrimaryWindow() {
@@ -584,7 +601,7 @@ async function emitIngestDebugEvent({ supabaseUrl, serviceRoleKey, eventPayload 
       method: 'POST',
       headers: {
         apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
+        Authorization: `Bearer ${await getAuthBearer(serviceRoleKey)}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ p_event: payload })
@@ -615,7 +632,7 @@ async function callSupabaseRpc(rpcName, body) {
     method: 'POST',
     headers: {
       apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
+      Authorization: `Bearer ${await getAuthBearer(serviceRoleKey)}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(body || {})
@@ -681,7 +698,7 @@ async function callSupabaseRestGet(endpointPath, allow404 = false) {
     method: 'GET',
     headers: {
       apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
+      Authorization: `Bearer ${await getAuthBearer(serviceRoleKey)}`,
       Accept: 'application/json'
     }
   });
@@ -709,7 +726,7 @@ async function callSupabaseRestWrite(method, endpointPath, payload = null, optio
 
   const headers = {
     apikey: serviceRoleKey,
-    Authorization: `Bearer ${serviceRoleKey}`,
+    Authorization: `Bearer ${await getAuthBearer(serviceRoleKey)}`,
     Accept: 'application/json',
     Prefer: options?.prefer || 'return=minimal'
   };
@@ -975,7 +992,7 @@ async function ingestDreamRpc(kindInput, params) {
       method: 'POST',
       headers: {
         apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
+        Authorization: `Bearer ${await getAuthBearer(serviceRoleKey)}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(requestBody)
@@ -1087,6 +1104,21 @@ ipcMain.handle('dream-send-merge', async (_event, params) => {
 
 ipcMain.handle('dream-send-clarification', async (_event, params) => {
   return ingestDreamRpc('clarification', params);
+});
+
+// --- Supabase Auth (multi-user) ---
+// Signed-in ingest/session writes carry the user JWT, so backend owner_id
+// triggers attribute rows to this account. Signed out = legacy anon behaviour.
+ipcMain.handle('auth-sign-in', async (_event, params) => {
+  return authStore.signIn(params?.email, params?.password);
+});
+
+ipcMain.handle('auth-sign-out', async () => {
+  return authStore.signOut();
+});
+
+ipcMain.handle('auth-get-status', async () => {
+  return authStore.getStatus();
 });
 
 ipcMain.handle('dream-append-trace-artifact', async (_event, params) => {

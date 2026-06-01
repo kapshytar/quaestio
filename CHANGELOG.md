@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.112.0
+
+- Multi-user (desktop step A+B): add Supabase Auth sign-in. New **Account** tab
+  in the config panel (email/password sign in, status, sign out). When signed
+  in, every Supabase RPC/REST call sends the user's access token as
+  `Authorization: Bearer` (the `apikey` stays the publishable key), so the
+  backend `owner_id` triggers attribute ingested notes/sessions to the account.
+  When signed out, behaviour is unchanged (legacy anon). Tokens are persisted
+  encrypted via Electron `safeStorage` and auto-refreshed.
+- New `auth-store.js` (main-process Supabase Auth: sign-in/out, token refresh,
+  secure persistence).
+
 ## 1.111.12
 
 - fix desktop Supabase fallback: 1.111.11 repointed it to the DELETED Sydney

@@ -4388,6 +4388,9 @@ function initMergePanel() {
     if (tab === 'sessions') {
       updateSessionsUI({ forceRefresh: true }).catch(err => console.warn('[sessions] refresh failed:', err));
     }
+    if (tab === 'account') {
+      refreshAccountUI().catch(err => console.warn('[account] status refresh failed:', err));
+    }
   }
 
   document.querySelectorAll('.cfg-tab').forEach(btn => {
@@ -4395,6 +4398,8 @@ function initMergePanel() {
       activateConfigTab(btn.dataset.tab);
     });
   });
+
+  initAccountTab();
 
   // Restore active tab
   const savedTab = localStorage.getItem('cfg-tabs-active') || 'provider';
@@ -4405,6 +4410,80 @@ function initMergePanel() {
     document.querySelectorAll('.cfg-tab-pane').forEach(p => p.classList.remove('active'));
     document.getElementById(`cfg-pane-${savedTab}`)?.classList.add('active');
   }
+}
+
+// ========== ACCOUNT (multi-user auth) ==========
+async function refreshAccountUI() {
+  const signedOut = document.getElementById('account-signed-out');
+  const signedIn = document.getElementById('account-signed-in');
+  const emailDisplay = document.getElementById('account-email-display');
+  if (!signedOut || !signedIn) return;
+  let status = { signedIn: false };
+  try {
+    status = await window.electronAPI.authGetStatus();
+  } catch (err) {
+    console.warn('[account] status failed:', err);
+  }
+  if (status?.signedIn) {
+    signedOut.style.display = 'none';
+    signedIn.style.display = 'block';
+    if (emailDisplay) emailDisplay.textContent = status.email || '(signed in)';
+  } else {
+    signedOut.style.display = 'block';
+    signedIn.style.display = 'none';
+  }
+}
+
+function setAccountMsg(text, isError = true) {
+  const el = document.getElementById('account-status-msg');
+  if (!el) return;
+  el.style.color = isError ? '#c66' : '#6a6';
+  el.textContent = text || '';
+}
+
+function initAccountTab() {
+  const signInBtn = document.getElementById('account-signin-btn');
+  const signOutBtn = document.getElementById('account-signout-btn');
+  if (signInBtn && !signInBtn.dataset.wired) {
+    signInBtn.dataset.wired = '1';
+    signInBtn.addEventListener('click', async () => {
+      const email = document.getElementById('account-email')?.value || '';
+      const password = document.getElementById('account-password')?.value || '';
+      if (!email || !password) { setAccountMsg('Enter email and password.'); return; }
+      signInBtn.disabled = true;
+      setAccountMsg('Signing in…', false);
+      try {
+        const res = await window.electronAPI.authSignIn(email, password);
+        if (res?.ok) {
+          setAccountMsg('', false);
+          const pw = document.getElementById('account-password');
+          if (pw) pw.value = '';
+          await refreshAccountUI();
+        } else {
+          setAccountMsg(res?.error || 'Sign-in failed.');
+        }
+      } catch (err) {
+        setAccountMsg(err?.message || 'Sign-in error.');
+      } finally {
+        signInBtn.disabled = false;
+      }
+    });
+  }
+  if (signOutBtn && !signOutBtn.dataset.wired) {
+    signOutBtn.dataset.wired = '1';
+    signOutBtn.addEventListener('click', async () => {
+      signOutBtn.disabled = true;
+      try {
+        await window.electronAPI.authSignOut();
+        await refreshAccountUI();
+      } catch (err) {
+        setAccountMsg(err?.message || 'Sign-out error.');
+      } finally {
+        signOutBtn.disabled = false;
+      }
+    });
+  }
+  refreshAccountUI().catch(() => {});
 }
 
 // Initialize merge panel after DOM is ready

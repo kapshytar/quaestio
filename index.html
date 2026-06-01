@@ -1856,6 +1856,7 @@
             <button class="cfg-tab" data-tab="instructions">Prompt</button>
             <button class="cfg-tab" data-tab="debug">Debug</button>
             <button class="cfg-tab" data-tab="sessions">Sessions</button>
+            <button class="cfg-tab" data-tab="account">Account</button>
             <button id="config-tabs-collapse" title="Collapse">v</button>
           </div>
           <div id="config-tabs-body">
@@ -1933,6 +1934,32 @@
                 <input id="sessions-search-input" class="sessions-search sessions-search-input" type="text" placeholder="Search by session id or title...">
               </div>
               <div id="sessions-list" class="sessions-list" style="display:flex;flex-direction:column;gap:4px;flex:1;overflow-y:auto;"></div>
+            </div>
+            <!-- Account tab (multi-user) -->
+            <div class="cfg-tab-pane" id="cfg-pane-account">
+              <!-- Signed-out: login form -->
+              <div id="account-signed-out">
+                <div class="config-field">
+                  <label for="account-email">Email</label>
+                  <input type="email" id="account-email" placeholder="you@example.com" autocomplete="username">
+                </div>
+                <div class="config-field">
+                  <label for="account-password">Password</label>
+                  <input type="password" id="account-password" placeholder="••••••••" autocomplete="current-password">
+                </div>
+                <button class="control-btn" id="account-signin-btn" style="align-self:flex-start;">Sign In</button>
+                <div style="font-size:10px;color:#666;margin-top:6px;">
+                  Signed in: notes sync to your account. Signed out: local sessions only.
+                </div>
+              </div>
+              <!-- Signed-in: status + sign out -->
+              <div id="account-signed-in" style="display:none;">
+                <div style="font-size:11px;color:#aaa;margin-bottom:8px;">
+                  Signed in as <span id="account-email-display" style="color:#ddd;"></span>
+                </div>
+                <button class="control-btn" id="account-signout-btn" style="align-self:flex-start;">Sign Out</button>
+              </div>
+              <div id="account-status-msg" style="font-size:10px;color:#c66;margin-top:8px;min-height:12px;"></div>
             </div>
           </div>
         </div>
