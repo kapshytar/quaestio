@@ -11,6 +11,9 @@
   encrypted via Electron `safeStorage` and auto-refreshed.
 - New `auth-store.js` (main-process Supabase Auth: sign-in/out, token refresh,
   secure persistence).
+- First-run onboarding modal: on first launch (no prior choice, not already
+  signed in) the app asks whether to **Sign In** (inline email/password) or
+  **Use Locally** (sessions only). The choice is remembered in `verity-mode`.
 
 ## 1.111.12
 

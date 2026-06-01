@@ -4486,11 +4486,84 @@ function initAccountTab() {
   refreshAccountUI().catch(() => {});
 }
 
+// ========== FIRST-RUN ONBOARDING (local vs sign in) ==========
+const ONBOARD_DONE_KEY = 'verity-onboard-done';
+const APP_MODE_KEY = 'verity-mode'; // 'account' | 'local'
+
+function hideOnboardModal() {
+  const m = document.getElementById('onboard-modal');
+  if (!m) return;
+  m.classList.remove('visible');
+  m.setAttribute('aria-hidden', 'true');
+}
+
+function finishOnboarding(mode) {
+  localStorage.setItem(APP_MODE_KEY, mode);
+  localStorage.setItem(ONBOARD_DONE_KEY, '1');
+  hideOnboardModal();
+}
+
+async function initOnboarding() {
+  const modal = document.getElementById('onboard-modal');
+  if (!modal) return;
+
+  // Already chosen, or already signed in from a previous run → skip.
+  if (localStorage.getItem(ONBOARD_DONE_KEY)) return;
+  try {
+    const status = await window.electronAPI.authGetStatus();
+    if (status?.signedIn) { finishOnboarding('account'); return; }
+  } catch (_) {}
+
+  const choices = document.getElementById('onboard-choices');
+  const loginBox = document.getElementById('onboard-login');
+  const msg = document.getElementById('onboard-status-msg');
+  const setMsg = (t, err = true) => { if (msg) { msg.style.color = err ? '#c66' : '#6a6'; msg.textContent = t || ''; } };
+
+  document.getElementById('onboard-signin-choice')?.addEventListener('click', () => {
+    if (choices) choices.style.display = 'none';
+    if (loginBox) loginBox.style.display = 'block';
+    setMsg('');
+  });
+  document.getElementById('onboard-login-back')?.addEventListener('click', () => {
+    if (loginBox) loginBox.style.display = 'none';
+    if (choices) choices.style.display = 'flex';
+    setMsg('');
+  });
+  document.getElementById('onboard-local-choice')?.addEventListener('click', () => {
+    finishOnboarding('local');
+  });
+  document.getElementById('onboard-login-submit')?.addEventListener('click', async () => {
+    const email = document.getElementById('onboard-email')?.value || '';
+    const password = document.getElementById('onboard-password')?.value || '';
+    if (!email || !password) { setMsg('Enter email and password.'); return; }
+    const btn = document.getElementById('onboard-login-submit');
+    if (btn) btn.disabled = true;
+    setMsg('Signing in…', false);
+    try {
+      const res = await window.electronAPI.authSignIn(email, password);
+      if (res?.ok) {
+        finishOnboarding('account');
+        refreshAccountUI().catch(() => {});
+      } else {
+        setMsg(res?.error || 'Sign-in failed.');
+      }
+    } catch (err) {
+      setMsg(err?.message || 'Sign-in error.');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
+  modal.classList.add('visible');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
 // Initialize merge panel after DOM is ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initMergePanel);
+  document.addEventListener('DOMContentLoaded', () => { initMergePanel(); initOnboarding(); });
 } else {
   initMergePanel();
+  initOnboarding();
 }
 
 // ========== GET LATEST ASSISTANT REPLY ==========

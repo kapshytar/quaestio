@@ -886,6 +886,28 @@
       padding: 24px;
     }
     #about-modal.visible { display: flex; }
+    /* First-run onboarding modal (choose local vs sign in) */
+    #onboard-modal {
+      position: fixed; inset: 0; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.78); z-index: 30001; padding: 24px;
+    }
+    #onboard-modal.visible { display: flex; }
+    #onboard-dialog {
+      background: #232323; border: 1px solid #3a3a3a; border-radius: 10px;
+      width: 100%; max-width: 360px; padding: 22px; color: #ddd;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    }
+    #onboard-dialog h2 { margin: 0 0 4px; font-size: 16px; color: #fff; }
+    #onboard-dialog p { margin: 0 0 16px; font-size: 12px; color: #999; line-height: 1.5; }
+    #onboard-dialog .onboard-actions { display: flex; flex-direction: column; gap: 8px; }
+    #onboard-dialog .control-btn { width: 100%; padding: 10px; }
+    #onboard-dialog .onboard-primary {
+      background: #3b6fb0; border-color: #3b6fb0; color: #fff;
+    }
+    #onboard-dialog .config-field { margin-bottom: 8px; }
+    #onboard-login { margin-top: 6px; }
+    #onboard-status-msg { font-size: 11px; color: #c66; min-height: 14px; margin-top: 8px; }
     #about-dialog {
       width: min(820px, calc(100vw - 48px));
       max-height: calc(100vh - 48px);
@@ -1991,6 +2013,33 @@
 
   <!-- Resize overlay â€” blocks webview mouse capture during panel resize -->
   <div id="resize-overlay"></div>
+  <!-- First-run onboarding: choose local-only or sign in -->
+  <div id="onboard-modal" aria-hidden="true">
+    <div id="onboard-dialog" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
+      <h2 id="onboard-title">Welcome to VerityDB</h2>
+      <p>Sign in to sync your notes to your account, or use the app locally
+        (saved sessions only, nothing sent to the server).</p>
+      <div class="onboard-actions" id="onboard-choices">
+        <button class="control-btn onboard-primary" id="onboard-signin-choice">Sign In</button>
+        <button class="control-btn" id="onboard-local-choice">Use Locally</button>
+      </div>
+      <div id="onboard-login" style="display:none;">
+        <div class="config-field">
+          <label for="onboard-email">Email</label>
+          <input type="email" id="onboard-email" placeholder="you@example.com" autocomplete="username">
+        </div>
+        <div class="config-field">
+          <label for="onboard-password">Password</label>
+          <input type="password" id="onboard-password" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <div class="onboard-actions">
+          <button class="control-btn onboard-primary" id="onboard-login-submit">Sign In</button>
+          <button class="control-btn" id="onboard-login-back">Back</button>
+        </div>
+      </div>
+      <div id="onboard-status-msg"></div>
+    </div>
+  </div>
   <div id="about-modal" aria-hidden="true">
     <div id="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-dialog-title">
       <div id="about-dialog-header">
