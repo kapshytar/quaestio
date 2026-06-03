@@ -29,6 +29,29 @@ struct SessionSnapshot: Codable, Identifiable, Hashable {
     }
 }
 
+extension SessionSnapshot {
+    // Tolerant decode (defined in an extension so the memberwise init is kept):
+    // a legacy/partial stored row missing a non-optional field (e.g. an older
+    // entry without `slot_live_urls`) must NOT fail the decode of the whole
+    // array — that silently emptied the on-device Sessions list (the local
+    // session counter kept advancing while no rows ever showed). Missing fields
+    // fall back to empty defaults instead.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        timestamp = (try c.decodeIfPresent(Int64.self, forKey: .timestamp)) ?? 0
+        sessionId = try c.decodeIfPresent(Int.self, forKey: .sessionId)
+        noteId = try c.decodeIfPresent(String.self, forKey: .noteId)
+        name = (try c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        slotConfig = (try c.decodeIfPresent([String: String].self, forKey: .slotConfig)) ?? [:]
+        slotURLs = (try c.decodeIfPresent([String: String].self, forKey: .slotURLs)) ?? [:]
+        slotEnabled = (try c.decodeIfPresent([String: Bool].self, forKey: .slotEnabled)) ?? [:]
+        slotLiveURLs = (try c.decodeIfPresent([String: String].self, forKey: .slotLiveURLs)) ?? [:]
+        createdAt = (try c.decodeIfPresent(String.self, forKey: .createdAt)) ?? ""
+        updatedAt = (try c.decodeIfPresent(String.self, forKey: .updatedAt)) ?? ""
+    }
+}
+
 struct ParallelIngestState: Codable, Equatable {
     var sessionId: Int?
     var activeNoteId: String
@@ -53,6 +76,16 @@ final class SessionManager {
     private enum Keys {
         static let sessions = "verity.mobile.sessions.list"
         static let parallelState = "verity.mobile.parallelIngest.state"
+        static let localSessionCounter = "verity.mobile.localSession.counter"
+        static let suppressSlotRestore = "verity.mobile.suppressSlotRestore"
+    }
+
+    // One-shot guard: after sign-in / late-login migration, suppress
+    // slot-fingerprint restore so a new question doesn't resurrect a pre-login
+    // session sharing the slot layout. Lifted on explicit load / fresh ingest.
+    var suppressSlotRestore: Bool {
+        get { defaults.bool(forKey: Keys.suppressSlotRestore) }
+        set { defaults.set(newValue, forKey: Keys.suppressSlotRestore) }
     }
 
     private let defaults: UserDefaults
@@ -66,6 +99,34 @@ final class SessionManager {
 
     static func loadSessionsFromDatabase(defaults: UserDefaults = .standard) async -> [SessionSnapshot] {
         await SessionManager(defaults: defaults).loadSessionsFromDatabase()
+    }
+
+    /// Concurrency-safe wrapper: runs the gated bridge `save` on a fresh,
+    /// non-isolated instance so the main-actor-isolated shared manager is never
+    /// sent across actors (Swift 6). Mirrors `loadSessionsFromDatabase` above.
+    static func syncSessionToDatabase(_ session: SessionSnapshot, defaults: UserDefaults = .standard) async -> Bool {
+        await SessionManager(defaults: defaults).syncSessionToDatabase(session)
+    }
+
+    /// Concurrency-safe wrapper for late-login migration (bridge `migrate`).
+    static func migrateLocalSession(_ session: SessionSnapshot, defaults: UserDefaults = .standard) async -> Bool {
+        await SessionManager(defaults: defaults).migrateLocalSession(session)
+    }
+
+    /// Concurrency-safe wrapper for per-session delete (bridge `delete`).
+    static func deleteSessionFromDatabase(_ session: SessionSnapshot, defaults: UserDefaults = .standard) async -> Bool {
+        await SessionManager(defaults: defaults).deleteSessionFromDatabase(session)
+    }
+
+    /// Monotonic local session number for local-only mode (no backend
+    /// `session_id`). Uses a high base so it is visually distinct from backend
+    /// session ids and won't collide before a future late-login renumber.
+    func nextLocalSessionNumber() -> Int {
+        let base = 900_000
+        let current = defaults.integer(forKey: Keys.localSessionCounter)
+        let next = (current == 0 ? base : current) + 1
+        defaults.set(next, forKey: Keys.localSessionCounter)
+        return next
     }
 
     func getParallelIngestState() -> ParallelIngestState {
@@ -117,11 +178,13 @@ final class SessionManager {
         let endpoint = normalizeRestEndpoint(rpcBaseURL) + "/notes?\(query)"
         guard let url = URL(string: endpoint) else { return }
 
+        // Gate: signed out = no remote reads (local-only mode).
+        guard let authBearer = await AuthStore.shared.accessToken() else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 30
         request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(authBearer)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         guard let (data, response) = try? await URLSession.shared.data(for: request),
@@ -228,6 +291,45 @@ final class SessionManager {
         dedupeLatestSnapshots(getStoredSessions())
     }
 
+    /// Remove a session from on-device storage (local-only; the backend delete
+    /// is a separate, gated call). Matches Android `deleteSession(id)`.
+    func deleteSession(_ id: String) {
+        saveSessions(getStoredSessions().filter { $0.id != id })
+    }
+
+    /// Delete a session on the backend via the gated bridge `delete` action.
+    /// Parity with the Android/desktop clients: pass the integer `session_id`
+    /// and the `note_id` so the bridge deletes the note subtree (the row leaves
+    /// the web's notes tree) AND the aggregator_sessions rows. Passing only the
+    /// snapshot UUID as `p_record_id` makes the backend's int-cast fallback throw
+    /// and nothing gets deleted — so always forward session_id / note_id too.
+    /// Signed out, `postBridgeRequest` throws → returns false (local delete in
+    /// the caller still stands).
+    func deleteSessionFromDatabase(_ session: SessionSnapshot) async -> Bool {
+        let rpcBaseURL = KeyObfuscation.getSupabaseRPCURL(nil)
+        let apiKey = KeyObfuscation.getSupabaseAPIKey(nil)
+        guard !rpcBaseURL.isEmpty, !apiKey.isEmpty else { return false }
+
+        let body: [String: Any?] = [
+            "p_action": "delete",
+            "p_record_id": session.id,
+            "p_session_id": session.sessionId,
+            "p_note_id": session.noteId,
+            "p_name": nil,
+            "p_slot_config": nil,
+            "p_slot_urls": nil,
+            "p_slot_enabled": nil,
+            "p_limit": 1
+        ]
+
+        do {
+            _ = try await postBridgeRequest(rpcBaseURL: rpcBaseURL, apiKey: apiKey, body: body)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     func replaceSessions(_ sessions: [SessionSnapshot]) {
         saveSessions(dedupeLatestSnapshots(sessions))
     }
@@ -247,6 +349,36 @@ final class SessionManager {
             "p_slot_urls": session.slotURLs,
             "p_slot_enabled": session.slotEnabled,
             "p_limit": maxSessions
+        ]
+
+        do {
+            _ = try await postBridgeRequest(rpcBaseURL: rpcBaseURL, apiKey: apiKey, body: body)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Late-login migration: re-create a local-only session under the account
+    /// via the gated bridge `migrate` action. The backend allocates a fresh real
+    /// session_id (ignoring the local 900000+ number, so it never collides across
+    /// devices) and the owner trigger stamps owner_id = auth.uid(). Returns true
+    /// on success. Signed out, postBridgeRequest throws → false.
+    func migrateLocalSession(_ session: SessionSnapshot) async -> Bool {
+        let rpcBaseURL = KeyObfuscation.getSupabaseRPCURL(nil)
+        let apiKey = KeyObfuscation.getSupabaseAPIKey(nil)
+        guard !rpcBaseURL.isEmpty, !apiKey.isEmpty else { return false }
+
+        let body: [String: Any?] = [
+            "p_action": "migrate",
+            "p_record_id": nil,
+            "p_session_id": nil,
+            "p_note_id": nil,
+            "p_name": session.name,
+            "p_slot_config": session.slotConfig,
+            "p_slot_urls": session.slotURLs,
+            "p_slot_enabled": session.slotEnabled,
+            "p_limit": 1
         ]
 
         do {
@@ -288,7 +420,21 @@ final class SessionManager {
                 apiKey: apiKey,
                 snapshots: sessions
             )
-            let resolvedSessions = noteBackedRows.isEmpty ? sessions : noteBackedRows
+            // Note-less session snapshots (e.g. local sessions migrated on login:
+            // note_id = null) have no row in notes, so they are absent from
+            // noteBackedRows. Append them so they stay visible instead of
+            // vanishing whenever any note-backed session exists.
+            let resolvedSessions: [SessionSnapshot]
+            if noteBackedRows.isEmpty {
+                resolvedSessions = sessions
+            } else {
+                let noteBackedSessionIds = Set(noteBackedRows.compactMap { $0.sessionId })
+                let sessionOnly = sessions.filter { snapshot in
+                    guard (snapshot.noteId ?? "").isEmpty, let sid = snapshot.sessionId else { return false }
+                    return !noteBackedSessionIds.contains(sid)
+                }
+                resolvedSessions = noteBackedRows + sessionOnly
+            }
             replaceSessions(resolvedSessions)
             return resolvedSessions
         } catch {
@@ -363,12 +509,17 @@ final class SessionManager {
         guard let url = URL(string: endpoint) else {
             throw NSError(domain: "SessionManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid session bridge URL"])
         }
+        // Gate: signed out = no remote writes. Local session save already
+        // happened in the caller, so this just skips the backend sync.
+        guard let authBearer = await AuthStore.shared.accessToken() else {
+            throw NSError(domain: "SessionManager", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not signed in — local only"])
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 60
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(authBearer)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: body.mapValues { $0 ?? NSNull() }, options: [.sortedKeys])
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -390,11 +541,13 @@ final class SessionManager {
         let endpoint = normalizeRestEndpoint(rpcBaseURL) + "/notes?\(query)"
         guard let url = URL(string: endpoint) else { return [] }
 
+        // Gate: signed out = no remote reads (local-only mode).
+        guard let authBearer = await AuthStore.shared.accessToken() else { return [] }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 30
         request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(authBearer)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await URLSession.shared.data(for: request)

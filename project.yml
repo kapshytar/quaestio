@@ -10,8 +10,8 @@ settings:
   base:
     PRODUCT_BUNDLE_IDENTIFIER: com.verity.mobile
     SWIFT_VERSION: 6.0
-    CURRENT_PROJECT_VERSION: 270
-    MARKETING_VERSION: 2.5.1
+    CURRENT_PROJECT_VERSION: 278
+    MARKETING_VERSION: 2.5.9
     DEVELOPMENT_TEAM: "Y7643GTM35"
 targets:
   VerityMobile:
@@ -46,11 +46,29 @@ targets:
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies: []
+  VerityMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: ios/VerityMobileTests
+    dependencies:
+      - target: VerityMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.verity.mobile.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
 schemes:
   VerityMobile:
     build:
       targets:
         VerityMobile: all
+        VerityMobileTests: [test]
+    test:
+      config: Debug
+      targets:
+        - VerityMobileTests
     run:
       config: Debug
     archive:

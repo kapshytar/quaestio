@@ -160,6 +160,10 @@ android {
         viewBinding = true
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     sourceSets["main"].res.srcDir(generatedChangelogResDir.get().asFile)
     sourceSets["main"].assets.srcDir(rootProject.file("../shared/contracts"))
     sourceSets["main"].assets.srcDir(generatedSharedAssetsDir.get().asFile)
@@ -192,8 +196,10 @@ dependencies {
     implementation("androidx.webkit:webkit:1.15.0")
     implementation("com.google.code.gson:gson:2.13.2")
     implementation("androidx.preference:preference-ktx:1.2.1")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.android.billingclient:billing-ktx:8.3.0")
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:ext-tables:4.6.2")
     implementation("org.mozilla:rhino:1.7.15")
+    testImplementation("junit:junit:4.13.2")
 }

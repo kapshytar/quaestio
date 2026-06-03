@@ -318,6 +318,11 @@ enum AggregatedIngestClient {
     ) async throws -> AggregatedIngestResult {
         let payloadHash = sha256(payloadJSON)
         let endpoint = normalizeRPCEndpoint(base: rpcBaseURL, rpcName: rpcName)
+        // Multi-user gate: only signed-in users touch the backend. Signed out =
+        // local-only — never write anonymously (no publishable-key fallback).
+        guard let authBearer = await AuthStore.shared.accessToken() else {
+            throw AuthError.notSignedIn
+        }
         print("[INGEST] callRPC: endpoint=\(endpoint), rpcName=\(rpcName), idempotencyKey=\(idempotencyKey)")
         let payloadObject = try JSONSerialization.jsonObject(with: Data(payloadJSON.utf8))
         let bodyObject: [String: Any] = [
@@ -331,6 +336,7 @@ enum AggregatedIngestClient {
         try await logDebugEvent(
             rpcBaseURL: rpcBaseURL,
             apiKey: apiKey,
+            authBearer: authBearer,
             event: buildDebugEvent(
                 traceId: traceId,
                 sessionId: sessionId,
@@ -352,7 +358,7 @@ enum AggregatedIngestClient {
                     endpoint: endpoint,
                     headers: [
                         "apikey": apiKey,
-                        "Authorization": "Bearer \(apiKey)"
+                        "Authorization": "Bearer \(authBearer)"
                     ],
                     bodyData: rpcBodyData
                 )
@@ -369,6 +375,7 @@ enum AggregatedIngestClient {
                 try await logDebugEvent(
                     rpcBaseURL: rpcBaseURL,
                     apiKey: apiKey,
+                    authBearer: authBearer,
                     event: buildDebugEvent(
                         traceId: traceId,
                         sessionId: result.sessionId ?? sessionId,
@@ -390,6 +397,7 @@ enum AggregatedIngestClient {
                     try? await logDebugEvent(
                         rpcBaseURL: rpcBaseURL,
                         apiKey: apiKey,
+                        authBearer: authBearer,
                         event: buildDebugEvent(
                             traceId: traceId,
                             sessionId: sessionId,
@@ -454,6 +462,7 @@ enum AggregatedIngestClient {
     private static func logDebugEvent(
         rpcBaseURL: String,
         apiKey: String,
+        authBearer: String,
         event: [String: Any],
         detailedLogging: Bool
     ) async throws {
@@ -464,7 +473,7 @@ enum AggregatedIngestClient {
             endpoint: endpoint,
             headers: [
                 "apikey": apiKey,
-                "Authorization": "Bearer \(apiKey)"
+                "Authorization": "Bearer \(authBearer)"
             ],
             bodyData: data,
             ignoreFailures: true

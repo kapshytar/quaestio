@@ -156,10 +156,15 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <!-- Edge-swipe strips for switching slots. They start below the LLM page's
+         own top control row (marginTop) so taps on the chat's top-right controls
+         (e.g. temporary-chat / incognito, account) are not swallowed by the
+         transparent overlay (its GestureDetector.onDown consumes touches). -->
     <View
         android:id="@+id/edgeSwipeLeft"
         android:layout_width="36dp"
         android:layout_height="0dp"
+        android:layout_marginTop="88dp"
         android:background="@android:color/transparent"
         android:importantForAccessibility="no"
         app:layout_constraintTop_toTopOf="@id/viewPager"
@@ -170,6 +175,7 @@
         android:id="@+id/edgeSwipeRight"
         android:layout_width="36dp"
         android:layout_height="0dp"
+        android:layout_marginTop="88dp"
         android:background="@android:color/transparent"
         android:importantForAccessibility="no"
         app:layout_constraintTop_toTopOf="@id/viewPager"

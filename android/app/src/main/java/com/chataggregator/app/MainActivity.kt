@@ -201,6 +201,32 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         setupProjectSelector()
         applyUnstableFeatureVisibility()
         scheduleDeferredStartupWork()
+        maybeShowOnboarding()
+    }
+
+    /** First run: ask Local vs Sign In before any backend work. */
+    private fun maybeShowOnboarding() {
+        if (SettingsManager.getAppMode(this) != null) return
+        if (AuthStore.status(applicationContext).signedIn) {
+            SettingsManager.setAppMode(this, "account")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Welcome to Verity")
+            .setMessage(
+                "Choose how to use the app. You can change this later in Settings → Account.\n\n" +
+                    "Local keeps everything on this device — sessions only, nothing is sent to the server. " +
+                    "Sign in to attribute and sync your notes and sessions to your account."
+            )
+            .setCancelable(false)
+            .setPositiveButton("Sign In") { _, _ ->
+                SettingsManager.setAppMode(this, "account")
+                showAccountDialog()
+            }
+            .setNegativeButton("Use Locally") { _, _ ->
+                SettingsManager.setAppMode(this, "local")
+            }
+            .show()
     }
 
     override fun onResume() {
@@ -1251,11 +1277,13 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         allow404: Boolean = false,
         shouldSetError: Boolean = false,
     ): JsonArray? {
+        // Gate: signed out = no remote reads (local-only mode).
+        val authBearer = AuthStore.gateBearer(AuthStore.accessToken(applicationContext)) ?: return null
         val url = java.net.URL(endpointUrl)
         val connection = url.openConnection() as java.net.HttpURLConnection
         connection.requestMethod = "GET"
         connection.setRequestProperty("apikey", apiKey)
-        connection.setRequestProperty("Authorization", "Bearer $apiKey")
+        connection.setRequestProperty("Authorization", "Bearer $authBearer")
         connection.setRequestProperty("Accept", "application/json")
         connection.connectTimeout = 5000
         connection.readTimeout = 5000
@@ -1388,6 +1416,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             val rpcUrl = SettingsManager.getDreamTrackerRpcUrl(this)
             val apiKey = normalizeSupabaseApiKey(SettingsManager.getDreamTrackerApiKey(this))
             if (rpcUrl.isBlank() || apiKey.isBlank()) return emptyMap()
+            // Gate: signed out = no remote reads (local-only mode).
+            val authBearer = AuthStore.gateBearer(AuthStore.accessToken(applicationContext)) ?: return emptyMap()
 
             val restBaseUrl = normalizeRestEndpoint(rpcUrl)
             val encodedProjectId = URLEncoder.encode(projectId, "UTF-8")
@@ -1395,7 +1425,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             val connection = (java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("apikey", apiKey)
-                setRequestProperty("Authorization", "Bearer $apiKey")
+                setRequestProperty("Authorization", "Bearer $authBearer")
                 setRequestProperty("Accept", "application/json")
                 connectTimeout = 6000
                 readTimeout = 6000
@@ -1883,18 +1913,30 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         val sameQuestionAsLoaded = promptsReferToSameQuestion(text, loadedQuestionPrompt)
 
         SettingsManager.setLastUserPrompt(this, text)
-        when {
-            !hadCurrentQuestionContext || !contextMatchesCurrentSlots -> {
-                SettingsManager.clearParallelIngestState(this)
-                SettingsManager.setParallelIngestSourcePrompt(this, text)
+        // The question-context reset (clearing the parallel-ingest session id so a
+        // new question starts a new note) only applies to the signed-in ingest
+        // path. Offline there are no notes, so this would fire on every send
+        // (hadCurrentQuestionContext is always false), wiping the local session id
+        // and making saveLocalSession allocate a fresh S9000xx each time. Keep the
+        // local session stable across consecutive offline questions (one session
+        // per layout, matching desktop); the user starts a new one via the
+        // sessions UI / clear-active action.
+        if (AuthStore.status(this).signedIn) {
+            when {
+                !hadCurrentQuestionContext || !contextMatchesCurrentSlots -> {
+                    SettingsManager.clearParallelIngestState(this)
+                    SettingsManager.setParallelIngestSourcePrompt(this, text)
+                }
+                !sameQuestionAsLoaded -> {
+                    SettingsManager.clearParallelIngestActiveNoteId(this)
+                    SettingsManager.setParallelIngestSourcePrompt(this, text)
+                }
+                else -> {
+                    SettingsManager.setParallelIngestSourcePrompt(this, text)
+                }
             }
-            !sameQuestionAsLoaded -> {
-                SettingsManager.clearParallelIngestActiveNoteId(this)
-                SettingsManager.setParallelIngestSourcePrompt(this, text)
-            }
-            else -> {
-                SettingsManager.setParallelIngestSourcePrompt(this, text)
-            }
+        } else {
+            SettingsManager.setParallelIngestSourcePrompt(this, text)
         }
         if (SettingsManager.isDetailedLoggingEnabled(this)) {
             val bytes = text.toByteArray(Charsets.UTF_8)
@@ -1947,6 +1989,34 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         }
     }
 
+    /** Local-only session save: persists the current slot layout (config/URLs/
+     *  enabled + name + a local session number) on-device. No backend call.
+     *  Reuses the current local session number when continuing the same context,
+     *  else allocates a new one. Mirrors the iOS `saveLocalSession`. */
+    private fun saveLocalSession(prompt: String) {
+        // Only reuse a session id that is itself local (>= 900000). A leftover
+        // real backend id (e.g. from a prior signed-in session) must NOT be
+        // reused — that would collide with a real DB session and hide the row
+        // from late-login migration. Allocate a fresh local number instead.
+        val existing = SettingsManager.getParallelIngestSessionId(this)
+        val localId = if (existing != null && existing >= 900_000) {
+            existing
+        } else {
+            sessionManager.nextLocalSessionNumber().also {
+                SettingsManager.setParallelIngestSessionId(this, it)
+            }
+        }
+        val slotUrls = collectCurrentSlotUrls()
+        sessionManager.saveCurrentSession(
+            name = prompt.take(60).ifBlank { "Session" },
+            dreamSessionId = localId,
+            slotUrls = slotUrls,
+            noteId = null
+        )
+        updateSessionIndicator()
+        Toast.makeText(this, "Saved locally (S$localId)", Toast.LENGTH_SHORT).show()
+    }
+
     private fun startParallelAggregatedIngest(prompt: String, expectedSlots: Int) {
         val rpcUrl = SettingsManager.getDreamTrackerRpcUrl(this)
         val apiKey = SettingsManager.getDreamTrackerApiKey(this)
@@ -1956,6 +2026,13 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             return
         }
         if (expectedSlots <= 0) return
+        // Local-only gate: signed out → save the slot layout locally and skip
+        // the backend ingest entirely (no anonymous writes). status() is a
+        // local check (no network), safe on the UI thread.
+        if (!AuthStore.status(applicationContext).signedIn) {
+            saveLocalSession(prompt)
+            return
+        }
         pendingAggregationPrompt = prompt
         pendingAggregationExpectedSlots = expectedSlots
         autoAggregationPaused = false
@@ -2242,14 +2319,27 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     }
 
     private fun restoreStoredQuestionContextForCurrentSlots(): SessionSnapshot? {
+        // After sign-in / migration, do not resurrect a pre-login session by slot
+        // layout alone — the next question must start fresh.
+        if (SettingsManager.getSuppressSlotRestore(this)) return null
         val enabledSlotKeys = (0 until SlotManager.NUM_SLOTS)
             .filter { slotManager.isSlotEnabled(it) }
             .map { "slot-${it + 1}" }
             .toSet()
         if (enabledSlotKeys.isEmpty()) return null
 
-        val currentFingerprint = buildSessionFingerprint(collectCurrentSlotUrls(), enabledSlotKeys)
+        val currentSlotUrls = collectCurrentSlotUrls()
+        val currentFingerprint = buildSessionFingerprint(currentSlotUrls, enabledSlotKeys)
         if (currentFingerprint.isBlank()) return null
+        // Only resurrect a prior session when the CURRENT slots point at a real,
+        // identifiable conversation (e.g. chatgpt.com/c/<id>). A Temporary Chat or
+        // a fresh home page has no conversation id, so extractConversationKey
+        // falls back to a generic origin (or "temporary") that collides with any
+        // old session that also reduced to the same origin — which is exactly how
+        // a brand-new question got glued onto stale session 158. Desktop avoids
+        // this because it keys context by the exact real-conversation fingerprint
+        // string; mirror that here: no real conversation id ⇒ start fresh.
+        if (!fingerprintHasRealConversation(currentSlotUrls, enabledSlotKeys)) return null
         val currentSourcePrompt = SettingsManager.getParallelIngestSourcePrompt(this).trim()
 
         val matching = sessionManager.getAllSessions()
@@ -2291,6 +2381,29 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             snapshot.sessionId == activeSessionId &&
                 snapshot.noteId == activeNoteId &&
                 buildSessionFingerprint(snapshot.slotUrls, enabledSlotKeys) == currentFingerprint
+        }
+    }
+
+    /**
+     * True when at least one enabled slot points at a *real, identifiable*
+     * conversation (a chat id), as opposed to a Temporary Chat, a home/landing
+     * page, or a blank slot whose `extractConversationKey` degrades to a generic
+     * origin. Used to gate slot-fingerprint session restore so a new question on
+     * generic pages never resurrects an unrelated old session (e.g. 158).
+     */
+    private fun fingerprintHasRealConversation(slotUrls: Map<String, String>, slotKeys: Set<String>): Boolean {
+        return slotKeys.any { slotKey ->
+            val rawUrl = slotUrls[slotKey]?.trim().orEmpty()
+            if (rawUrl.isBlank()) return@any false
+            val slotIndex = slotKey.removePrefix("slot-").toIntOrNull()?.minus(1) ?: return@any false
+            val serviceId = ServiceConfig.detectServiceByUrl(rawUrl)
+                ?: slotManager.getServiceId(slotIndex)
+                ?: "unknown"
+            val tail = extractConversationKey(serviceId, rawUrl).substringAfter(":", "")
+            tail.isNotBlank() &&
+                tail != "temporary" &&
+                tail != "no-url" &&
+                !tail.contains("://")
         }
     }
 
@@ -2425,6 +2538,9 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             if (result.sessionId != null) {
                 val hadSession = SettingsManager.getParallelIngestSessionId(this) != null
                 SettingsManager.setParallelIngestSessionId(this, result.sessionId)
+                // A fresh ingest established the active session; normal
+                // slot-fingerprint continuation is safe again.
+                SettingsManager.setSuppressSlotRestore(this, false)
 
                 val rpcUrl = SettingsManager.getDreamTrackerRpcUrl(this)
                 val apiKey = SettingsManager.getDreamTrackerApiKey(this)
@@ -2777,6 +2893,10 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                         reloadAllSlots()
                         true
                     }
+                    R.id.action_account -> {
+                        showAccountDialog()
+                        true
+                    }
                     R.id.action_manage_subscription -> {
                         billingManager.launchSubscriptionPurchase(this)
                         true
@@ -2802,6 +2922,159 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             }
             popup.show()
         }
+    }
+
+    /**
+     * Shown when a Supabase call found the account session expired (refresh
+     * token rejected). The session has already been cleared by AuthStore, so
+     * refresh the indicator and offer a one-tap path back to sign-in instead of
+     * leaving the user with stale local sessions and a UI that still implies
+     * "signed in".
+     */
+    private fun promptSessionExpired() {
+        updateSessionIndicator()
+        AlertDialog.Builder(this)
+            .setTitle("Session expired")
+            .setMessage("Your account session expired. Sign in again to see and sync your cloud sessions.")
+            .setPositiveButton("Sign In") { _, _ -> showAccountDialog() }
+            .setNegativeButton("Later", null)
+            .show()
+    }
+
+    private fun showAccountDialog() {
+        val status = AuthStore.status(this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(4))
+        }
+
+        if (status.signedIn) {
+            container.addView(TextView(this).apply {
+                text = "Signed in as ${status.email ?: "—"}\n\nYour notes and sessions are attributed to this account."
+                setTextColor(Color.parseColor("#E8E8E8"))
+                textSize = 14f
+            })
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.settings_account))
+                .setView(container)
+                .setNegativeButton("Sign Out") { _, _ -> performSignOut() }
+                .setPositiveButton("Close", null)
+                .show()
+            return
+        }
+
+        val emailField = EditText(this).apply {
+            hint = "Email"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+        }
+        val passwordField = EditText(this).apply {
+            hint = "Password"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        container.addView(emailField)
+        container.addView(passwordField)
+        container.addView(TextView(this).apply {
+            text = "Signed out keeps the legacy local/anon behaviour. Sign in to attribute your notes and sessions to your account."
+            setTextColor(Color.parseColor("#9AA0A6"))
+            textSize = 12f
+            setPadding(0, dp(8), 0, 0)
+        })
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.settings_account))
+            .setView(container)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Sign In", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val email = emailField.text.toString().trim()
+                val password = passwordField.text.toString()
+                if (email.isEmpty() || password.isEmpty()) {
+                    Toast.makeText(this, "Enter email and password", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                performSignIn(email, password, dialog)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun performSignIn(email: String, password: String, dialog: AlertDialog) {
+        Toast.makeText(this, "Signing in…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val result = AuthStore.signIn(applicationContext, email, password)
+            runOnUiThread {
+                result
+                    .onSuccess {
+                        Toast.makeText(this, "Signed in as ${it.email ?: "account"}", Toast.LENGTH_SHORT).show()
+                        dialog.dismiss()
+                        // Start the account with a clean slate: drop any pre-login
+                        // question context and suppress slot-fingerprint restore so
+                        // the next question opens a fresh session instead of
+                        // resurrecting an old one that shares the slot layout.
+                        SettingsManager.clearParallelIngestState(this)
+                        SettingsManager.setSuppressSlotRestore(this, true)
+                        updateSessionIndicator()
+                        maybeOfferLocalSessionMigration()
+                    }
+                    .onFailure {
+                        Toast.makeText(this, it.message ?: "Sign-in failed", Toast.LENGTH_LONG).show()
+                    }
+            }
+        }.start()
+    }
+
+    /**
+     * Late-login migration: after sign-in, offer to upload local-only sessions
+     * (session_id >= 900000) to the account. Saving while signed in carries the
+     * JWT, so the backend set_owner_from_note trigger stamps owner_id = auth.uid().
+     * Purely client-side; see shared/contracts/AUTH_AND_SESSION_SYNC.md.
+     */
+    private fun maybeOfferLocalSessionMigration() {
+        val locals = sessionManager.getAllSessions().filter { (it.sessionId ?: 0) >= 900_000 }
+        if (locals.isEmpty()) return
+        AlertDialog.Builder(this)
+            .setTitle("Upload local sessions?")
+            .setMessage(
+                "You have ${locals.size} session(s) saved while signed out. " +
+                    "Upload them to your account so they sync across your devices?"
+            )
+            .setPositiveButton("Upload") { _, _ -> migrateLocalSessions(locals) }
+            .setNegativeButton("Not now", null)
+            .show()
+    }
+
+    private fun migrateLocalSessions(locals: List<SessionSnapshot>) {
+        val rpcUrl = SettingsManager.getDreamTrackerRpcUrl(this)
+        val apiKey = SettingsManager.getDreamTrackerApiKey(this)
+        if (rpcUrl.isBlank() || apiKey.isBlank()) return
+        thread {
+            val migratedIds = mutableSetOf<String>()
+            for (session in locals) {
+                val ok = runBlocking { sessionManager.migrateLocalSession(session, rpcUrl, apiKey) }
+                if (ok) migratedIds.add(session.id)
+            }
+            if (migratedIds.isNotEmpty()) {
+                val remaining = sessionManager.getAllSessions().filter { it.id !in migratedIds }
+                sessionManager.replaceSessions(remaining)
+            }
+            runOnUiThread {
+                val msg = if (migratedIds.size == locals.size) {
+                    "Uploaded ${migratedIds.size} local session(s) to your account."
+                } else {
+                    "Uploaded ${migratedIds.size} of ${locals.size} local session(s); the rest stayed local."
+                }
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun performSignOut() {
+        Thread {
+            AuthStore.signOut(applicationContext)
+            runOnUiThread { Toast.makeText(this, "Signed out", Toast.LENGTH_SHORT).show() }
+        }.start()
     }
 
     private fun showAboutDialog() {
@@ -2880,9 +3153,25 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                         sessionManager.loadSessionsFromDatabase(rpcUrl, apiKey)
                     }
                     Log.i(TAG, "[SESSION] remoteSessions count=${remoteSessions.size}")
+                    // If the load failed because the account session silently
+                    // expired (refresh token rejected), tell the user instead of
+                    // quietly showing stale local sessions as if signed in.
+                    if (AuthStore.consumeSessionExpired(this)) {
+                        runOnUiThread { promptSessionExpired() }
+                    }
                     val sessions = if (remoteSessions.isNotEmpty()) {
-                        sessionManager.replaceSessions(remoteSessions)
-                        remoteSessions
+                        // Cloud is the source of truth for cloud sessions, but it
+                        // never contains local-only sessions (session_id >= 900000,
+                        // saved while signed out and not yet migrated). A plain
+                        // replace wiped those from the list. Preserve any local-only
+                        // session the cloud doesn't already represent.
+                        val remoteSessionIds = remoteSessions.mapNotNull { it.sessionId }.toSet()
+                        val localOnly = localSessions.filter {
+                            (it.sessionId ?: 0) >= 900_000 && (it.sessionId ?: 0) !in remoteSessionIds
+                        }
+                        val combined = remoteSessions + localOnly
+                        sessionManager.replaceSessions(combined)
+                        combined
                     } else {
                         val mergedSessions = mergeSessions(remoteSessions, localSessions)
                         if (mergedSessions.isNotEmpty()) {
@@ -3138,6 +3427,9 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             val loaded = sessionManager.loadSession(session.id)
             Log.i(TAG, "[SESSION] loadSession id=${session.id} result=${if (loaded != null) "ok" else "null"}")
             if (loaded != null) {
+                // Explicit load = the user chose this session; normal continuation
+                // (incl. slot-fingerprint restore) is intended again.
+                SettingsManager.setSuppressSlotRestore(this, false)
                 loaded.sessionId?.let {
                     SettingsManager.setParallelIngestSessionId(this, it)
                 } ?: SettingsManager.clearParallelIngestSessionId(this)
@@ -3170,7 +3462,9 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                     if (rpcUrl.isNotBlank() && apiKey.isNotBlank()) {
                         thread {
                             runBlocking {
-                                sessionManager.deleteSessionFromDatabase(session.id, rpcUrl, apiKey)
+                                sessionManager.deleteSessionFromDatabase(
+                                    session.id, session.sessionId, session.noteId, rpcUrl, apiKey
+                                )
                             }
                         }
                     }

@@ -9,6 +9,7 @@
     <string name="settings_detailed_logging">Detailed logging</string>
     <string name="settings_auto_cache_cleanup">Auto clear WebView cache on start</string>
     <string name="settings_incognito_mode">Global Incognito Mode</string>
+    <string name="settings_account">Account</string>
     <string name="settings_manage_subscription">Manage subscription</string>
     <string name="settings_find_in_page">Find in page</string>
     <string name="settings_about">About</string>

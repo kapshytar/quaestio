@@ -7,6 +7,7 @@ struct RootTabView: View {
     @State private var settingsButtonFrame: CGRect = .zero
     @State private var showsSettingsReveal = false
     @State private var settingsRevealScale: CGFloat = 0.08
+    @State private var showOnboarding = false
 
     var body: some View {
         ZStack {
@@ -27,7 +28,38 @@ struct RootTabView: View {
         .coordinateSpace(name: "rootShell")
         .shellBackground()
         .task {
+            // First run: ask Local vs Sign In before doing any remote work.
+            if AppMode.stored == nil {
+                if await AuthStore.shared.accessToken() == nil {
+                    showOnboarding = true
+                } else {
+                    AppMode.set("account")
+                }
+            }
             await appState.loadProjectTreeIfNeeded()
+        }
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingView { showOnboarding = false }
+        }
+        .alert(
+            "Upload local sessions?",
+            isPresented: Binding(
+                get: { appState.pendingLocalMigrationCount > 0 },
+                set: { if !$0 { appState.dismissLocalSessionMigration() } }
+            )
+        ) {
+            Button("Upload") { Task { await appState.confirmLocalSessionMigration() } }
+            Button("Not now", role: .cancel) { appState.dismissLocalSessionMigration() }
+        } message: {
+            Text("You have \(appState.pendingLocalMigrationCount) session(s) saved while signed out. Upload them to your account so they sync across your devices?")
+        }
+        .alert(
+            "Session expired",
+            isPresented: $appState.sessionExpiredPrompt
+        ) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Your account session expired. Open Settings → Account and sign in again to see and sync your cloud sessions.")
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {

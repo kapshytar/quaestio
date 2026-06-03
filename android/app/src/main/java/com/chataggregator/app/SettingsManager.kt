@@ -16,6 +16,7 @@ object SettingsManager {
     private const val KEY_MERGE_INSTRUCTIONS = "merge_instructions"
     private const val KEY_CLARIFICATION_INSTRUCTIONS = "clarification_instructions"
     private const val KEY_INCOGNITO_MODE = "incognito_mode"
+    private const val KEY_APP_MODE = "app_mode"
     private const val KEY_DREAM_TRACKER_RPC_URL = "dream_tracker_rpc_url"
     private const val KEY_DREAM_TRACKER_API_KEY = "dream_tracker_api_key"
     private const val KEY_DREAM_TRACKER_APP_ID = "dream_tracker_app_id"
@@ -139,6 +140,18 @@ object SettingsManager {
         prefs.edit().putBoolean(KEY_INCOGNITO_MODE, enabled).apply()
     }
 
+    // App mode chosen on first run (changeable later). "local" = on-device only
+    // (sessions, nothing sent to the server); "account" = signed in.
+    fun getAppMode(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_APP_MODE, null)
+    }
+
+    fun setAppMode(context: Context, value: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_APP_MODE, value).apply()
+    }
+
     fun getDreamTrackerRpcUrl(context: Context): String {
         // Hardcoded mode: always use BuildConfig value.
         val buildConfigUrl = com.chataggregator.app.BuildConfig.DREAM_TRACKER_RPC_URL
@@ -220,6 +233,23 @@ object SettingsManager {
     fun clearParallelIngestSourcePrompt(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().remove(KEY_PARALLEL_INGEST_SOURCE_PROMPT).apply()
+    }
+
+    // One-shot guard: after sign-in / late-login migration, suppress the
+    // slot-fingerprint "restore stored question context" so a brand-new question
+    // does not silently resurrect a pre-login session that merely shares the same
+    // slot layout. Lifted on explicit session load or when a fresh ingest assigns
+    // a new session_id. See AUTH_AND_SESSION_SYNC.md.
+    private const val KEY_SUPPRESS_SLOT_RESTORE = "suppress_slot_restore"
+
+    fun setSuppressSlotRestore(context: Context, value: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_SUPPRESS_SLOT_RESTORE, value).apply()
+    }
+
+    fun getSuppressSlotRestore(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_SUPPRESS_SLOT_RESTORE, false)
     }
 
     fun getParallelIngestExternalChatId(context: Context): String {

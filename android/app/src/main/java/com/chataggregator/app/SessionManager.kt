@@ -22,6 +22,7 @@ import java.util.*
  */
 class SessionManager(context: Context, private val slotManager: SlotManager) {
 
+    private val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences =
         context.getSharedPreferences("aggregator_sessions", Context.MODE_PRIVATE)
     private val gson = Gson()
@@ -30,6 +31,7 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
         private const val TAG = "SessionManager"
         const val SESSIONS_KEY = "sessions_list"
         const val MAX_SESSIONS = 1000
+        private const val LOCAL_SESSION_COUNTER_KEY = "local_session_counter"
     }
 
     private fun snapshotKey(session: SessionSnapshot): String {
@@ -128,6 +130,17 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
         return session
     }
 
+    /** Monotonic local session number for local-only mode (no backend
+     *  session_id). High base so it is visually distinct from backend ids and
+     *  won't collide before a future late-login renumber. Mirrors iOS. */
+    fun nextLocalSessionNumber(): Int {
+        val base = 900_000
+        val current = prefs.getInt(LOCAL_SESSION_COUNTER_KEY, 0)
+        val next = (if (current == 0) base else current) + 1
+        prefs.edit().putInt(LOCAL_SESSION_COUNTER_KEY, next).apply()
+        return next
+    }
+
     fun loadSession(sessionId: String): SessionSnapshot? {
         val session = getAllSessions().find { it.id == sessionId } ?: return null
         for (i in 0 until SlotManager.NUM_SLOTS) {
@@ -200,6 +213,38 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
             true
         } catch (e: Exception) {
             Log.w(TAG, "syncSessionToDatabase failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Late-login migration: re-create a local-only session under the account via
+     * the gated bridge `migrate` action. The backend allocates a fresh real
+     * session_id (ignoring the local 900000+ number, so it never collides across
+     * devices) and the owner trigger stamps owner_id = auth.uid(). Signed out,
+     * postJson throws → false.
+     */
+    suspend fun migrateLocalSession(
+        session: SessionSnapshot,
+        rpcBaseUrl: String,
+        apiKey: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = JsonObject().apply {
+                addProperty("p_action", "migrate")
+                add("p_record_id", null)
+                add("p_session_id", null)
+                add("p_note_id", null)
+                addProperty("p_name", session.name)
+                add("p_slot_config", gson.toJsonTree(session.slotConfig))
+                add("p_slot_urls", gson.toJsonTree(session.slotUrls))
+                add("p_slot_enabled", gson.toJsonTree(session.slotEnabled))
+                addProperty("p_limit", 1)
+            }
+            postJson(rpcBaseUrl, apiKey, "aggregator_sessions_bridge_v1", gson.toJson(body))
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "migrateLocalSession failed: ${e.message}")
             false
         }
     }
@@ -334,7 +379,17 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
             }
 
             if (noteBackedRows.isNotEmpty()) {
-                return@withContext noteBackedRows
+                // Note-less session snapshots (e.g. local sessions migrated on
+                // login: note_id = null) have no row in notes, so they are absent
+                // from noteBackedRows. Append them so they stay visible instead of
+                // vanishing whenever any note-backed session exists.
+                val noteBackedSessionIds = noteBackedRows.mapNotNull { it.sessionId }.toSet()
+                val sessionOnly = snapshots.filter { snap ->
+                    snap.noteId.isNullOrBlank() &&
+                        snap.sessionId != null &&
+                        snap.sessionId !in noteBackedSessionIds
+                }
+                return@withContext (noteBackedRows + sessionOnly)
                     .sortedByDescending { it.timestamp }
                     .take(MAX_SESSIONS)
             }
@@ -347,15 +402,26 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
     }
 
     suspend fun deleteSessionFromDatabase(
-        sessionId: String,
+        recordId: String,
+        sessionId: Int?,
+        noteId: String?,
         rpcBaseUrl: String,
         apiKey: String
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val body = JsonObject().apply {
                 addProperty("p_action", "delete")
-                addProperty("p_record_id", sessionId)
-                add("p_session_id", null)
+                // The bridge's delete action: with p_note_id it deletes the note
+                // subtree (so the row disappears from the web's notes tree) AND the
+                // aggregator_sessions rows; without it, it falls back to
+                // delete_aggregator_session(coalesce(p_session_id, p_record_id::int)).
+                // The old code passed only p_record_id = the snapshot UUID, which the
+                // fallback tried to cast to int (throwing) — so nothing was deleted
+                // on the backend and the session lingered in the web. Pass the
+                // integer session_id and the note id like the desktop client.
+                if (recordId.isNotBlank()) addProperty("p_record_id", recordId) else add("p_record_id", null)
+                if (sessionId != null) addProperty("p_session_id", sessionId) else add("p_session_id", null)
+                if (!noteId.isNullOrBlank()) addProperty("p_note_id", noteId) else add("p_note_id", null)
                 add("p_name", null)
                 add("p_slot_config", null)
                 add("p_slot_urls", null)
@@ -437,6 +503,10 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
         jsonBody: String
     ): String {
         val endpoint = normalizeRpcEndpoint(rpcBaseUrl, rpcName)
+        // Gate: signed out = no remote writes/reads. Local session store is the
+        // source of truth in local-only mode.
+        val authBearer = AuthStore.gateBearer(AuthStore.accessToken(appContext))
+            ?: throw NotSignedInException()
         Log.i(TAG, "[RPC] sending to $rpcName endpoint=$endpoint")
 
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -446,7 +516,7 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
             readTimeout = 30_000
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("apikey", apiKey)
-            setRequestProperty("Authorization", "Bearer $apiKey")
+            setRequestProperty("Authorization", "Bearer $authBearer")
         }
         OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(jsonBody) }
 
@@ -465,12 +535,15 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
     }
 
     private fun getJson(endpoint: String, apiKey: String): String {
+        // Gate: signed out = no remote reads (local-only mode).
+        val authBearer = AuthStore.gateBearer(AuthStore.accessToken(appContext))
+            ?: throw NotSignedInException()
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 20_000
             readTimeout = 30_000
             setRequestProperty("apikey", apiKey)
-            setRequestProperty("Authorization", "Bearer $apiKey")
+            setRequestProperty("Authorization", "Bearer $authBearer")
             setRequestProperty("Accept", "application/json")
         }
         val code = conn.responseCode

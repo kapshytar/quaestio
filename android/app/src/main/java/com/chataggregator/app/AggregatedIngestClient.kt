@@ -273,6 +273,10 @@ object AggregatedIngestClient {
     ): AggregatedIngestResult {
         val payloadHash = sha256(payloadJson)
         val endpoint = normalizeRpcEndpoint(rpcBaseUrl, rpcName)
+        // Multi-user gate: only signed-in users touch the backend. Signed out =
+        // local-only — never write anonymously (no publishable-key fallback).
+        val authBearer = AuthStore.gateBearer(AuthStore.accessToken(context))
+            ?: throw NotSignedInException()
         val payloadElement = gson.fromJson(payloadJson, JsonElement::class.java)
 
         val bodyObj = JsonObject()
@@ -310,7 +314,7 @@ object AggregatedIngestClient {
                     endpoint = endpoint,
                     headers = mapOf(
                         "apikey" to apiKey,
-                        "Authorization" to "Bearer $apiKey"
+                        "Authorization" to "Bearer $authBearer"
                     ),
                     jsonBody = rpcBody,
                     detailedLogging = detailedLogging
@@ -427,13 +431,15 @@ object AggregatedIngestClient {
         appendLocalDebugArtifact(context, event, detailedLogging)
         try {
             val endpoint = normalizeRpcEndpoint(rpcBaseUrl, "log_ingest_debug_v1")
+            // Gate: signed out = no remote debug log (local artifact still written above).
+            val authBearer = AuthStore.gateBearer(AuthStore.accessToken(context)) ?: return
             val bodyObj = JsonObject().apply { add("p_event", event) }
             val rpcBody = gson.toJson(bodyObj)
             postJson(
                 endpoint = endpoint,
                 headers = mapOf(
                     "apikey" to apiKey,
-                    "Authorization" to "Bearer $apiKey"
+                    "Authorization" to "Bearer $authBearer"
                 ),
                 jsonBody = rpcBody,
                 detailedLogging = detailedLogging

@@ -7,6 +7,11 @@ struct SettingsView: View {
     @State private var sharePayload: SharePayload?
     @State private var showDiagnostics = false
     @State private var selectedDiagnosticsSlotId = 1
+    @State private var authEmail = ""
+    @State private var authPassword = ""
+    @State private var authStatus: AuthStore.Status?
+    @State private var authBusy = false
+    @State private var authMessage: String?
     private let onClose: (() -> Void)?
 
     init(onClose: (() -> Void)? = nil) {
@@ -32,8 +37,18 @@ struct SettingsView: View {
 
                         settingsCard(title: "Status") {
                             statusRow(label: "Runtime", value: appState.statusMessage)
+                            statusRow(label: "Sessions", value: appState.diagnosticSessionCounts)
                             statusRow(label: "Cookie Store", value: "default")
                             statusRow(label: "Version", value: appVersionText)
+                        }
+
+                        settingsCard(title: "Account") {
+                            accountCardContent
+                        }
+                        .task {
+                            if authStatus == nil {
+                                authStatus = await AuthStore.shared.status()
+                            }
                         }
 
                         settingsCard(title: "Display") {
@@ -234,6 +249,85 @@ struct SettingsView: View {
         .onAppear {
             if appState.slots.contains(where: { $0.id == selectedDiagnosticsSlotId }) == false {
                 selectedDiagnosticsSlotId = appState.slots.first?.id ?? 1
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var accountCardContent: some View {
+        if let status = authStatus, status.signedIn {
+            statusRow(label: "Signed in", value: status.email ?? "—")
+            Button {
+                signOutTapped()
+            } label: {
+                Text(authBusy ? "Signing out…" : "Sign Out")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(SecondaryCapsuleButtonStyle())
+            .disabled(authBusy)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                TextField("Email", text: $authEmail)
+                    .textContentType(.username)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .textFieldStyle(.roundedBorder)
+                SecureField("Password", text: $authPassword)
+                    .textContentType(.password)
+                    .textFieldStyle(.roundedBorder)
+                Button {
+                    signInTapped()
+                } label: {
+                    Text(authBusy ? "Signing in…" : "Sign In")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryCapsuleButtonStyle())
+                .disabled(authBusy || authEmail.isEmpty || authPassword.isEmpty)
+                Text("Signed out keeps the legacy local/anon behaviour. Sign in to attribute your notes and sessions to your account.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+        }
+        if let authMessage {
+            Text(authMessage)
+                .font(.system(size: 12))
+                .foregroundStyle(AppTheme.textSecondary)
+        }
+    }
+
+    private func signInTapped() {
+        authBusy = true
+        authMessage = nil
+        let email = authEmail
+        let password = authPassword
+        Task {
+            let result = await AuthStore.shared.signIn(email: email, password: password)
+            await MainActor.run {
+                authBusy = false
+                switch result {
+                case .success(let status):
+                    authStatus = status
+                    authPassword = ""
+                    authMessage = "Signed in."
+                    appState.detectLocalSessionsForMigration()
+                case .failure(let error):
+                    authMessage = error.displayMessage
+                }
+            }
+        }
+    }
+
+    private func signOutTapped() {
+        authBusy = true
+        authMessage = nil
+        Task {
+            await AuthStore.shared.signOut()
+            let status = await AuthStore.shared.status()
+            await MainActor.run {
+                authBusy = false
+                authStatus = status
+                authMessage = "Signed out."
             }
         }
     }

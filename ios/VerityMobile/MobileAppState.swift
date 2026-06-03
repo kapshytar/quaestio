@@ -57,6 +57,13 @@ final class MobileAppState: ObservableObject {
     @Published private(set) var slotUserAgentPresets: [Int: UserAgentPreset] = [:]
     @Published private(set) var lastUserPrompt: String = ""
     @Published private(set) var globalPhoneZoomPercent: Int = 90
+    /// Number of local-only sessions (`session_id >= 900000`) found at sign-in
+    /// that can be uploaded to the account. Drives the migration alert. 0 = hidden.
+    @Published var pendingLocalMigrationCount: Int = 0
+    // Set when a Supabase call found the account session expired (refresh token
+    // rejected). The UI shows a "session expired — sign in again" alert instead
+    // of silently degrading to stale local sessions while in account mode.
+    @Published var sessionExpiredPrompt: Bool = false
 
     private static let slotsDefaultsKey = "verity.mobile.slots"
     private static let selectedSlotDefaultsKey = "verity.mobile.selectedSlotId"
@@ -180,19 +187,126 @@ final class MobileAppState: ObservableObject {
         if successCount > 0 {
             lastUserPrompt = message
             persistLastUserPrompt(message)
-            if !hadCurrentQuestionContext || !contextMatchesCurrentSlots {
-                sessionManager.clearParallelIngestState()
+            let expectedSlots = activeSlots.count
+            let signedIn = await AuthStore.shared.accessToken() != nil
+            // The question-context reset (clearing the parallel-ingest session id
+            // so a new question starts a new note) only applies to the signed-in
+            // ingest path. Offline there are no notes, so this branch would fire on
+            // every send (hadCurrentQuestionContext is always false), wiping the
+            // local session id and making saveLocalSession allocate a fresh
+            // S9000xx each time. Keep the local session stable across consecutive
+            // offline questions (one session per layout, matching desktop); the
+            // user can start a new one via Clear Active Session.
+            if signedIn {
+                if !hadCurrentQuestionContext || !contextMatchesCurrentSlots {
+                    sessionManager.clearParallelIngestState()
+                    sessionManager.rememberSourcePrompt(message)
+                } else if shouldResetQuestionContext {
+                    sessionManager.startNewQuestionInCurrentSession(sourcePrompt: message)
+                }
+            } else {
+                // Offline: remember the latest prompt for the (reused) local
+                // session name, but do NOT clear its session id.
                 sessionManager.rememberSourcePrompt(message)
-            } else if shouldResetQuestionContext {
-                sessionManager.startNewQuestionInCurrentSession(sourcePrompt: message)
             }
             updateSessionIndicator()
             composerText = ""
-            let expectedSlots = activeSlots.count
-            Task {
-                await startParallelAggregatedIngest(prompt: message, expectedSlots: expectedSlots)
+            if signedIn {
+                Task {
+                    await startParallelAggregatedIngest(prompt: message, expectedSlots: expectedSlots)
+                }
+            } else {
+                // Local-only mode: no backend ingest. Save the current slot
+                // layout as a local session so it can be reopened (parity with
+                // the signed-in auto-save, but on-device only).
+                await saveLocalSession(prompt: message)
             }
         }
+    }
+
+    /// Local-only session save: persists the current slot layout (config/URLs/
+    /// enabled + name + a local session number) to the on-device store. No
+    /// backend call. Reuses the current question's local number when continuing
+    /// the same context, else allocates a new one.
+    private func saveLocalSession(prompt: String) async {
+        var state = sessionManager.getParallelIngestState()
+        let localId: Int
+        // Only reuse a session id that is itself local (>= 900000). A leftover
+        // real backend id (e.g. from a prior signed-in session) must NOT be
+        // reused — it would collide with a real DB session and hide the row from
+        // late-login migration. Allocate a fresh local number instead.
+        if let existing = state.sessionId, existing >= Self.localSessionBase {
+            localId = existing
+        } else {
+            localId = sessionManager.nextLocalSessionNumber()
+            state.sessionId = localId
+            sessionManager.replaceParallelIngestState(state)
+        }
+        let slotURLs = currentSessionSnapshotSlotURLs()
+        _ = sessionManager.saveCurrentSession(
+            name: String(prompt.prefix(60)).ifEmpty("Session"),
+            dreamSessionId: localId,
+            slotStates: slots,
+            slotURLs: slotURLs,
+            noteId: nil,
+            slotLiveURLs: slotURLs
+        )
+        updateSessionIndicator()
+        // Visible confirmation (parity with Android's "Saved locally" toast) and
+        // a diagnostic anchor: if this shows, the signed-out save path ran.
+        statusMessage = "Saved locally (S\(localId))"
+        await loadSessions(forceRefresh: false)
+    }
+
+    // MARK: - Late-login session migration
+
+    private static let localSessionBase = 900_000
+
+    /// Called after a successful sign-in. Starts the account with a clean slate:
+    /// drops any pre-login question context and suppresses slot-fingerprint
+    /// restore (so the next question opens a fresh session instead of resurrecting
+    /// an old one sharing the slot layout), then raises the migration prompt if
+    /// there are local-only sessions to upload.
+    func detectLocalSessionsForMigration() {
+        sessionManager.clearParallelIngestState()
+        sessionManager.suppressSlotRestore = true
+        updateSessionIndicator()
+        let count = sessionManager.getAllSessions().filter {
+            ($0.sessionId ?? 0) >= Self.localSessionBase
+        }.count
+        pendingLocalMigrationCount = count
+    }
+
+    func dismissLocalSessionMigration() {
+        pendingLocalMigrationCount = 0
+    }
+
+    /// Upload local-only sessions to the account via the gated bridge `save`
+    /// (carries the JWT now that we are signed in, so the backend stamps
+    /// owner_id = auth.uid()). Migrated copies are removed locally so the next
+    /// refresh shows the now-owned rows from the DB. See AUTH_AND_SESSION_SYNC.md.
+    func confirmLocalSessionMigration() async {
+        let locals = sessionManager.getAllSessions().filter {
+            ($0.sessionId ?? 0) >= Self.localSessionBase
+        }
+        pendingLocalMigrationCount = 0
+        guard !locals.isEmpty else { return }
+
+        var migratedIds = Set<String>()
+        for session in locals {
+            if await SessionManager.migrateLocalSession(session) {
+                migratedIds.insert(session.id)
+            }
+        }
+
+        if !migratedIds.isEmpty {
+            let remaining = sessionManager.getAllSessions().filter { !migratedIds.contains($0.id) }
+            sessionManager.replaceSessions(remaining)
+        }
+        statusMessage = migratedIds.count == locals.count
+            ? "Uploaded \(migratedIds.count) local session(s) to your account."
+            : "Uploaded \(migratedIds.count) of \(locals.count) local session(s); the rest stayed local."
+        await loadSessions(forceRefresh: true)
     }
 
     func setActiveProject(_ projectId: String?) {
@@ -285,6 +399,13 @@ final class MobileAppState: ObservableObject {
         }
     }
 
+    /// Diagnostic: stored (decoded from disk) vs currently-shown session counts.
+    /// Surfaced in Settings → Shell diagnostics so a "saved but not listed" bug
+    /// is visible on-device without log tooling.
+    var diagnosticSessionCounts: String {
+        "stored \(sessionManager.getAllSessions().count) / shown \(availableSessions.count)"
+    }
+
     func loadProjectTreeIfNeeded() async {
         await loadProjectTree()
     }
@@ -307,10 +428,26 @@ final class MobileAppState: ObservableObject {
         defer { isLoadingSessions = false }
 
         let remoteSessions = await SessionManager.loadSessionsFromDatabase()
+        // If the load found the account session expired (refresh rejected),
+        // surface it rather than quietly showing stale local sessions.
+        if AuthStore.consumeSessionExpired() {
+            sessionExpiredPrompt = true
+        }
         let sessions: [SessionSnapshot]
         if !remoteSessions.isEmpty {
-            sessionManager.replaceSessions(remoteSessions)
-            sessions = remoteSessions
+            // Cloud is the source of truth for cloud sessions, but it never
+            // contains local-only sessions (session_id >= 900000, saved while
+            // signed out and not yet migrated). A plain replace wiped those from
+            // the on-device list. Preserve any local-only session the cloud
+            // doesn't already represent so signing in never deletes a pending
+            // local session before the user migrates it.
+            let remoteSessionIds = Set(remoteSessions.compactMap { $0.sessionId })
+            let localOnly = localSessions.filter {
+                ($0.sessionId ?? 0) >= Self.localSessionBase && !remoteSessionIds.contains($0.sessionId ?? 0)
+            }
+            let combined = remoteSessions + localOnly
+            sessionManager.replaceSessions(combined)
+            sessions = combined
         } else {
             let merged = mergeSessions(remoteSessions: remoteSessions, localSessions: localSessions)
             if !merged.isEmpty {
@@ -326,6 +463,25 @@ final class MobileAppState: ObservableObject {
 
     func loadSessionsIfNeeded() async {
         await loadSessions()
+    }
+
+    /// Delete one saved session (parity with Android/desktop). Removes it from
+    /// the on-device store and the visible list immediately, then deletes it on
+    /// the backend (fire-and-forget; signed out the remote call is a no-op and
+    /// the local removal still stands).
+    func deleteSession(_ session: SessionSnapshot) {
+        sessionManager.deleteSession(session.id)
+        availableSessions.removeAll { $0.id == session.id }
+        if availableSessions.isEmpty {
+            statusMessage = "No saved sessions"
+        }
+        Task {
+            let ok = await SessionManager.deleteSessionFromDatabase(session)
+            if AuthStore.consumeSessionExpired() {
+                sessionExpiredPrompt = true
+            }
+            print("[deleteSession] id=\(session.id) session=\(session.sessionId ?? -1) backend=\(ok ? "ok" : "skipped/failed")")
+        }
     }
 
     func loadSession(_ session: SessionSnapshot) {
@@ -365,6 +521,9 @@ final class MobileAppState: ObservableObject {
             print("[loadSession]   \(slotKey) -> \(svc) @ \(url.prefix(60))")
         }
 
+        // Explicit load = the user chose this session; normal continuation
+        // (incl. slot-fingerprint restore) is intended again.
+        sessionManager.suppressSlotRestore = false
         sessionManager.updateSessionLink(
             sessionId: session.sessionId,
             noteId: session.noteId,
@@ -903,6 +1062,9 @@ final class MobileAppState: ObservableObject {
         persistLastUserPrompt(prompt)
 
         if let sessionId = result.sessionId {
+            // A fresh ingest established the active session; normal
+            // slot-fingerprint continuation is safe again.
+            sessionManager.suppressSlotRestore = false
             let snapshot = sessionManager.saveCurrentSession(
                 name: String(prompt.prefix(60)).ifEmpty("Session"),
                 dreamSessionId: sessionId,
@@ -1263,11 +1425,23 @@ final class MobileAppState: ObservableObject {
     }
 
     private func restoreStoredQuestionContextForCurrentSlots() -> SessionSnapshot? {
+        // After sign-in / migration, do not resurrect a pre-login session by slot
+        // layout alone — the next question must start fresh.
+        if sessionManager.suppressSlotRestore { return nil }
         let enabledSlotKeys = Set(slots.filter(\.isEnabled).map { "slot-\($0.id)" })
         if enabledSlotKeys.isEmpty { return nil }
 
-        let currentFingerprint = buildSessionFingerprint(slotURLs: currentSessionSnapshotSlotURLs(), slotKeys: enabledSlotKeys)
+        let currentSlotURLs = currentSessionSnapshotSlotURLs()
+        let currentFingerprint = buildSessionFingerprint(slotURLs: currentSlotURLs, slotKeys: enabledSlotKeys)
         if currentFingerprint.isEmpty { return nil }
+        // Only resurrect a prior session when the CURRENT slots point at a real,
+        // identifiable conversation (chatgpt.com/c/<id>, …). A Temporary Chat or
+        // a fresh home page has no conversation id, so extractConversationKey
+        // degrades to a generic origin (or "temporary") that collides with any
+        // old session that reduced to the same origin — that's how a new question
+        // got attached to stale session 158 on Android. Desktop sidesteps this by
+        // keying context on the exact real-conversation fingerprint; mirror that.
+        if !fingerprintHasRealConversation(slotURLs: currentSlotURLs, slotKeys: enabledSlotKeys) { return nil }
 
         let currentSourcePrompt = sessionManager.getParallelIngestState().sourcePrompt
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1308,6 +1482,23 @@ final class MobileAppState: ObservableObject {
             snapshot.sessionId == activeSessionId &&
                 (snapshot.noteId ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == activeNoteId &&
                 buildSessionFingerprint(slotURLs: snapshot.slotURLs, slotKeys: enabledSlotKeys) == currentFingerprint
+        }
+    }
+
+    /// True when at least one enabled slot points at a real, identifiable
+    /// conversation (a chat id), as opposed to a Temporary Chat, a home/landing
+    /// page, or a blank slot whose `extractConversationKey` degrades to a generic
+    /// origin. Gates slot-fingerprint restore so a new question on generic pages
+    /// never resurrects an unrelated old session. Mirrors Android.
+    private func fingerprintHasRealConversation(slotURLs: [String: String], slotKeys: Set<String>) -> Bool {
+        slotKeys.contains { slotKey in
+            let rawURL = slotURLs[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if rawURL.isEmpty { return false }
+            let slotIndex = Int(slotKey.replacingOccurrences(of: "slot-", with: ""))
+            let serviceId = slots.first(where: { $0.id == slotIndex })?.serviceId ?? "unknown"
+            let key = extractConversationKey(serviceId: serviceId, rawURL: rawURL)
+            let tail = key.contains(":") ? String(key[key.index(after: key.firstIndex(of: ":")!)...]) : ""
+            return !tail.isEmpty && tail != "temporary" && tail != "no-url" && !tail.contains("://")
         }
     }
 
@@ -1527,14 +1718,6 @@ final class MobileAppState: ObservableObject {
         let encodedProjectId = projectId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? projectId
         let endpoint = "\(restBase)/tags?select=id,slot_urls&id=eq.\(encodedProjectId)&limit=1"
 
-        guard let url = URL(string: endpoint) else { return [:] }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 8
-        request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-
         do {
             let rows: [ProjectSlotURLsTagRow] = try await getJSONArray(
                 endpoint: endpoint,
@@ -1619,11 +1802,13 @@ final class MobileAppState: ObservableObject {
         guard let url = URL(string: endpoint) else {
             throw NSError(domain: "MobileAppState", code: 2101, userInfo: [NSLocalizedDescriptionKey: "Invalid project endpoint"])
         }
+        // Gate: signed out = no remote reads (local-only mode).
+        guard let authBearer = await AuthStore.shared.accessToken() else { return [] }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 8
         request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(authBearer)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -1646,7 +1831,11 @@ final class MobileAppState: ObservableObject {
     }
 
     private static func makeSessionIndicator(from state: ParallelIngestState) -> String? {
-        if let sessionId = state.sessionId, !state.activeNoteId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        // Show the session id whenever one is active — including note-less local
+        // sessions (session_id >= 900000, no aggregated note). Previously this
+        // required a non-empty activeNoteId, so loading/saving a local session
+        // left the indicator blank (desktop shows S<id> for any session id).
+        if let sessionId = state.sessionId {
             return "S\(sessionId)"
         }
         return nil

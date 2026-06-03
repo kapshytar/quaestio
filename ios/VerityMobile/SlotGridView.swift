@@ -121,6 +121,7 @@ struct SlotGridView: View {
     @State private var projectRefreshLocked = false
     @State private var sessionsRefreshLocked = false
     @State private var expandedSessionTitleIds: Set<String> = []
+    @State private var sessionPendingDelete: SessionSnapshot?
 
     private var selectedSlot: SlotState? {
         appState.slots.first { $0.id == appState.selectedSlotId } ?? appState.slots.first
@@ -563,9 +564,33 @@ struct SlotGridView: View {
                                 }
                             }
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        sessionPendingDelete = session
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
                         }
                     }
                 }
+            }
+            .confirmationDialog(
+                "Delete this session?",
+                isPresented: Binding(
+                    get: { sessionPendingDelete != nil },
+                    set: { if !$0 { sessionPendingDelete = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: sessionPendingDelete
+            ) { session in
+                Button("Delete \(appState.displaySessionName(session))", role: .destructive) {
+                    appState.deleteSession(session)
+                    sessionPendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) { sessionPendingDelete = nil }
+            } message: { session in
+                Text(appState.displaySessionName(session))
             }
             .navigationTitle("Sessions")
             .toolbar {
