@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.6.0
+
+- Push milestone for the 2.5.10 iOS work: deterministic bottom tray around the
+  keyboard (tap-heuristic and timer races removed) and glass-island chrome
+  (Liquid Glass on iOS 26+ with material / Reduce Transparency fallbacks).
+  Device-tested on iPhone 15 Pro Max.
+
+
 ## 2.5.10
 
 - Fix jittery iOS bottom tray around the keyboard. Previously a tap recognizer
