@@ -49,6 +49,37 @@ enum RootSection: String, CaseIterable, Identifiable {
     }
 }
 
+struct GlassIslandModifier: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    let radius: CGFloat
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content
+                .background(
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .fill(Color(red: 0.09, green: 0.10, blue: 0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                )
+        } else if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+        } else {
+            content
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.22), radius: 14, x: 0, y: 8)
+        }
+    }
+}
+
 struct ShellBackground: ViewModifier {
     func body(content: Content) -> some View {
         content.background(
@@ -109,6 +140,12 @@ extension View {
                 x: 0,
                 y: showsShadow ? 4 : 0
             )
+    }
+
+    // Floating "glass island" chrome: Liquid Glass on iOS 26+, material fallback below,
+    // opaque fill when the user has Reduce Transparency on.
+    func glassIsland(radius: CGFloat = AppTheme.compactRadius) -> some View {
+        modifier(GlassIslandModifier(radius: radius))
     }
 
     func glassCard(padding: CGFloat = 16, radius: CGFloat = AppTheme.cardRadius) -> some View {

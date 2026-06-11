@@ -5,6 +5,7 @@ import WebKit
 private struct GrowingComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
+    @Binding var isFocused: Bool
 
     let minHeight: CGFloat
     let maxHeight: CGFloat
@@ -57,6 +58,17 @@ private struct GrowingComposerTextView: UIViewRepresentable {
 
         init(_ parent: GrowingComposerTextView) {
             self.parent = parent
+        }
+
+        // Synchronous on purpose: didBeginEditing fires before keyboardWillShow,
+        // so the focus flag must be set before the keyboard notification lands —
+        // deferring it a runloop would briefly collapse the tray under the composer.
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.isFocused = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.isFocused = false
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -116,7 +128,8 @@ struct SlotGridView: View {
     @State private var showsSettingsQuickMenu = false
     @State private var sessionSearchText = ""
     @State private var composerHeight: CGFloat = 22
-    @State private var collapsesBottomTrayForWebInput = false
+    @State private var isComposerFocused = false
+    @State private var keepsTrayDuringWebInput = false
     @State private var isKeyboardVisible = false
     @State private var projectRefreshLocked = false
     @State private var sessionsRefreshLocked = false
@@ -125,6 +138,17 @@ struct SlotGridView: View {
 
     private var selectedSlot: SlotState? {
         appState.slots.first { $0.id == appState.selectedSlotId } ?? appState.slots.first
+    }
+
+    // Tray visibility is a pure function of focus state — no tap heuristics, no timers.
+    // Keyboard up for a web input (composer not focused) → tray collapses to give the page room.
+    // Sheet keyboards (project/session search) don't count — they belong to the sheet, not the page.
+    private var isBottomTrayCollapsed: Bool {
+        isKeyboardVisible
+            && !isComposerFocused
+            && !keepsTrayDuringWebInput
+            && !showsProjectSheet
+            && !showsSessionSheet
     }
 
     private func shouldShowSessionTitleMore(_ title: String) -> Bool {
@@ -162,9 +186,7 @@ struct SlotGridView: View {
                 if let slot = selectedSlot {
                     let model = appState.webModel(for: slot.id)
 
-                    WebViewSlot(slot: slot, model: model) {
-                        collapseBottomTrayForWebInput()
-                    }
+                    WebViewSlot(slot: slot, model: model)
                         .id(slot.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .opacity(model.isDisplayReady ? 1 : 0.001)
@@ -212,7 +234,7 @@ struct SlotGridView: View {
             .padding(.bottom, 4)
 
             Group {
-                if collapsesBottomTrayForWebInput {
+                if isBottomTrayCollapsed {
                     collapsedBottomTraySwipeZone
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 } else {
@@ -220,10 +242,11 @@ struct SlotGridView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .padding(.horizontal, collapsesBottomTrayForWebInput ? 0 : 10)
-            .padding(.top, collapsesBottomTrayForWebInput ? 0 : 4)
-            .padding(.bottom, collapsesBottomTrayForWebInput ? 2 : 8)
+            .padding(.horizontal, isBottomTrayCollapsed ? 0 : 10)
+            .padding(.top, isBottomTrayCollapsed ? 0 : 4)
+            .padding(.bottom, isBottomTrayCollapsed ? 2 : 8)
         }
+        .animation(.spring(response: 0.28, dampingFraction: 0.88), value: isBottomTrayCollapsed)
         .shellBackground()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
@@ -237,7 +260,7 @@ struct SlotGridView: View {
         }
         .onChange(of: appState.selectedSlotId) { _, _ in
             showsSlotControlStrip = false
-            collapsesBottomTrayForWebInput = false
+            keepsTrayDuringWebInput = false
             syncSlotAddressDraft()
         }
         .onChange(of: appState.slots) { _, _ in
@@ -248,7 +271,7 @@ struct SlotGridView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
-            collapsesBottomTrayForWebInput = false
+            keepsTrayDuringWebInput = false
         }
         .sheet(isPresented: $showsProjectSheet) {
             projectSheet
@@ -263,9 +286,9 @@ struct SlotGridView: View {
     }
 
     private var slotTabBar: some View {
-        HStack(alignment: .bottom, spacing: 4) {
+        HStack(alignment: .center, spacing: 6) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: -6) {
+                HStack(spacing: 2) {
                     ForEach(appState.slots) { slot in
                         Button {
                             if appState.selectedSlotId == slot.id {
@@ -285,51 +308,33 @@ struct SlotGridView: View {
                                     .foregroundStyle(appState.selectedSlotId == slot.id ? AppTheme.textPrimary : AppTheme.textSecondary)
                                     .lineLimit(1)
                             }
-                            .padding(.horizontal, 15)
-                            .padding(.top, 9)
-                            .padding(.bottom, 8)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 8)
                             .background(
-                                UnevenRoundedRectangle(
-                                    topLeadingRadius: 15,
-                                    bottomLeadingRadius: 0,
-                                    bottomTrailingRadius: 0,
-                                    topTrailingRadius: 15,
-                                    style: .continuous
-                                )
+                                Capsule(style: .continuous)
                                     .fill(
                                         appState.selectedSlotId == slot.id
-                                        ? Color(red: 0.16, green: 0.17, blue: 0.20)
-                                        : Color(red: 0.09, green: 0.10, blue: 0.12)
+                                        ? Color.white.opacity(0.12)
+                                        : Color.clear
                                     )
                             )
                             .overlay(
-                                UnevenRoundedRectangle(
-                                    topLeadingRadius: 15,
-                                    bottomLeadingRadius: 0,
-                                    bottomTrailingRadius: 0,
-                                    topTrailingRadius: 15,
-                                    style: .continuous
-                                )
+                                Capsule(style: .continuous)
                                     .stroke(
                                         appState.selectedSlotId == slot.id
-                                        ? AppTheme.borderStrong
-                                        : Color.white.opacity(0.06),
+                                        ? Color.white.opacity(0.14)
+                                        : Color.clear,
                                         lineWidth: 1
                                     )
                             )
-                            .shadow(
-                                color: appState.selectedSlotId == slot.id ? Color.black.opacity(0.18) : .clear,
-                                radius: 10,
-                                x: 0,
-                                y: -1
-                            )
                         }
-                        .zIndex(appState.selectedSlotId == slot.id ? 100 : Double(99 - slot.id))
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 4)
             }
+            .padding(.vertical, 4)
+            .glassIsland(radius: 22)
 
             HStack(spacing: 4) {
                 utilityButton(kind: .merge) {
@@ -346,7 +351,6 @@ struct SlotGridView: View {
                     onSettingsFrameChange?(frame)
                 }
             }
-            .padding(.bottom, 1)
         }
     }
 
@@ -718,13 +722,7 @@ struct SlotGridView: View {
             }
         }
         .padding(12)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.14), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.22), radius: 18, x: 0, y: 10)
+        .glassIsland(radius: 20)
     }
 
     private var bottomPanel: some View {
@@ -734,14 +732,7 @@ struct SlotGridView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(red: 0.09, green: 0.10, blue: 0.12))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.06), lineWidth: 1)
-        )
+        .glassIsland(radius: 22)
         .padding(.bottom, 4)
     }
 
@@ -870,6 +861,7 @@ struct SlotGridView: View {
                     GrowingComposerTextView(
                         text: $appState.composerText,
                         measuredHeight: $composerHeight,
+                        isFocused: $isComposerFocused,
                         minHeight: 22,
                         maxHeight: 88
                     )
@@ -880,11 +872,11 @@ struct SlotGridView: View {
             .padding(.vertical, 12)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(red: 0.10, green: 0.11, blue: 0.13))
+                    .fill(Color.white.opacity(0.06))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
             )
 
             Button {
@@ -912,21 +904,8 @@ struct SlotGridView: View {
         appState.slots[index].isEnabled.toggle()
     }
 
-    private func collapseBottomTrayForWebInput() {
-        guard !collapsesBottomTrayForWebInput else { return }
-        collapsesBottomTrayForWebInput = true
-        Task {
-            try? await Task.sleep(nanoseconds: 450_000_000)
-            await MainActor.run {
-                if !isKeyboardVisible {
-                    collapsesBottomTrayForWebInput = false
-                }
-            }
-        }
-    }
-
     private func restoreBottomTray() {
-        collapsesBottomTrayForWebInput = false
+        keepsTrayDuringWebInput = true
     }
 
     private func tabAccent(for slot: SlotState) -> Color {
@@ -1044,14 +1023,7 @@ struct SlotGridView: View {
         }
         .padding(14)
         .frame(width: 240, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(red: 0.10, green: 0.11, blue: 0.13))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .glassIsland(radius: 16)
     }
 
     private func stripPillLabel(systemName: String, text: String) -> some View {

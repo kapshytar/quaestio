@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.5.10
+
+- Fix jittery iOS bottom tray around the keyboard. Previously a tap recognizer
+  on the slot webview collapsed the tray on ANY tap, then a 450ms timer and the
+  `keyboardWillHide` handler raced each other to restore it — tapping the work
+  area to dismiss the keyboard randomly hid/showed the tray. The tap heuristic
+  and timer are gone; tray visibility is now a pure function of state:
+  collapsed iff the keyboard is up and the native composer is not focused
+  (composer focus tracked via `UITextViewDelegate`). Swipe-up restore still
+  works via an explicit `keepsTrayDuringWebInput` override that resets when the
+  keyboard hides or the slot changes. Composer focus flags are set synchronously
+  (before `keyboardWillShow` lands), and sheet keyboards (project/session
+  search) don't collapse the tray behind the sheet.
+- Move iOS chrome onto floating glass islands: top slot tab bar (now capsule
+  chips), bottom composer tray, slot control strip, and the settings quick
+  popover use a shared `glassIsland` modifier — native Liquid Glass
+  (`glassEffect`) on iOS 26+, `ultraThinMaterial` + stroke + shadow fallback on
+  iOS 17–25, and an opaque fill when Reduce Transparency is enabled.
+
+
 ## 2.5.9
 
 - Fix offline (signed-out) sends allocating a new local session number on every
