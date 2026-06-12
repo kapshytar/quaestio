@@ -20,6 +20,10 @@ const REFRESH_SKEW_SECONDS = 60;
 let config = { supabaseUrl: '', apikey: '' };
 let session = null; // { access_token, refresh_token, expires_at, email, user_id }
 let loaded = false;
+// Set when a refresh is definitively rejected (token revoked/expired). Consumed
+// by the renderer to prompt re-sign-in. In-memory: a restart re-derives it on
+// the next failed refresh.
+let sessionExpired = false;
 
 function configure({ supabaseUrl, apikey }) {
   config = {
@@ -80,6 +84,8 @@ function tokenUrl(grantType) {
 
 function setSessionFromResponse(data) {
   if (!data || !data.access_token) return null;
+  // A fresh token clears any pending expiry prompt.
+  sessionExpired = false;
   const nowSec = Math.floor(Date.now() / 1000);
   session = {
     access_token: data.access_token,
@@ -125,19 +131,37 @@ async function refresh() {
       body: JSON.stringify({ refresh_token: session.refresh_token })
     });
     const data = await response.json().catch(() => null);
-    if (!response.ok) {
-      // Refresh token revoked/expired — force a clean signed-out state.
-      console.warn('[auth] refresh failed; signing out locally.');
+    if (response.ok && setSessionFromResponse(data)) {
+      return true;
+    }
+    if (response.status === 400 || response.status === 401) {
+      // Definitive auth rejection: the refresh token is invalid/revoked/expired.
+      // Nothing local recovers it — clear the session and flag the expiry so the
+      // UI can prompt re-sign-in instead of silently degrading to local-only.
+      console.warn(`[auth] refresh rejected (${response.status}): ${(data?.error_description || data?.msg || data?.error || '').toString().slice(0, 200)} — clearing session`);
       session = null;
       persist();
+      sessionExpired = true;
       return false;
     }
-    setSessionFromResponse(data);
-    return true;
+    // Transient failure (5xx / unexpected): keep the session so a later call can
+    // retry instead of nuking a valid session over a server blip.
+    console.warn(`[auth] refresh transient failure (${response.status}) — keeping session`);
+    return false;
   } catch (error) {
-    console.warn('[auth] refresh error:', error?.message || error);
+    // Network error: keep the session and retry on a later call.
+    console.warn('[auth] refresh error:', error?.message || error, '— keeping session');
     return false;
   }
+}
+
+// True exactly once after a refresh was definitively rejected (token
+// revoked/expired); consuming clears it. The renderer polls this so it can show
+// "session expired — sign in again" instead of silently showing stale sessions.
+function consumeSessionExpired() {
+  if (!sessionExpired) return false;
+  sessionExpired = false;
+  return true;
 }
 
 // Returns a valid user access token, refreshing if near expiry. Null if the
@@ -167,6 +191,8 @@ async function signOut() {
   }
   session = null;
   persist();
+  // Deliberate sign-out is not an expiry — drop any pending prompt.
+  sessionExpired = false;
   return { ok: true, status: getStatus() };
 }
 
@@ -184,5 +210,6 @@ module.exports = {
   signIn,
   signOut,
   getStatus,
-  getValidAccessToken
+  getValidAccessToken,
+  consumeSessionExpired
 };

@@ -4,6 +4,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const authStore = require('./auth-store');
+const { bearerOrNull } = require('./auth-gate');
 
 const APP_DATA_PATH = app.getPath('appData');
 const FIXED_USER_DATA_PATH = path.join(APP_DATA_PATH, 'chat-aggregator');
@@ -307,14 +308,24 @@ loadSupabaseEnv();
 // Resolve the `Authorization: Bearer` token for Supabase calls: the signed-in
 // user's access token when available (so backend owner_id triggers attribute
 // rows to them), otherwise the publishable key (legacy anon behaviour).
-async function getAuthBearer(fallbackKey) {
+// Multi-user gate: the user's JWT, or null when signed out. There is no
+// publishable-key fallback — signed out means local-only, so callers must skip
+// the backend entirely (no anonymous writes/reads). Mirrors the mobile
+// AuthStore gate and shared/contracts/AUTH_AND_SESSION_SYNC.md.
+async function userBearerOrNull() {
   try {
-    const token = await authStore.getValidAccessToken();
-    if (token) return token;
+    return bearerOrNull(await authStore.getValidAccessToken());
   } catch (error) {
-    console.warn('[auth] token resolution failed; using publishable key:', error?.message || error);
+    console.warn('[auth] token resolution failed; treating as local-only:', error?.message || error);
+    return null;
   }
-  return fallbackKey;
+}
+
+class NotSignedInError extends Error {
+  constructor() {
+    super('Not signed in — local-only mode');
+    this.code = 'NOT_SIGNED_IN';
+  }
 }
 
 function getPrimaryWindow() {
@@ -596,12 +607,16 @@ async function emitIngestDebugEvent({ supabaseUrl, serviceRoleKey, eventPayload 
 
   if (!supabaseUrl || !serviceRoleKey) return;
 
+  // Gate: signed out = no remote debug log (the local artifact is kept above).
+  const bearer = await userBearerOrNull();
+  if (!bearer) return;
+
   try {
     const response = await fetch(`${supabaseUrl}${DREAM_DEBUG_RPC_PATH}`, {
       method: 'POST',
       headers: {
         apikey: serviceRoleKey,
-        Authorization: `Bearer ${await getAuthBearer(serviceRoleKey)}`,
+        Authorization: `Bearer ${bearer}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ p_event: payload })
@@ -628,11 +643,16 @@ async function callSupabaseRpc(rpcName, body) {
     throw new Error('Supabase env is not configured (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).');
   }
 
+  // Gate: signed out = local-only; never call the backend anonymously. The
+  // session handlers fall back to the local store on this error.
+  const bearer = await userBearerOrNull();
+  if (!bearer) throw new NotSignedInError();
+
   const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${rpcName}`, {
     method: 'POST',
     headers: {
       apikey: serviceRoleKey,
-      Authorization: `Bearer ${await getAuthBearer(serviceRoleKey)}`,
+      Authorization: `Bearer ${bearer}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(body || {})
@@ -694,11 +714,15 @@ async function callSupabaseRestGet(endpointPath, allow404 = false) {
     throw new Error('Supabase env is not configured (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).');
   }
 
+  // Gate: signed out = no remote reads (local-only mode).
+  const bearer = await userBearerOrNull();
+  if (!bearer) return [];
+
   const response = await fetch(buildSupabaseRestUrl(endpointPath), {
     method: 'GET',
     headers: {
       apikey: serviceRoleKey,
-      Authorization: `Bearer ${await getAuthBearer(serviceRoleKey)}`,
+      Authorization: `Bearer ${bearer}`,
       Accept: 'application/json'
     }
   });
@@ -724,9 +748,13 @@ async function callSupabaseRestWrite(method, endpointPath, payload = null, optio
     throw new Error('Supabase env is not configured (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).');
   }
 
+  // Gate: signed out = local-only; never write to the backend anonymously.
+  const bearer = await userBearerOrNull();
+  if (!bearer) throw new NotSignedInError();
+
   const headers = {
     apikey: serviceRoleKey,
-    Authorization: `Bearer ${await getAuthBearer(serviceRoleKey)}`,
+    Authorization: `Bearer ${bearer}`,
     Accept: 'application/json',
     Prefer: options?.prefer || 'return=minimal'
   };
@@ -988,11 +1016,15 @@ async function ingestDreamRpc(kindInput, params) {
       sessionId
     });
 
+    // Gate: signed out = local-only; never ingest to the backend anonymously.
+    const bearer = await userBearerOrNull();
+    if (!bearer) throw new NotSignedInError();
+
     const response = await fetch(`${supabaseUrl}${DREAM_RPC_PATHS[kind]}`, {
       method: 'POST',
       headers: {
         apikey: serviceRoleKey,
-        Authorization: `Bearer ${await getAuthBearer(serviceRoleKey)}`,
+        Authorization: `Bearer ${bearer}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(requestBody)
@@ -1121,6 +1153,10 @@ ipcMain.handle('auth-get-status', async () => {
   return authStore.getStatus();
 });
 
+ipcMain.handle('auth-consume-session-expired', async () => {
+  return authStore.consumeSessionExpired();
+});
+
 ipcMain.handle('dream-append-trace-artifact', async (_event, params) => {
   const traceId = params?.traceId || sanitizeTraceId();
   const eventPayload = params?.eventPayload && typeof params.eventPayload === 'object'
@@ -1151,6 +1187,30 @@ ipcMain.handle('dream-save-session', async (_event, params) => {
     return result || null;
   } catch (error) {
     console.error('[dream-save-session] failed:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('dream-migrate-session', async (_event, params) => {
+  // Late-login migration of a local-only session: the backend allocates a fresh
+  // real session_id (ignores the local 900000+ number) so it never collides
+  // across devices, and the owner trigger stamps owner_id = auth.uid(). Requires
+  // a signed-in caller (callSupabaseRpc throws NotSignedInError when signed out).
+  try {
+    const raw = await callSupabaseRpc('aggregator_sessions_bridge_v1', {
+      p_action: 'migrate',
+      p_record_id: null,
+      p_session_id: null,
+      p_note_id: null,
+      p_name: String(params?.name || '').trim() || 'Session',
+      p_slot_config: params?.slotConfig || {},
+      p_slot_urls: params?.slotUrls || {},
+      p_slot_enabled: params?.slotEnabled || {},
+      p_limit: 1
+    });
+    return raw?.data ?? null;
+  } catch (error) {
+    console.error('[dream-migrate-session] failed:', error);
     throw error;
   }
 });
@@ -1244,7 +1304,19 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       };
     });
 
-    return noteBackedRows.length > 0 ? noteBackedRows : snapshots;
+    if (noteBackedRows.length === 0) return snapshots;
+
+    // Note-less session snapshots (e.g. local sessions migrated on login:
+    // session_id >= 900000, note_id = null) have no row in the notes table, so
+    // they are absent from noteBackedRows. Append them so they still appear in
+    // the Sessions list instead of silently vanishing after migration.
+    const noteBackedSessionIds = new Set(
+      noteBackedRows.map((row) => row.sessionId).filter((id) => Number.isInteger(id))
+    );
+    const sessionOnlyRows = snapshots.filter(
+      (s) => !s.noteId && Number.isInteger(s.sessionId) && !noteBackedSessionIds.has(s.sessionId)
+    );
+    return [...noteBackedRows, ...sessionOnlyRows];
   } catch (error) {
     console.error('[dream-load-sessions] failed:', error);
     throw error;

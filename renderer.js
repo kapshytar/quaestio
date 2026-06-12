@@ -1022,7 +1022,23 @@ function getStoredSessionContextForFingerprint(fingerprint) {
   return context;
 }
 
+// One-shot guard: after sign-in / late-login migration, suppress restoring a
+// pre-login session by slot fingerprint so a new question starts fresh. Lifted
+// on explicit session load or when a fresh ingest creates a session.
+const SUPPRESS_SLOT_RESTORE_KEY = 'verity-suppress-slot-restore';
+function setSuppressSlotRestore(value) {
+  try {
+    if (value) localStorage.setItem(SUPPRESS_SLOT_RESTORE_KEY, '1');
+    else localStorage.removeItem(SUPPRESS_SLOT_RESTORE_KEY);
+  } catch (_) { /* ignore */ }
+}
+function getSuppressSlotRestore() {
+  try { return localStorage.getItem(SUPPRESS_SLOT_RESTORE_KEY) === '1'; }
+  catch (_) { return false; }
+}
+
 function restoreStoredQuestionContextForFingerprint(fingerprint) {
+  if (getSuppressSlotRestore()) return null;
   const context = getStoredSessionContextForFingerprint(fingerprint);
   if (!context?.session_id) return null;
   activeSessionId = context.session_id;
@@ -4023,6 +4039,28 @@ async function sendToAll() {
   resizeMessageInput();
   messageInput.focus();
 
+  // Local-only parity: when signed out we make zero backend calls, so the
+  // ingest/aggregation path (which would throw NotSignedInError) is skipped and
+  // we persist the session snapshot locally on send — mirrors the iOS/Android
+  // saveLocalSession-on-send behaviour.
+  try {
+    const authStatus = await window.electronAPI?.authGetStatus?.();
+    if (!authStatus?.signedIn) {
+      const localId = Number.isInteger(activeSessionId) && activeSessionId > 0
+        ? activeSessionId
+        : getNextLocalSessionId();
+      activeSessionId = localId;
+      setIngestSessionIndicator(localId);
+      const localName = text.trim().slice(0, 60) || undefined;
+      await saveSessionSnapshot(localName, localId, null);
+      mergeLog(`Signed out — saved session ${localId} locally, skipping ingest`, 'info');
+      return;
+    }
+  } catch (e) {
+    mergeLog(`Local session save (signed out) failed: ${e?.message || e}`, 'warn');
+    return;
+  }
+
   const pendingAggregation = {
     sourcePrompt: text,
     expectedSlotCount: enabledSlots.length,
@@ -4459,6 +4497,8 @@ function initAccountTab() {
           const pw = document.getElementById('account-password');
           if (pw) pw.value = '';
           await refreshAccountUI();
+          await migrateLocalSessionsOnLogin().catch((e) =>
+            console.error('[account sign-in] local session migration failed:', e));
         } else {
           setAccountMsg(res?.error || 'Sign-in failed.');
         }
@@ -4544,6 +4584,8 @@ async function initOnboarding() {
       if (res?.ok) {
         finishOnboarding('account');
         refreshAccountUI().catch(() => {});
+        migrateLocalSessionsOnLogin().catch((e) =>
+          console.error('[onboarding sign-in] local session migration failed:', e));
       } else {
         setMsg(res?.error || 'Sign-in failed.');
       }
@@ -5550,6 +5592,9 @@ async function finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContex
   const sessionId = extractSessionId(ingestResult);
   const noteId = String(ingestResult?.data?.note_id || '').trim() || null;
   if (ingestResult?.ok && sessionId) {
+    // A fresh ingest established the active session; normal slot-fingerprint
+    // continuation is safe again.
+    setSuppressSlotRestore(false);
     activeSessionId = sessionId;
     if (noteId) activeAggregatedNoteId = noteId;
     if (String(sourcePrompt || '').trim()) {
@@ -6068,7 +6113,19 @@ async function runMerge(isClarification = false, clarificationText = '', previou
 // ========== SESSION MANAGEMENT ==========
   const SESSIONS_KEY = 'chat-aggregator-sessions';
   const SESSIONS_META_KEY = 'chat-aggregator-sessions-meta';
+  const LOCAL_SESSION_COUNTER_KEY = 'chat-aggregator-local-session-counter';
+  const LOCAL_SESSION_BASE = 900000;
   const MAX_SESSIONS = 1000;
+
+  // Local-only session numbering (signed-out parity with iOS/Android, base
+  // 900000) so locally-saved sessions never collide with backend session ids.
+  function getNextLocalSessionId() {
+    let current = parseInt(localStorage.getItem(LOCAL_SESSION_COUNTER_KEY) || '0', 10);
+    if (!Number.isInteger(current) || current < LOCAL_SESSION_BASE) current = LOCAL_SESSION_BASE;
+    const next = current + 1;
+    localStorage.setItem(LOCAL_SESSION_COUNTER_KEY, String(next));
+    return next;
+  }
   let sessionsNotice = { text: '', kind: 'info' };
   let sessionsSearchQuery = '';
   const expandedSessionTitleIds = new Set();
@@ -6216,6 +6273,92 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
   return snapshot;
 }
 
+  // Late-login migration: after sign-in, offer to push local-only sessions
+  // (session_id >= LOCAL_SESSION_BASE) up to the account. Saving while signed in
+  // carries the JWT, so the backend set_owner_from_note trigger stamps owner_id
+  // = auth.uid(). Purely client-side; see shared/contracts/AUTH_AND_SESSION_SYNC.md.
+  async function migrateLocalSessionsOnLogin() {
+    // Start the account clean: a new question must not resurrect a pre-login
+    // session by slot fingerprint. Lifted on explicit load / fresh ingest.
+    clearStoredSessionContext();
+    clearIngestSessionIndicator();
+    setSuppressSlotRestore(true);
+
+    let cached = [];
+    try {
+      const raw = localStorage.getItem(SESSIONS_KEY);
+      cached = raw ? JSON.parse(raw) : [];
+    } catch (_) {
+      cached = [];
+    }
+    if (!Array.isArray(cached) || cached.length === 0) return;
+
+    const isLocal = (s) => {
+      const sid = Number(s?.sessionId ?? s?.session_id);
+      return Number.isInteger(sid) && sid >= LOCAL_SESSION_BASE;
+    };
+    const locals = cached.filter(isLocal);
+    if (locals.length === 0) return;
+
+    const ok = window.confirm(
+      `You have ${locals.length} local session(s) saved while signed out.\n\n` +
+      `Upload them to your account so they sync across your devices?`
+    );
+    if (!ok) return;
+
+    let migrated = 0;
+    const migratedIds = new Set();
+    for (const s of locals) {
+      try {
+        // Use the `migrate` action: the backend allocates a fresh real
+        // session_id (not the local 900000+ one) so it never collides across
+        // devices. Owner is stamped server-side from the JWT.
+        const result = await window.electronAPI.migrateSession({
+          name: s.name || s.title || 'Session',
+          slotConfig: s.slotConfig || s.slot_config || {},
+          slotUrls: s.slotUrls || s.slot_urls || {},
+          slotEnabled: s.slotEnabled || s.slot_enabled || {}
+        });
+        if (result && result.id) {
+          migrated += 1;
+          migratedIds.add(s.id);
+        }
+      } catch (err) {
+        console.error('[migrateLocalSessionsOnLogin] failed for', s?.id, err);
+        // Keep this local copy; the offer recurs next sign-in.
+      }
+    }
+
+    if (migratedIds.size > 0) {
+      const remaining = cached.filter((s) => !migratedIds.has(s.id));
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify(remaining));
+      sessionsListMemoryCache = remaining;
+    }
+    setSessionsNotice(
+      migrated === locals.length
+        ? `Uploaded ${migrated} local session(s) to your account.`
+        : `Uploaded ${migrated} of ${locals.length} local session(s); the rest stayed local.`,
+      migrated === locals.length ? 'ok' : 'warn'
+    );
+    await updateSessionsUI({ forceRefresh: true });
+  }
+
+  // If a gated call just found the account session expired (refresh token
+  // rejected), say so loudly and refresh the account panel to "signed out"
+  // instead of silently degrading to the local cache while the UI implies
+  // we're still signed in.
+  async function maybePromptSessionExpired() {
+    try {
+      const expired = await window.electronAPI?.authConsumeSessionExpired?.();
+      if (expired) {
+        setSessionsNotice('Your account session expired. Sign in again (Account) to see and sync your cloud sessions.', 'warn');
+        await refreshAccountUI().catch(() => {});
+        return true;
+      }
+    } catch (_) { /* non-fatal */ }
+    return false;
+  }
+
   async function loadSessionsList(options = {}) {
     const preferCache = options?.preferCache === true;
     const forceRefresh = options?.forceRefresh === true;
@@ -6244,6 +6387,20 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
       return sessionsListMemoryCache;
     }
 
+  // Local-only mode: when signed out we never call the backend. Use the local
+  // cache directly so loading a locally-saved session does not surface a
+  // "Not signed in" DB error.
+  try {
+    const authStatus = await window.electronAPI?.authGetStatus?.();
+    if (!authStatus?.signedIn) {
+      sessionsListMemoryCache = Array.isArray(cachedSessions) ? cachedSessions : [];
+      setSessionsNotice('Local-only mode (signed out): showing local sessions.', 'info');
+      return sessionsListMemoryCache;
+    }
+  } catch (_) {
+    // If the status check itself fails, fall through to the existing path.
+  }
+
   // Try to load from database first
   if (window.electronAPI?.loadSessions) {
     try {
@@ -6260,6 +6417,13 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
           return normalizedSessions;
         }
       if (Array.isArray(dbSessions) && dbSessions.length === 0) {
+        // An empty result can mean the account session silently expired during
+        // this call (gate refresh was rejected). Prefer the expiry prompt and
+        // the local cache over a misleading "0 sessions" against the account.
+        if (await maybePromptSessionExpired()) {
+          sessionsListMemoryCache = Array.isArray(cachedSessions) ? cachedSessions : [];
+          return sessionsListMemoryCache;
+        }
         localStorage.setItem(SESSIONS_KEY, JSON.stringify([]));
         writeJsonCache(SESSIONS_META_KEY, { fetchedAt: Date.now() });
         sessionsListMemoryCache = [];
@@ -6268,7 +6432,9 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
       }
     } catch (error) {
       console.error('[loadSessionsList] DB load failed:', error);
-      setSessionsNotice(`DB load failed, using local cache: ${errorToText(error)}`, 'warn');
+      if (!(await maybePromptSessionExpired())) {
+        setSessionsNotice(`DB load failed, using local cache: ${errorToText(error)}`, 'warn');
+      }
       // Fall through to localStorage
     }
   }
@@ -6296,6 +6462,9 @@ async function loadSession(sessionId) {
     return;
   }
 
+  // Explicit load = the user chose this session; normal slot-fingerprint
+  // continuation is intended again.
+  setSuppressSlotRestore(false);
   const sessionSlotConfig = session.slotConfig || session.slot_config || {};
   const sessionSlotUrls = session.slotUrls || session.slot_urls || {};
   const sessionSlotEnabled = session.slotEnabled || session.slot_enabled || {};
@@ -6386,8 +6555,15 @@ async function loadSession(sessionId) {
     const sessions = await loadSessionsList();
     const session = sessions.find((s) => s.id === sessionId) || null;
 
-    // Delete from database first
-    if (window.electronAPI?.deleteSession) {
+    // Delete from database first (skip entirely in local-only / signed-out mode)
+    let signedInForDelete = false;
+    try {
+      const authStatus = await window.electronAPI?.authGetStatus?.();
+      signedInForDelete = !!authStatus?.signedIn;
+    } catch (_) {
+      signedInForDelete = false;
+    }
+    if (signedInForDelete && window.electronAPI?.deleteSession) {
       try {
         await window.electronAPI.deleteSession({
           recordId: String(session?.id ?? sessionId),

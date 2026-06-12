@@ -18,8 +18,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   authSignIn: (email, password) => ipcRenderer.invoke('auth-sign-in', { email, password }),
   authSignOut: () => ipcRenderer.invoke('auth-sign-out'),
   authGetStatus: () => ipcRenderer.invoke('auth-get-status'),
+  authConsumeSessionExpired: () => ipcRenderer.invoke('auth-consume-session-expired'),
   // Session management
   saveSession: (params) => ipcRenderer.invoke('dream-save-session', params),
+  migrateSession: (params) => ipcRenderer.invoke('dream-migrate-session', params),
   loadSessions: (sessionId) => ipcRenderer.invoke('dream-load-sessions', sessionId),
   deleteSession: (sessionId) => ipcRenderer.invoke('dream-delete-session', sessionId),
   openSessionWindow: (session) => ipcRenderer.invoke('dream-open-session-window', session),

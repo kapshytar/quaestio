@@ -1,5 +1,80 @@
 # Changelog
 
+## 1.112.5
+
+- Open-sourcing prep: dual licensing added — LICENSE (AGPL-3.0), NOTICE
+  (`AGPL-3.0-only OR LicenseRef-Commercial`, proprietary option by contact),
+  CONTRIBUTING.md with inbound license grant; package.json license field fixed
+  from stale MIT to AGPL-3.0-only.
+- README rewritten as a product page (English): Quaestio positioning, features,
+  quick start, shortcuts, related repos, license section. Secrets sweep of the
+  repo (working tree + full git history) came back clean — no scrub needed.
+
+## 1.112.4
+
+- fix signed-in client silently degrading to local-only after the access token
+  expired: `auth-store.js` `refresh()` cleared the session on *any* non-2xx, so
+  an expired ~1h token whose refresh hit a transient error nuked a valid session
+  — the gate then returned null and the Sessions list showed stale local rows
+  while the account looked signed in. `refresh()` now clears only on a
+  definitive auth rejection (HTTP 400 `invalid_grant` / 401) and keeps the
+  session on transient 5xx/network failures (later call retries); it logs the
+  failure code+body.
+- surface session expiry: a definitive refresh rejection raises a one-shot
+  flag (`consumeSessionExpired`, exposed via the new `auth-consume-session-expired`
+  IPC). The Sessions loader consumes it and shows "session expired — sign in
+  again" + refreshes the Account panel to signed-out, instead of quietly
+  returning the local cache. A fresh sign-in and an explicit sign-out clear it.
+  Mirrors iOS/Android and `shared/contracts/AUTH_AND_SESSION_SYNC.md` (in the
+  chat-aggregator-mobile repo).
+
+## 1.112.3
+
+- late-login session migration: after signing in, the desktop offers to upload
+  local-only sessions (saved while signed out) to the account. It uses the new
+  `aggregator_sessions_bridge_v1` `migrate` action, which allocates a fresh real
+  `session_id` server-side (instead of persisting the local 900000+ number, which
+  collides across devices) and stamps `owner_id` from the JWT. New
+  `dream-migrate-session` IPC / `migrateSession` bridge.
+- fix new question resurrecting a pre-login session: after sign-in/migration the
+  slot-fingerprint context restore could attach a new question to an old session
+  sharing the slot layout. A one-shot suppress flag (set on sign-in, lifted on
+  explicit load or fresh ingest) makes the first post-login question start fresh.
+- fix migrated sessions vanishing from the Sessions list: after late-login
+  migration, note-less session rows (`session_id >= 900000`, `note_id = null`)
+  uploaded to the account were dropped by `dream-load-sessions`, which returned
+  only note-backed rows whenever any existed. The migrated rows persisted on the
+  server (verified) but disappeared from the UI because their local copies were
+  removed. The handler now appends session-only snapshots (no matching note)
+  alongside the note-backed rows so they stay visible.
+
+## 1.112.2
+
+- fix signed-out local sessions: a signed-out send produced no session at all
+  because the auto-save only ran inside the ingest success path
+  (`finalizeAggregatedIngest`), which never executes when the backend is gated
+  off. `sendToAll` now detects signed-out (`authGetStatus`), allocates a local
+  session number (base 900000, parity with iOS/Android), saves the slot snapshot
+  to the local cache, and skips the ingest/aggregation arming entirely. Sending
+  to the chat webviews still works; only the backend calls are skipped.
+- Local-only Sessions tab: when signed out, `loadSessionsList` and
+  `deleteSession` no longer call the backend (which threw "Not signed in" and
+  surfaced a scary `DB load failed` banner on every load/delete). They now read
+  and write the local cache directly, so loading and deleting locally-saved
+  sessions works cleanly while signed out.
+
+## 1.112.1
+
+- Multi-user local-only gate: when signed out the desktop now makes **zero**
+  Supabase calls (ingest, session bridge, REST reads, debug log all skipped) —
+  the publishable-key fallback in `getAuthBearer` is removed and replaced with
+  `userBearerOrNull` + a shared `auth-gate.js` rule, so a signed-out desktop no
+  longer writes rows anonymously (`owner_id = null`). Signed-in behaviour is
+  unchanged. Sessions still fall back to the local store when signed out.
+- New `auth-gate.js` (pure `bearerOrNull` gate rule) and `test/auth-gate.test.js`
+  (run with `npm test`): proves signed out ⇒ no usable bearer ⇒ no backend call.
+  Mirrors the mobile `AuthStore` gate and `shared/contracts/AUTH_AND_SESSION_SYNC.md`.
+
 ## 1.112.0
 
 - Multi-user (desktop step A+B): add Supabase Auth sign-in. New **Account** tab

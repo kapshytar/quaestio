@@ -1,69 +1,70 @@
-# Chat Aggregator v0.1 🚀
+# Quaestio — Verity Desktop: ask every AI at once, keep the best answer
 
-Electron-приложение для одновременной работы с ChatGPT, Claude, Gemini, Grok и другими AI-сервисами.
+**Quaestio** is the desktop client of **Verity**, a multi-LLM chat aggregator: one prompt goes to **ChatGPT, Claude, Gemini, Grok, DeepSeek and Perplexity side by side**, you see all the answers next to each other, and a one-click **Merge** synthesizes them into a single, best-of-all response. Electron app for Windows / macOS / Linux.
 
-## ✨ Основные возможности
+No per-message API costs for the chats themselves: the slots are real WebView sessions of the services you already use, logged in with **your own accounts and subscriptions**. An API key is only needed for the optional Merge step (bring your own — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, or any OpenAI-compatible endpoint).
 
-- **4-слотовая сетка:** Работайте с четырьмя разными чат-ботами одновременно.
-- **Единая отправка:** Отправляйте сообщение во все активные слоты одним нажатием.
-- **Функция Merge:** Синтезируйте ответы от разных моделей в один финальный ответ через API (OpenAI, Anthropic, Google и др.).
-- **Правая панель управления:** Удобная настройка API и управление слиянием ответов.
-- **Импорт сессий:** Быстрый перенос куки из Chrome/Edge для мгновенной авторизации.
-- **Кастомизация:** Редактируемые URL и настройки масштаба (zoom) для каждого окна.
+> Why: every model is good at different things, and the same model answers the same question differently run to run. Asking four of them at once and merging is the cheapest reliability trick there is — Quaestio makes it one click instead of eight copy-pastes.
 
-## 🚀 Быстрый старт
+## Features
 
-1. **Установка зависимостей:**
-   ```bash
-   npm install
-   ```
-2. **Запуск приложения:**
-   ```bash
-   npm start
-   ```
-   (Или используйте `start.bat` в Windows / `start.sh` в macOS/Linux)
+- **4-slot chat grid** — four simultaneous WebView sessions; assign any supported AI service to any slot, with per-slot URL and zoom control.
+- **Broadcast send** — type once, `Enter` sends to all enabled slots at the same time.
+- **Merge / synthesis** — collect all replies and feed them to an LLM API of your choice for one consolidated answer; right-side panel manages providers and API keys.
+- **Cookie import** — pull sessions from Chrome/Edge (`Ctrl+I`) for instant sign-in to the chat services.
+- **Sessions** — save and restore grid layouts; signed-in sessions sync across devices (desktop ↔ [iOS/Android](https://github.com/kapshytar/chat-aggregator-mobile) ↔ web).
+- **Local-first** — choose *Use Locally* at first run and nothing leaves your machine. Optional accounts are **invite-only**: request access at [veritydb.vercel.app](https://veritydb.vercel.app).
+- **Search** — `Ctrl+F` across a slot, the merge output, or all slots at once.
 
-3. **Авторизация:**
-   - Нажмите "Import 🍪" в верхней панели или используйте `Ctrl+I`.
-   - Инструкции по подготовке куки находятся в [docs/COOKIE_IMPORT.md](docs/COOKIE_IMPORT.md).
+## Quick start
 
-## 🛠 Документация
+```bash
+npm install
+npm start        # or start.bat (Windows) / start.sh (macOS, Linux)
+```
 
-Подробные инструкции и технические детали:
+Then sign in to the chat services inside the slots (or import cookies — see [docs/COOKIE_IMPORT.md](docs/COOKIE_IMPORT.md)).
 
-### Использование
-- [QUICKSTART.md](QUICKSTART.md) — Быстрая настройка и первый запуск.
-- [docs/COOKIE_IMPORT.md](docs/COOKIE_IMPORT.md) — Как импортировать сессии из браузера.
-- [docs/MANUAL_COOKIE_IMPORT.md](docs/MANUAL_COOKIE_IMPORT.md) — Ручной экспорт куки через расширения.
-- [docs/FIXES.md](docs/FIXES.md) — Решение проблем с Gemini и Grok.
+## Keyboard shortcuts
 
-### Особенности (Merge Feature)
-- [docs/MERGE_FINAL.md](docs/MERGE_FINAL.md) — Обзор функции слияния ответов.
-- [docs/RIGHT_SIDE_PANEL.md](docs/RIGHT_SIDE_PANEL.md) — Управление правой панелью и API.
-- [docs/MERGE_IMPLEMENTATION.md](docs/MERGE_IMPLEMENTATION.md) — Техническая реализация логики Merge.
+| Keys | Action |
+| --- | --- |
+| `Enter` | Send to all active slots |
+| `Shift+Enter` | New line |
+| `Ctrl+I` | Import cookies |
+| `Ctrl+F` | Search (slot / merge / all) |
+| `Ctrl+R` | Reload all slots |
+| `Ctrl +/−/0` | Zoom / reset |
+| `F12` | DevTools |
 
-### Техническая часть
-- [TECHNICAL_DOCS.md](TECHNICAL_DOCS.md) — Архитектура приложения и описание компонентов.
-- [PROJECT_STATUS.md](PROJECT_STATUS.md) — Текущее состояние разработки и планы.
+## Project structure
 
-## ⌨️ Горячие клавиши
+- `main.js` — Electron main process
+- `renderer.js` — front-end logic and broadcast send
+- `index.html` — UI (4 WebViews + merge panel)
+- `merge-api-client.js` — LLM API client for the Merge step
+- `auth-store.js` — optional account sign-in (user JWT; no privileged keys ship in the app)
 
-- `Enter` — Отправить во все активные слоты.
-- `Shift + Enter` — Новая строка в поле ввода.
-- `Ctrl + I` — Импорт cookies.
-- `Ctrl + F` — Поиск: по выбранному слоту / по Merge / по всем слотам (если общий фокус).
-- `Ctrl + R` — Перезагрузить все окна.
-- `F12` — Открыть DevTools.
-- `Ctrl + Plus/Minus` — Управление масштабом.
-- `Ctrl + 0` — Сбросить масштаб.
+More docs: [QUICKSTART.md](QUICKSTART.md), [TECHNICAL_DOCS.md](TECHNICAL_DOCS.md), [docs/](docs/).
 
-## 📁 Структура проекта
+## Related repos
 
-- `main.js` — Главный процесс Electron.
-- `renderer.js` — Логика фронтенда и отправки сообщений.
-- `index.html` — Интерфейс (4 WebView + Merge Panel).
-- `merge-api-client.js` — Клиент для работы с API провайдеров (OpenAI, Claude, etc.).
-- `side-panel-controls.js` — Логика управления боковой панелью.
+- [chat-aggregator-mobile](https://github.com/kapshytar/chat-aggregator-mobile) — native iOS + Android clients sharing the same provider contracts.
+
+## License
+
+Dual-licensed (see [NOTICE](NOTICE)): `AGPL-3.0-only OR LicenseRef-Commercial`
+
+- **AGPL-3.0** ([LICENSE](LICENSE)) — use it for anything, commercial included.
+  The condition is copyleft: if you distribute the app or let users interact
+  with a modified version over a network, you must offer your complete
+  modified source under AGPL-3.0, attribution retained.
+- **Proprietary option** — a separate non-AGPL license (no copyleft
+  conditions) is available from the owner: k.vitaliq@gmail.com.
+
+Contributions are welcome under the inbound-license terms in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
-Лицензия: MIT
+
+*Keywords: multi-LLM desktop client, AI chat aggregator, compare ChatGPT Claude Gemini Grok DeepSeek Perplexity side by side, send one prompt to multiple AI models, merge AI answers, LLM answer synthesis, ensemble prompting, Electron AI app.*

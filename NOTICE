@@ -1,0 +1,19 @@
+Quaestio — Verity Desktop (chat-aggregator)
+Copyright 2026 Vitalii K. (https://github.com/kapshytar)
+
+This product is part of the Verity project (https://veritydb.vercel.app).
+
+SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Commercial
+
+Dual-licensed:
+  1. GNU Affero General Public License v3.0 (see LICENSE). AGPL permits any
+     use, including commercial use; its condition is copyleft: if you
+     distribute the software or let users interact with a modified version
+     over a network, you must offer the complete corresponding source under
+     AGPL-3.0 and retain this notice.
+  2. A separate proprietary (non-AGPL) license is available for those who
+     want to use this code without the copyleft conditions — contact
+     k.vitaliq@gmail.com.
+
+Contributions are accepted under the terms in CONTRIBUTING.md (license grant
+to the project owner that keeps dual licensing possible).
