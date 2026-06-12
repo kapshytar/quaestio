@@ -23,13 +23,13 @@ Default behavior in that case:
    - `git -C C:\Users\kvita\PROJECTS\chat-aggregator-mobile push origin main`
 
 2. Wait for CI:
-   - `gh run list --repo kapshytar/chat-aggregator-mobile --limit 5`
+   - `gh run list --repo kapshytar/quaestio --limit 5`
    - Take latest run id for workflow `Build Android Artifacts`
-   - `gh run watch <run_id> --repo kapshytar/chat-aggregator-mobile --exit-status`
+   - `gh run watch <run_id> --repo kapshytar/quaestio --exit-status`
    - Continue only on `success`
 
 3. Download artifacts to isolated folder:
-   - `gh run download <run_id> --repo kapshytar/chat-aggregator-mobile --dir C:\Users\kvita\PROJECTS\chat-aggregator-mobile\ci-output\latest-ci-install\run-<run_id>`
+   - `gh run download <run_id> --repo kapshytar/quaestio --dir C:\Users\kvita\PROJECTS\chat-aggregator-mobile\ci-output\latest-ci-install\run-<run_id>`
 
 4. Locate APK and install:
    - Find APK: `...\run-<run_id>\chat-aggregator-build-*\app-release.apk`
