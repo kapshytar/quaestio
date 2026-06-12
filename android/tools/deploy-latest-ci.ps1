@@ -1,6 +1,6 @@
 param(
     [string]$Repo = "kapshytar/chat-aggregator-mobile",
-    [string]$RepoDir = "C:\chat-aggregator-android",
+    [string]$RepoDir = "C:\chat-aggregator-mobile\android",
     [string]$Workflow = "Build Android Artifacts",
     [string]$Branch = "main",
     [string]$HeadSha = "",
@@ -8,7 +8,7 @@ param(
     [int]$WaitTimeoutSec = 900,
     [int]$PollSec = 10,
     [string]$DeviceSerial = "",
-    [string]$OutputDir = "C:\chat-aggregator-android\ci-output\latest-ci-install"
+    [string]$OutputDir = "C:\chat-aggregator-mobile\android\ci-output\latest-ci-install"
 )
 
 $ErrorActionPreference = "Stop"

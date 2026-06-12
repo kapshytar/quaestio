@@ -18,18 +18,18 @@ Default behavior in that case:
 ## Standard Flow
 
 1. Commit and push Android changes:
-   - `git -C C:\Users\kvita\PROJECTS\chat-aggregator-android add <changed-files>`
-   - `git -C C:\Users\kvita\PROJECTS\chat-aggregator-android commit -m "<message>"`
-   - `git -C C:\Users\kvita\PROJECTS\chat-aggregator-android push origin main`
+   - `git -C C:\Users\kvita\PROJECTS\chat-aggregator-mobile add <changed-files>`
+   - `git -C C:\Users\kvita\PROJECTS\chat-aggregator-mobile commit -m "<message>"`
+   - `git -C C:\Users\kvita\PROJECTS\chat-aggregator-mobile push origin main`
 
 2. Wait for CI:
-   - `gh run list --repo kvitaliq-maker/chat-aggregator-android --limit 5`
+   - `gh run list --repo kapshytar/chat-aggregator-mobile --limit 5`
    - Take latest run id for workflow `Build Android Artifacts`
-   - `gh run watch <run_id> --repo kvitaliq-maker/chat-aggregator-android --exit-status`
+   - `gh run watch <run_id> --repo kapshytar/chat-aggregator-mobile --exit-status`
    - Continue only on `success`
 
 3. Download artifacts to isolated folder:
-   - `gh run download <run_id> --repo kvitaliq-maker/chat-aggregator-android --dir C:\Users\kvita\PROJECTS\chat-aggregator-android\ci-output\latest-ci-install\run-<run_id>`
+   - `gh run download <run_id> --repo kapshytar/chat-aggregator-mobile --dir C:\Users\kvita\PROJECTS\chat-aggregator-mobile\ci-output\latest-ci-install\run-<run_id>`
 
 4. Locate APK and install:
    - Find APK: `...\run-<run_id>\chat-aggregator-build-*\app-release.apk`

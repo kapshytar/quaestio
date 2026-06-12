@@ -10,7 +10,7 @@ Rules:
 
 Notes:
 
-- This directory was migrated from `../chat-aggregator-android`.
+- This directory was migrated from the legacy standalone android repo (now merged here).
 - The old standalone repo is now a migration source and rollback reference, not the intended long-term home.
 - canonical local Android deploy path from the mobile repo root:
   - `./scripts/deploy-android-device.sh`

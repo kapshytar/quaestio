@@ -4,7 +4,7 @@ Repo entry: see `../VERITY_MAP.md` and `./CURRENT_STATE.md`.
 
 ## Layout
 
-- `android/` — active Android source. The sibling `../chat-aggregator-android` repo is frozen legacy; do not edit it.
+- `android/` — active Android source (merged from the legacy standalone android repo).
 - `ios/VerityMobile/` — iOS source (Xcode project generated from `project.yml` via `xcodegen`).
 - `shared/js/` — WebView injection (`sendMessage.js`, `scrapeReply.js`, `extractLatestAssistantRaw.js`, `mergeStreamParser.js`, `attachFile.js`). Both clients consume these as bundled assets.
 - `shared/contracts/` — JSON specs + cross-client rule docs (`servicePresets.json`, `mergeConfig.json`, `streamParserConfig.json`, `QUESTION_IDENTITY_RULES.md`).

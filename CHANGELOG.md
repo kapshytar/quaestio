@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.7.0
+
+- Open-sourcing prep: removed the embedded DeepSeek test key from both clients
+  (iOS `KeyObfuscation.swift`, Android `KeyObfuscation.kt`) and disabled the
+  "Use Preinstalled Key" option via `shared/contracts/mergeConfig.json`
+  (`deepseek_api.supportsPreinstalledKey=false`). Users now supply their own
+  key. The old key was present in git history and must be revoked on the
+  DeepSeek platform before the repo goes public.
+- Added `LICENSE` (Apache-2.0) and `NOTICE` (attribution required on forks per
+  §4(d)); README license section.
+- Onboarding (iOS modal + Android first-run dialog) now explains that accounts
+  are invite-only: request access at veritydb.vercel.app; until approval the
+  app works fully in local mode.
+- Backend (dream-tracker migration `20260612090000_bridge_rpc_owner_scope`):
+  `aggregator_sessions_bridge_v1` and `delete_aggregator_session` switch from
+  SECURITY DEFINER to SECURITY INVOKER so strict owner_id+approved RLS scopes
+  every read/write (previously list/save/delete crossed user boundaries), plus
+  an explicit `account_pending_approval` error for unapproved users.
+
 ## 2.6.0
 
 - Push milestone for the 2.5.10 iOS work: deterministic bottom tray around the

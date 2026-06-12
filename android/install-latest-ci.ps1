@@ -17,7 +17,7 @@ if (-not $runId) {
 }
 
 Write-Host "Run ID: $runId"
-$outDir = "C:\chat-aggregator-android\ci-output\latest-build"
+$outDir = "C:\chat-aggregator-mobile\android\ci-output\latest-build"
 
 if (Test-Path $outDir) {
     Remove-Item -Recurse -Force $outDir

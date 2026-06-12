@@ -14,7 +14,7 @@ This repo is now the target mobile workspace.
 - iOS work lives here and is actively developed in `ios/`.
 - Android is being moved here under `android/`.
 - `shared/js` and `shared/contracts` are the shared source of truth for cross-platform WebView/provider behavior.
-- The sibling repo `../chat-aggregator-android` is now a migration source and rollback reference, not the intended long-term home.
+- The legacy standalone `chat-aggregator-android` repo has been merged into `android/` here; this repo is the single home for iOS + Android.
 
 ## Goal
 
