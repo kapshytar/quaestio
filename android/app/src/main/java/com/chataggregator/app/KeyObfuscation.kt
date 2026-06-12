@@ -20,8 +20,9 @@ object KeyObfuscation {
     // Frankfurt project (eu-central-1). Encoded from: https://pphntxcslmbymvcwvhnr.supabase.co
     private const val SUPABASE_RPC_URL = "aHR0cHM6Ly9wcGhudHhjc2xtYnltdmN3dmhuci5zdXBhYmFzZS5jbw=="
 
-    // Supabase publishable (anon) key (Base64 encoded). NOT service_role: the
-    // ingest/session RPCs are SECURITY DEFINER granted to anon, so the shipped
+    // Supabase publishable key (Base64 encoded). Public by design: anon has zero
+    // grants, every call also needs a signed-in user JWT, and the RPCs run as
+    // SECURITY INVOKER under owner-scoped RLS. NOT service_role — the shipped
     // binary never carries a secret key. Encoded from: sb_publishable_ofhf4igULLa20waOrI34pA_LXqzvphb
     private const val SUPABASE_API_KEY = "c2JfcHVibGlzaGFibGVfb2ZoZjRpZ1VMTGEyMHdhT3JJMzRwQV9MWHF6dnBoYg=="
 
@@ -78,7 +79,7 @@ object KeyObfuscation {
      * Handles both Base64-encoded and plaintext values.
      * - If envValue is provided, use it as-is (plaintext from environment variable)
      * - Otherwise, decode the embedded Base64-encoded value
-     * This is the service_role JWT - must be protected!
+     * This is the public Supabase publishable key (not a secret).
      */
     fun getSupabaseApiKey(encodedOrPlainValue: String?): String {
         if (!encodedOrPlainValue.isNullOrBlank()) {

@@ -65,6 +65,42 @@ actor AuthStore {
         return session?.accessToken
     }
 
+    /// User-facing copy for an unapproved (invite-pending) account. Shown after
+    /// sign-in when `fetchApproved()` returns false, and when a backend RPC
+    /// rejects with `account_pending_approval`.
+    nonisolated static let pendingApprovalMessage =
+        "Your access request is pending approval. Request access at veritydb.vercel.app — until approved, the app keeps working in local mode."
+
+    /// Reads `profiles.approved` for the signed-in user (RLS lets a user SELECT
+    /// their own row, mirroring the web's `.from('profiles').select('approved')`).
+    /// Returns `nil` when signed out or on any network/decode failure — callers
+    /// must treat `nil` as "unknown" and proceed as approved, NOT as unapproved.
+    func fetchApproved() async -> Bool? {
+        guard let token = await accessToken() else { return nil }
+        guard let userId = session?.userId, !userId.isEmpty else { return nil }
+        let url = supabaseURL
+        let key = apiKey
+        guard !url.isEmpty, !key.isEmpty,
+              let endpoint = URL(string: "\(url)/rest/v1/profiles?id=eq.\(userId)&select=approved") else {
+            return nil
+        }
+        var request = URLRequest(url: endpoint)
+        request.timeoutInterval = 30
+        request.setValue(key, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                  let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]],
+                  let approved = rows.first?["approved"] as? Bool else {
+                return nil
+            }
+            return approved
+        } catch {
+            return nil
+        }
+    }
+
     func status() -> Status {
         loadFromKeychain()
         return Status(

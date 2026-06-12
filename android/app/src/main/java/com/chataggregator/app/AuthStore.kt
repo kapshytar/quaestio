@@ -153,6 +153,37 @@ object AuthStore {
         }
     }
 
+    /**
+     * Whether the signed-in user's profile is approved (invite-only accounts:
+     * `profiles.approved`; RLS lets a user read only their own row). Returns
+     * `null` when not signed in or on any network/parse error — callers must
+     * treat `null` as "unknown", NOT as unapproved. Blocking — call off the
+     * main thread.
+     */
+    fun fetchApproved(context: Context): Boolean? {
+        val token = accessToken(context) ?: return null
+        val userId = status(context).userId ?: return null
+        val url = supabaseUrl()
+        val key = apiKey()
+        if (url.isBlank() || key.isBlank()) return null
+        return try {
+            val (code, text) = get(
+                "$url/rest/v1/profiles?id=eq.$userId&select=approved",
+                mapOf("apikey" to key, "Authorization" to "Bearer $token")
+            )
+            if (code !in 200..299) {
+                Log.w(TAG, "fetchApproved failed ($code): ${text.take(200)}")
+                return null
+            }
+            val rows = JsonParser.parseString(text).asJsonArray
+            rows.firstOrNull()?.asJsonObject
+                ?.get("approved")?.takeIf { !it.isJsonNull }?.asBoolean
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchApproved error: ${e.message}")
+            null
+        }
+    }
+
     // MARK: - Refresh (caller holds lock)
 
     private fun refresh(context: Context): Boolean {
@@ -320,6 +351,22 @@ object AuthStore {
     }
 
     // MARK: - HTTP
+
+    private fun get(endpoint: String, headers: Map<String, String>): Pair<Int, String> {
+        val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 20_000
+            readTimeout = 30_000
+            headers.forEach { (k, v) -> setRequestProperty(k, v) }
+        }
+        val code = conn.responseCode
+        val text = if (code in 200..299) {
+            conn.inputStream.bufferedReader().use { it.readText() }
+        } else {
+            conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+        }
+        return code to text
+    }
 
     private fun post(endpoint: String, headers: Map<String, String>, jsonBody: String): Pair<Int, String> {
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {

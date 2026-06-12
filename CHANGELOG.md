@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.7.2
+
+Codex (gpt-5.5) adversarial review of the open-source prep — fixes:
+
+- **Android Merge fix**: `isPreinstalledKeySelected()` now returns false when
+  the selected provider has no catalog `supportsPreinstalledKey` — previously
+  the stored preference defaulted to true, so after the embedded DeepSeek key
+  was removed, DeepSeek merges silently sent an empty key even when the user
+  had typed their own (runMerge / handleMergeResponses / saveCurrentFields all
+  routed through the stale check).
+- **Approval check at sign-in (iOS + Android)**: after a successful sign-in
+  the client reads `profiles.approved`; if false it shows "access request
+  pending" guidance (veritydb.vercel.app), keeps the session, and skips the
+  local-session migration offer instead of letting RPCs fail later with a raw
+  `account_pending_approval` error — which is now also mapped to friendly text
+  at the visible error sites on both platforms.
+- **Public naming**: apps are publicly **Quaestio** (README, NOTICE, both
+  onboarding screens); Verity stays the project/backend name. Internal
+  identifiers (bundle ids, VerityMobile scheme, prefs keys) unchanged.
+- **Licensing hygiene**: NOTICE/README rephrased (AGPL permits commercial use;
+  the paid option is a separate proprietary license), SPDX expression
+  `AGPL-3.0-only OR LicenseRef-Commercial`, new CONTRIBUTING.md with an
+  inbound license grant (DCO + Apache-2.0 to the owner) so dual licensing
+  survives external PRs.
+- **Stale security comments** in both KeyObfuscation files corrected
+  (publishable key, SECURITY INVOKER + RLS — no anon grants, no service_role).
+
 ## 2.7.1
 
 - License switched from Apache-2.0 to dual licensing: AGPL-3.0 (LICENSE) +

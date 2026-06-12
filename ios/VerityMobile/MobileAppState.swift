@@ -267,6 +267,14 @@ final class MobileAppState: ObservableObject {
     /// restore (so the next question opens a fresh session instead of resurrecting
     /// an old one sharing the slot layout), then raises the migration prompt if
     /// there are local-only sessions to upload.
+    /// Maps backend errors to user-facing status text: the RPCs' raw
+    /// `account_pending_approval` rejection becomes the friendly invite-pending
+    /// message; everything else passes through unchanged.
+    private static func friendlyErrorText(_ error: Error) -> String {
+        let text = error.localizedDescription
+        return text.contains("account_pending_approval") ? AuthStore.pendingApprovalMessage : text
+    }
+
     func detectLocalSessionsForMigration() {
         sessionManager.clearParallelIngestState()
         sessionManager.suppressSlotRestore = true
@@ -637,7 +645,7 @@ final class MobileAppState: ObservableObject {
             appendIngestEvent("Collect ok • session \(result.sessionId.map(String.init) ?? "-") • note \(result.noteId ?? "-")")
             return result
         } catch {
-            statusMessage = error.localizedDescription
+            statusMessage = Self.friendlyErrorText(error)
             appendIngestEvent("Collect failed • \(error.localizedDescription)")
             return nil
         }
@@ -1104,7 +1112,10 @@ final class MobileAppState: ObservableObject {
                 appendIngestEvent("Auto-collect ok • session \(sessionId) • note \(result.noteId ?? "-")")
             }
         } catch {
-            statusMessage = "Auto-collect failed: \(error.localizedDescription)"
+            let friendly = Self.friendlyErrorText(error)
+            statusMessage = friendly == AuthStore.pendingApprovalMessage
+                ? friendly
+                : "Auto-collect failed: \(friendly)"
             appendIngestEvent("Auto-collect failed • \(error.localizedDescription)")
         }
     }

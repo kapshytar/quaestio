@@ -5,8 +5,9 @@ enum KeyObfuscation {
     // No key ships in the binary (repo is public). Users supply their own
     // DeepSeek key in Settings; the old embedded test key was revoked.
     private static let deepSeekEmbeddedKey = ""
-    // Frankfurt project (pphntxcslmbymvcwvhnr); publishable (anon) key, base64.
-    // RPCs are SECURITY DEFINER granted to anon, so no service_role in the binary.
+    // Frankfurt project (pphntxcslmbymvcwvhnr); publishable key, base64. It is
+    // public by design: anon has zero grants, every call also needs a signed-in
+    // user JWT, and the RPCs run as SECURITY INVOKER under owner-scoped RLS.
     private static let supabaseRPCURL = "aHR0cHM6Ly9wcGhudHhjc2xtYnltdmN3dmhuci5zdXBhYmFzZS5jbw=="
     private static let supabaseAPIKey = "c2JfcHVibGlzaGFibGVfb2ZoZjRpZ1VMTGEyMHdhT3JJMzRwQV9MWHF6dnBoYg=="
 

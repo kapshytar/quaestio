@@ -86,6 +86,9 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         private const val SESSIONS_LOADED_AT_PREF = "sessions_loaded_at"
         private const val CHEAT_UNLOCK_SHA256 = "1bda832333f390e87d3683d9a73f8613fd92cf062790cfe7349efd41e9b89594"
         private const val CHEAT_DEBUG_SHA256 = "51c55c26253022764f0fb1780249cdd4a4fa809e679c79e6b550af4ee571318f"
+        private const val PENDING_APPROVAL_MESSAGE =
+            "Your access request is pending approval. Request access at veritydb.vercel.app — " +
+                "until approved, the app keeps working in local mode."
     }
 
     private data class ProjectTreeNode(
@@ -212,7 +215,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             return
         }
         AlertDialog.Builder(this)
-            .setTitle("Welcome to Verity")
+            .setTitle("Welcome to Quaestio")
             .setMessage(
                 "Choose how to use the app. You can change this later in Settings → Account.\n\n" +
                     "Local keeps everything on this device — sessions only, nothing is sent to the server. " +
@@ -785,7 +788,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             } catch (e: Exception) {
                 runOnUiThread {
                     setContextChipLoading(binding.chipProjects, false)
-                    Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, friendlyBackendError(e.message), Toast.LENGTH_LONG).show()
                 }
             } finally {
                 if (forceRefresh) releaseProjectRefreshLock()
@@ -995,7 +998,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, friendlyBackendError(e.message), Toast.LENGTH_LONG).show()
                     projectTreeNodes = emptyList()
                     renderProjectPanel(emptyList())
                     updateContextChips()
@@ -3006,6 +3009,10 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         Toast.makeText(this, "Signing in…", Toast.LENGTH_SHORT).show()
         Thread {
             val result = AuthStore.signIn(applicationContext, email, password)
+            // Invite-only accounts: check profiles.approved while still on the
+            // background thread. null = unknown (network/parse error) — treat
+            // as approved so a blip never locks a legit user out of sync.
+            val approved = if (result.isSuccess) AuthStore.fetchApproved(applicationContext) else null
             runOnUiThread {
                 result
                     .onSuccess {
@@ -3018,7 +3025,13 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                         SettingsManager.clearParallelIngestState(this)
                         SettingsManager.setSuppressSlotRestore(this, true)
                         updateSessionIndicator()
-                        maybeOfferLocalSessionMigration()
+                        if (approved == false) {
+                            // Stay signed in, but no migration offer — backend
+                            // RPCs would reject with account_pending_approval.
+                            showPendingApprovalDialog()
+                        } else {
+                            maybeOfferLocalSessionMigration()
+                        }
                     }
                     .onFailure {
                         Toast.makeText(this, it.message ?: "Sign-in failed", Toast.LENGTH_LONG).show()
@@ -3026,6 +3039,23 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             }
         }.start()
     }
+
+    /** Invite-only gate: signed in but profiles.approved is false. */
+    private fun showPendingApprovalDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Pending approval")
+            .setMessage(PENDING_APPROVAL_MESSAGE)
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    /**
+     * Maps raw backend errors to user-friendly text where we know the cause.
+     * Backend RPCs raise 'account_pending_approval' for unapproved accounts.
+     */
+    private fun friendlyBackendError(message: String?): String =
+        if (message?.contains("account_pending_approval") == true) PENDING_APPROVAL_MESSAGE
+        else "Failed: ${message ?: "unknown error"}"
 
     /**
      * Late-login migration: after sign-in, offer to upload local-only sessions
@@ -3191,7 +3221,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 } catch (e: Exception) {
                     runOnUiThread {
                         setContextChipLoading(binding.chipSessions, false)
-                        Toast.makeText(this@MainActivity, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, friendlyBackendError(e.message), Toast.LENGTH_LONG).show()
                     }
                 } finally {
                     if (forceRefresh) releaseSessionsRefreshLock()

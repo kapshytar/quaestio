@@ -475,6 +475,11 @@ class MergeFragment : Fragment(), Findable {
     }
 
     private fun isPreinstalledKeySelected(): Boolean {
+        // A provider without catalog support has no preinstalled key, no matter
+        // what the stored preference says (it defaults to true from the era when
+        // a DeepSeek key shipped in the binary) — otherwise the empty embedded
+        // key would silently win over the user's own key in the input field.
+        if (catalogProvider(selectedProvider())?.supportsPreinstalledKey != true) return false
         val prefs = requireContext().getSharedPreferences(MERGE_PREFS, 0)
         return prefs.getBoolean("use_preinstalled_key", true)
     }

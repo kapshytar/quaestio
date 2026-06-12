@@ -21,12 +21,13 @@ struct OnboardingView: View {
     @State private var password = ""
     @State private var busy = false
     @State private var message: String?
+    @State private var pendingApproval = false
 
     var body: some View {
         VStack(spacing: 22) {
             Spacer()
 
-            Text("Welcome to Verity")
+            Text("Welcome to Quaestio")
                 .font(.system(size: 27, weight: .bold))
             Text("Choose how to use the app. You can change this later in Settings → Account.")
                 .font(.system(size: 14))
@@ -43,13 +44,22 @@ struct OnboardingView: View {
                         .disableAutocorrection(true)
                     SecureField("Password", text: $password)
                         .textFieldStyle(.roundedBorder)
-                    Button { signIn() } label: {
-                        Text(busy ? "Signing in…" : "Sign In").frame(maxWidth: .infinity)
+                    if pendingApproval {
+                        // Signed in but unapproved: the session stays valid, the
+                        // app just runs in local mode until approval.
+                        Button { onDone() } label: {
+                            Text("Continue").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        Button { signIn() } label: {
+                            Text(busy ? "Signing in…" : "Sign In").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(busy || email.isEmpty || password.isEmpty)
+                        Button("Back") { showLogin = false; message = nil }
+                            .disabled(busy)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(busy || email.isEmpty || password.isEmpty)
-                    Button("Back") { showLogin = false; message = nil }
-                        .disabled(busy)
                 }
                 .padding(.horizontal, 28)
             } else {
@@ -99,13 +109,24 @@ struct OnboardingView: View {
         let password = self.password
         Task {
             let result = await AuthStore.shared.signIn(email: email, password: password)
+            // nil = approval unknown (network/decode hiccup) — proceed as today;
+            // only an explicit false means the invite is still pending.
+            var approved: Bool?
+            if case .success = result {
+                approved = await AuthStore.shared.fetchApproved()
+            }
             await MainActor.run {
                 busy = false
                 switch result {
                 case .success:
                     AppMode.set("account")
-                    onDone()
-                    appState.detectLocalSessionsForMigration()
+                    if approved == false {
+                        pendingApproval = true
+                        message = AuthStore.pendingApprovalMessage
+                    } else {
+                        onDone()
+                        appState.detectLocalSessionsForMigration()
+                    }
                 case .failure(let error):
                     message = error.displayMessage
                 }

@@ -303,14 +303,25 @@ struct SettingsView: View {
         let password = authPassword
         Task {
             let result = await AuthStore.shared.signIn(email: email, password: password)
+            // nil = approval unknown (network/decode hiccup) — proceed as today;
+            // only an explicit false means the invite is still pending.
+            var approved: Bool?
+            if case .success = result {
+                approved = await AuthStore.shared.fetchApproved()
+            }
             await MainActor.run {
                 authBusy = false
                 switch result {
                 case .success(let status):
                     authStatus = status
                     authPassword = ""
-                    authMessage = "Signed in."
-                    appState.detectLocalSessionsForMigration()
+                    if approved == false {
+                        // Session stays valid; skip the migration offer until approved.
+                        authMessage = AuthStore.pendingApprovalMessage
+                    } else {
+                        authMessage = "Signed in."
+                        appState.detectLocalSessionsForMigration()
+                    }
                 case .failure(let error):
                     authMessage = error.displayMessage
                 }

@@ -1,10 +1,10 @@
-# Verity Mobile — ask every AI at once, keep the best answer
+# Quaestio Mobile — ask every AI at once, keep the best answer
 
-**Verity** is a multi-LLM chat aggregator: one prompt goes to **ChatGPT, Claude, Gemini, Grok, DeepSeek and Perplexity side by side**, you see all the answers next to each other, and a one-tap **Merge** synthesizes them into a single, best-of-all response. This repo is the mobile half of the project — native **iOS and Android** apps sharing one provider-logic core.
+**Quaestio** is a multi-LLM chat aggregator: one prompt goes to **ChatGPT, Claude, Gemini, Grok, DeepSeek and Perplexity side by side**, you see all the answers next to each other, and a one-tap **Merge** synthesizes them into a single, best-of-all response. This repo is the mobile half — native **iOS and Android** apps sharing one provider-logic core. (Quaestio is part of the Verity project; the optional sync backend is [VerityDB](https://veritydb.vercel.app).)
 
 No per-message API costs for the chats themselves: the slots are real WebView sessions of the services you already use, logged in with **your own accounts and subscriptions**. API keys are only needed for the optional Merge step (bring your own key — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, Hugging Face, or any OpenAI-compatible endpoint).
 
-> Why: every model is good at different things, and the same model answers the same question differently run to run. Asking four of them at once and merging is the cheapest reliability trick there is — Verity makes it one tap instead of eight copy-pastes.
+> Why: every model is good at different things, and the same model answers the same question differently run to run. Asking four of them at once and merging is the cheapest reliability trick there is — Quaestio makes it one tap instead of eight copy-pastes.
 
 ## Features
 
@@ -64,20 +64,23 @@ Android: pinned JDK comes from `android/gradle.properties`; use the script rathe
 
 ## Keys & privacy
 
-- The app ships **no API keys**. Merge requires your own key, entered in the app and stored on-device.
-- Chat slots authenticate through each service's own login inside the WebView; credentials never pass through any Verity server.
+- The app ships **no LLM provider keys and no secrets**. Merge requires your own key, entered in the app and stored on-device. (The binary does include the public Supabase *publishable* key for optional account sync — it grants nothing by itself; every backend call also requires a signed-in user JWT.)
+- Chat slots authenticate through each service's own login inside the WebView; credentials never pass through any Quaestio/Verity server.
 - In local mode the app makes zero backend calls (enforced and covered by tests on both platforms).
 
 ## License
 
-Dual-licensed (see [NOTICE](NOTICE)):
+Dual-licensed (see [NOTICE](NOTICE)): `AGPL-3.0-only OR LicenseRef-Commercial`
 
-- **AGPL-3.0** ([LICENSE](LICENSE)) — free to use, fork, and modify; but if
-  you distribute it or run a modified version as a service, you must publish
-  your complete modified source under AGPL-3.0 with attribution retained.
-- **Commercial** — to build a closed-source or commercial product on this code
-  without AGPL obligations, contact k.vitaliq@gmail.com for a commercial
-  license.
+- **AGPL-3.0** ([LICENSE](LICENSE)) — use it for anything, commercial included.
+  The condition is copyleft: if you distribute the app or let users interact
+  with a modified version over a network, you must offer your complete
+  modified source under AGPL-3.0, attribution retained.
+- **Proprietary option** — a separate non-AGPL license (no copyleft
+  conditions) is available from the owner: k.vitaliq@gmail.com.
+
+Contributions are welcome under the inbound-license terms in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
