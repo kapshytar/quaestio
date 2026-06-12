@@ -64,3 +64,8 @@ These are the canonical local device workflows for this repo. Prefer them over o
 2. Keep shared provider DOM logic in `shared/js/`.
 3. Keep shared payload/config/contracts in `shared/contracts/`.
 4. Let iOS and Android wrap shared logic only where platform-native behavior is required.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE). Forks and redistributions must
+retain the attribution in [NOTICE](NOTICE) (Apache-2.0 §4(d)).

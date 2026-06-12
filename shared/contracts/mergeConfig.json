@@ -25,7 +25,7 @@
       "defaultEndpoint": "https://api.deepseek.com/v1/chat/completions",
       "defaultModel": "deepseek-chat",
       "family": "openai",
-      "supportsPreinstalledKey": true,
+      "supportsPreinstalledKey": false,
       "supportsCustomEndpoint": false,
       "supportsCustomModel": false,
       "supportsFallbackModels": false

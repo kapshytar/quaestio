@@ -216,7 +216,9 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             .setMessage(
                 "Choose how to use the app. You can change this later in Settings → Account.\n\n" +
                     "Local keeps everything on this device — sessions only, nothing is sent to the server. " +
-                    "Sign in to attribute and sync your notes and sessions to your account."
+                    "Sign in to attribute and sync your notes and sessions to your account.\n\n" +
+                    "No account yet? Accounts are invite-only for now — request access at " +
+                    "veritydb.vercel.app. Until your request is approved, the app works fully in local mode."
             )
             .setCancelable(false)
             .setPositiveButton("Sign In") { _, _ ->

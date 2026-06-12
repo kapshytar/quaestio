@@ -67,6 +67,10 @@ struct OnboardingView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.top, 4)
+                    Text("No account yet? Accounts are invite-only for now — request access at [veritydb.vercel.app](https://veritydb.vercel.app). Until your request is approved, the app works fully in local mode.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
                 .padding(.horizontal, 28)
             }

@@ -150,7 +150,7 @@ Formatting rules (mandatory):
                     prompt = prompt, systemPrompt = systemPrompt, chatHistory = chatHistory,
                     detailedLogging = config.detailedLogging,
                     extraHeaders = mapOf(
-                        "HTTP-Referer" to "https://github.com/kapshytar/chat-aggregator-android",
+                        "HTTP-Referer" to "https://github.com/kapshytar/chat-aggregator-mobile",
                         "X-Title" to "Gunshi"
                     ),
                     providerTag = "openrouter",

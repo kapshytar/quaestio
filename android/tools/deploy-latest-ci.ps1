@@ -1,5 +1,5 @@
 param(
-    [string]$Repo = "kapshytar/chat-aggregator-android",
+    [string]$Repo = "kapshytar/chat-aggregator-mobile",
     [string]$RepoDir = "C:\chat-aggregator-android",
     [string]$Workflow = "Build Android Artifacts",
     [string]$Branch = "main",

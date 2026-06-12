@@ -12,9 +12,9 @@ import java.util.Base64
  */
 object KeyObfuscation {
 
-    // DeepSeek testing key (Base64 encoded)
-    // Encoded from: ***REMOVED***
-    private const val DEEPSEEK_EMBEDDED_KEY = "***REMOVED***"
+    // No key ships in the binary (repo is public). Users supply their own
+    // DeepSeek key in Settings; the old embedded test key was revoked.
+    private const val DEEPSEEK_EMBEDDED_KEY = ""
 
     // Supabase API credentials (Base64 encoded)
     // Frankfurt project (eu-central-1). Encoded from: https://pphntxcslmbymvcwvhnr.supabase.co
@@ -30,6 +30,7 @@ object KeyObfuscation {
      * Used only when user selects "Use Preinstalled Key" option.
      */
     fun getDeepSeekPreinstalledKey(): String {
+        if (DEEPSEEK_EMBEDDED_KEY.isEmpty()) return ""
         return try {
             val decoded = Base64.getDecoder().decode(DEEPSEEK_EMBEDDED_KEY)
             String(decoded, Charsets.UTF_8)
@@ -111,6 +112,7 @@ object KeyObfuscation {
      * Check if the provided string matches the preinstalled DeepSeek key.
      */
     fun isPreinstalledKey(key: String): Boolean {
-        return key == getDeepSeekPreinstalledKey()
+        val preinstalled = getDeepSeekPreinstalledKey()
+        return preinstalled.isNotEmpty() && key == preinstalled
     }
 }

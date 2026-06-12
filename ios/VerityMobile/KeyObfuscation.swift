@@ -1,15 +1,18 @@
 import Foundation
 
 enum KeyObfuscation {
-    // Mirrors Android KeyObfuscation.getDeepSeekPreinstalledKey()
-    private static let deepSeekEmbeddedKey = "***REMOVED***"
+    // Mirrors Android KeyObfuscation.getDeepSeekPreinstalledKey().
+    // No key ships in the binary (repo is public). Users supply their own
+    // DeepSeek key in Settings; the old embedded test key was revoked.
+    private static let deepSeekEmbeddedKey = ""
     // Frankfurt project (pphntxcslmbymvcwvhnr); publishable (anon) key, base64.
     // RPCs are SECURITY DEFINER granted to anon, so no service_role in the binary.
     private static let supabaseRPCURL = "aHR0cHM6Ly9wcGhudHhjc2xtYnltdmN3dmhuci5zdXBhYmFzZS5jbw=="
     private static let supabaseAPIKey = "c2JfcHVibGlzaGFibGVfb2ZoZjRpZ1VMTGEyMHdhT3JJMzRwQV9MWHF6dnBoYg=="
 
     static func getDeepSeekPreinstalledKey() -> String {
-        guard let data = Data(base64Encoded: deepSeekEmbeddedKey),
+        guard !deepSeekEmbeddedKey.isEmpty,
+              let data = Data(base64Encoded: deepSeekEmbeddedKey),
               let decoded = String(data: data, encoding: .utf8)
         else {
             return ""
