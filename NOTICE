@@ -3,6 +3,10 @@ Copyright 2026 Vitalii K. (https://github.com/kapshytar)
 
 This product is part of the Verity project (https://veritydb.vercel.app).
 
-Licensed under the Apache License, Version 2.0. Per section 4(d) of the
-license, redistributions and forks must retain this NOTICE file, including
-the attribution above.
+Dual-licensed:
+  1. GNU Affero General Public License v3.0 (see LICENSE) — free use, but any
+     distribution OR network/hosted use of a modified version requires
+     publishing the complete modified source under AGPL-3.0, retaining this
+     attribution.
+  2. Commercial license — to use this software in a closed-source or
+     commercial product without AGPL obligations, contact k.vitaliq@gmail.com.

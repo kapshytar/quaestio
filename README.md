@@ -67,5 +67,11 @@ These are the canonical local device workflows for this repo. Prefer them over o
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE). Forks and redistributions must
-retain the attribution in [NOTICE](NOTICE) (Apache-2.0 §4(d)).
+Dual-licensed (see [NOTICE](NOTICE)):
+
+- **AGPL-3.0** ([LICENSE](LICENSE)) — free to use, fork, and modify; but if
+  you distribute it or run a modified version as a service, you must publish
+  your complete modified source under AGPL-3.0 with attribution retained.
+- **Commercial** — to build a closed-source or commercial product on this code
+  without AGPL obligations, contact k.vitaliq@gmail.com for a commercial
+  license.

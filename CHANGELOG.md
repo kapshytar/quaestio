@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.1
+
+- License switched from Apache-2.0 to dual licensing: AGPL-3.0 (LICENSE) +
+  commercial license by contact (NOTICE, README). Commercial/closed-source use
+  without publishing modified source now requires a separate license.
+- Git history scrubbed of the revoked embedded DeepSeek key
+  (raw + base64 forms) via git-filter-repo before opening the repo.
+
 ## 2.7.0
 
 - Open-sourcing prep: removed the embedded DeepSeek test key from both clients
