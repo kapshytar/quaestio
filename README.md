@@ -16,6 +16,13 @@ Welcome, you found it.
 
 🔗 **Waitlist / early access: [veritydb.vercel.app](https://veritydb.vercel.app)**
 
+![Quaestio desktop — Grok, Gemini and ChatGPT answering side by side with one-click Merge consensus](docs/screens/desktop.png)
+
+<p align="center">
+  <img src="docs/screens/ios.png" alt="Quaestio on iPhone" width="32%" />
+  <img src="docs/screens/android.png" alt="Quaestio on Android" width="32%" />
+</p>
+
 ## Clients in this repo
 
 | Directory | Client | Stack |
