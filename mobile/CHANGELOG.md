@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.7.3
+
+- Fix: restoring a saved session now also restores its project. The bridge
+  `list` rows carry a derived `project_tag_id` (a tag on the session's note;
+  dream-tracker migration `20260612150000_bridge_list_project_tag`), and both
+  clients activate it on load — project identity/state only, so the session's
+  just-restored slot URLs are not clobbered by the project's own URL set.
+  iOS additionally stamps `projectTagId` into snapshots on save. Old backend /
+  rows without the field → behavior unchanged.
+
 ## 2.7.2
 
 Codex (gpt-5.5) adversarial review of the open-source prep — fixes:

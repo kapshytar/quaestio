@@ -3477,6 +3477,20 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 stageSessionUrlsForLoading(loaded.slotUrls)
                 Log.i(TAG, "[SESSION] pendingUrls after stage: ${synchronized(pendingSessionUrls) { pendingSessionUrls.toMap() }}")
                 scheduleSlotLoading(forceReload = true)
+                // Restore the session's project identity (if any) WITHOUT going
+                // through setActiveProject(): that setter re-applies the project's
+                // own slot URLs and would clobber the session URLs staged above.
+                val sessionProjectId = loaded.projectTagId?.trim()?.takeIf { it.isNotBlank() }
+                if (sessionProjectId != null && sessionProjectId != activeProjectId) {
+                    activeProjectId = sessionProjectId
+                    activeProjectPathKey =
+                        findProjectNode(projectTreeNodes, sessionProjectId, null)?.pathKey
+                            ?: sessionProjectId
+                    activeProjectSlotUrls = emptyMap()
+                    projectSlotUrlLoadGeneration++ // cancel any in-flight project URL load
+                    updateProjectSelectorAppearance()
+                    Log.i(TAG, "[SESSION] restored project=$sessionProjectId")
+                }
                 updateSessionIndicator()
                 dialog?.dismiss()
             }

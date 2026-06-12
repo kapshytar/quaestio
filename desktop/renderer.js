@@ -2276,7 +2276,10 @@ function hideProjectPanel() {
   setProjectPanelVisible(false);
 }
 
-async function setActiveProject(project) {
+async function setActiveProject(project, options = {}) {
+  // applySlotUrls=false activates only the project state/chip without
+  // navigating slots (used when slot URLs were already restored elsewhere).
+  const applySlotUrls = options?.applySlotUrls !== false;
   const projectNode = project && typeof project === 'object' ? project : null;
   const normalizedId = projectNode
     ? String(projectNode.id || '').trim()
@@ -2291,15 +2294,17 @@ async function setActiveProject(project) {
   if (!activeProjectId) {
     activeProjectPathKey = null;
     activeProjectSlotUrls = {};
-    SLOTS.forEach((slot) => {
-      const serviceId = String(slotConfig[slot] || '').trim();
-      const preset = SERVICE_PRESETS[serviceId];
-      if (preset?.url) {
-        safeLoadURL(slot, preset.url);
-        const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
-        if (urlInput) urlInput.value = preset.url;
-      }
-    });
+    if (applySlotUrls) {
+      SLOTS.forEach((slot) => {
+        const serviceId = String(slotConfig[slot] || '').trim();
+        const preset = SERVICE_PRESETS[serviceId];
+        if (preset?.url) {
+          safeLoadURL(slot, preset.url);
+          const urlInput = document.querySelector(`[data-slot="${slot}"] .webview-url`);
+          if (urlInput) urlInput.value = preset.url;
+        }
+      });
+    }
     return;
   }
 
@@ -2311,7 +2316,7 @@ async function setActiveProject(project) {
     : await loadProjectSlotUrls(activeProjectId);
   if (loadGen !== projectSlotUrlLoadGeneration || activeProjectId !== normalizedId || activeProjectPathKey !== normalizedPathKey) return;
   activeProjectSlotUrls = slotUrls;
-  applyProjectOverridesToVisibleSlots();
+  if (applySlotUrls) applyProjectOverridesToVisibleSlots();
 }
 
 function loadSlotEnabledState() {
@@ -6543,6 +6548,14 @@ async function loadSession(sessionId) {
   } else {
     clearStoredSessionContext();
     clearIngestSessionIndicator();
+  }
+
+  // Restore the session's project (state/chip only). The session's own slot
+  // URLs were just applied above, so project activation must not clobber them.
+  const sessionProjectTagId = String(session.projectTagId ?? session.project_tag_id ?? '').trim() || null;
+  if (sessionProjectTagId && sessionProjectTagId !== activeProjectId) {
+    const projectNode = findProjectNodeById(projectTreeNodes, sessionProjectTagId);
+    await setActiveProject(projectNode || sessionProjectTagId, { applySlotUrls: false });
   }
 
   console.log('Session loaded:', sessionId, '? activeSessionId =', activeSessionId);

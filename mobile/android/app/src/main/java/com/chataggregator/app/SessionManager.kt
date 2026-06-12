@@ -290,6 +290,12 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
                         ?.asString
                         ?.takeIf { it.isNotBlank() }
 
+                    // Optional: absent/null → no project (current behavior unchanged).
+                    val projectTagId = (obj.get("project_tag_id") ?: obj.get("projectTagId"))
+                        ?.takeIf { !it.isJsonNull }
+                        ?.let { try { it.asString } catch (_: Exception) { null } }
+                        ?.takeIf { it.isNotBlank() }
+
                     val id = obj.get("id")?.asString ?: return@mapNotNull null
                     Log.i(TAG, "[SESSION-DB] id=$id sid=$sessionId nid=$noteId slotConfig=$slotConfig slotUrls=$slotUrls slotEnabled=$slotEnabled")
                     SessionSnapshot(
@@ -303,6 +309,7 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
                         slotConfig = slotConfig,
                         slotUrls = slotUrls,
                         slotEnabled = slotEnabled,
+                        projectTagId = projectTagId,
                         createdAt = createdAt,
                         updatedAt = updatedAt
                     )
@@ -369,6 +376,7 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
                         slotConfig = matchingSnapshot?.slotConfig ?: rpcFallback?.slotConfig ?: emptyMap(),
                         slotUrls = matchingSnapshot?.slotUrls ?: rpcFallback?.slotUrls ?: emptyMap(),
                         slotEnabled = matchingSnapshot?.slotEnabled ?: rpcFallback?.slotEnabled ?: emptyMap(),
+                        projectTagId = matchingSnapshot?.projectTagId ?: rpcFallback?.projectTagId,
                         createdAt = matchingSnapshot?.createdAt ?: "",
                         updatedAt = updatedAt.ifBlank { matchingSnapshot?.updatedAt ?: "" }
                     )
@@ -591,6 +599,8 @@ data class SessionSnapshot(
     val slotConfig: Map<String, String> = emptyMap(),
     val slotUrls: Map<String, String> = emptyMap(),
     val slotEnabled: Map<String, Boolean> = emptyMap(),
+    /** Optional project tag uuid attached to the session (backend `project_tag_id`). */
+    val projectTagId: String? = null,
     val createdAt: String = "",
     val updatedAt: String = ""
 )

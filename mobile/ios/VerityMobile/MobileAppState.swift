@@ -529,6 +529,20 @@ final class MobileAppState: ObservableObject {
             print("[loadSession]   \(slotKey) -> \(svc) @ \(url.prefix(60))")
         }
 
+        // Restore the session's project (if any). Project IDENTITY only — going
+        // through setActiveProject(_:) would clearCurrentSessionLink + re-apply
+        // the project's slot URLs, clobbering the session URLs just restored
+        // above. Mirrors applyActiveProject minus the slot-URL application.
+        if let snapshotProjectId = session.projectTagId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !snapshotProjectId.isEmpty,
+           snapshotProjectId != activeProjectId {
+            let node = findProjectNode(id: snapshotProjectId, pathKey: nil, nodes: projectTreeNodes)
+            activeProjectId = snapshotProjectId
+            activeProjectPathKey = node?.pathKey ?? snapshotProjectId
+            persistWorkspaceState()
+            sessionManager.setActiveProjectId(snapshotProjectId)
+        }
+
         // Explicit load = the user chose this session; normal continuation
         // (incl. slot-fingerprint restore) is intended again.
         sessionManager.suppressSlotRestore = false

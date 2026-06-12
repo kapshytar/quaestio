@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.112.6
+
+- Fix: loading a saved session now also restores its project. Bridge `list`
+  rows carry a derived `project_tag_id`; `loadSession()` activates it via
+  `setActiveProject(..., { applySlotUrls: false })` — a new option so project
+  activation no longer re-applies the project's slot URLs over the session's
+  just-restored ones. Old backend rows without the field → no-op.
+
 ## 1.112.5
 
 - Open-sourcing prep: dual licensing added — LICENSE (AGPL-3.0), NOTICE

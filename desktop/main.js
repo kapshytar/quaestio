@@ -1244,6 +1244,9 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
       slotConfig: row.slot_config || row.slotConfig || {},
       slotUrls: row.slot_urls || row.slotUrls || {},
       slotEnabled: row.slot_enabled || row.slotEnabled || {},
+      projectTagId: typeof row.project_tag_id === 'string'
+        ? row.project_tag_id
+        : (typeof row.projectTagId === 'string' ? row.projectTagId : null),
       updatedAt: row.updated_at || row.updatedAt || null
     }));
 
@@ -1294,6 +1297,7 @@ ipcMain.handle('dream-load-sessions', async (_event, sessionId) => {
         slotConfig: matchingSnapshot?.slotConfig || rpcFallback?.slotConfig || {},
         slotUrls: matchingSnapshot?.slotUrls || rpcFallback?.slotUrls || {},
         slotEnabled: matchingSnapshot?.slotEnabled || rpcFallback?.slotEnabled || {},
+        projectTagId: matchingSnapshot?.projectTagId || rpcFallback?.projectTagId || null,
         // Session history should be stable even if the underlying note is edited later.
         // Use note creation time for note-backed rows and keep the live snapshot update as
         // auxiliary metadata only.

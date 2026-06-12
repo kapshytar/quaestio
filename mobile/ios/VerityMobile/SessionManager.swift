@@ -13,6 +13,9 @@ struct SessionSnapshot: Codable, Identifiable, Hashable {
     let slotLiveURLs: [String: String]
     let createdAt: String
     let updatedAt: String
+    // Project the session belongs to (bridge `project_tag_id`); optional —
+    // absent/null keeps the previous "no project" behavior.
+    let projectTagId: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -26,6 +29,7 @@ struct SessionSnapshot: Codable, Identifiable, Hashable {
         case slotLiveURLs = "slot_live_urls"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case projectTagId = "project_tag_id"
     }
 }
 
@@ -49,6 +53,7 @@ extension SessionSnapshot {
         slotLiveURLs = (try c.decodeIfPresent([String: String].self, forKey: .slotLiveURLs)) ?? [:]
         createdAt = (try c.decodeIfPresent(String.self, forKey: .createdAt)) ?? ""
         updatedAt = (try c.decodeIfPresent(String.self, forKey: .updatedAt)) ?? ""
+        projectTagId = (try c.decodeIfPresent(String.self, forKey: .projectTagId))?.nilIfEmpty
     }
 }
 
@@ -280,7 +285,8 @@ final class SessionManager {
             slotEnabled: Dictionary(uniqueKeysWithValues: slotStates.map { ("slot-\($0.id)", $0.isEnabled) }),
             slotLiveURLs: slotLiveURLs ?? [:],
             createdAt: existing?.createdAt ?? iso,
-            updatedAt: iso
+            updatedAt: iso,
+            projectTagId: getParallelIngestState().activeProjectId?.nilIfEmpty ?? existing?.projectTagId
         )
 
         addSessionToList(snapshot)
@@ -644,7 +650,10 @@ final class SessionManager {
                 slotEnabled: resolvedSlotEnabled,
                 slotLiveURLs: resolvedLiveURLs,
                 createdAt: matchingSnapshot?.createdAt ?? "",
-                updatedAt: updatedAt.ifEmpty(matchingSnapshot?.updatedAt ?? "")
+                updatedAt: updatedAt.ifEmpty(matchingSnapshot?.updatedAt ?? ""),
+                projectTagId: ((row["project_tag_id"] as? String) ?? (row["projectTagId"] as? String))?.nilIfEmpty
+                    ?? matchingSnapshot?.projectTagId
+                    ?? rpcFallback?.projectTagId
             )
 
             // Keep only the latest snapshot per session
@@ -706,7 +715,8 @@ final class SessionManager {
             slotEnabled: slotEnabled,
             slotLiveURLs: slotLiveURLs,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            projectTagId: ((row["project_tag_id"] as? String) ?? (row["projectTagId"] as? String))?.nilIfEmpty
         )
     }
 
