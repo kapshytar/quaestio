@@ -1,5 +1,5 @@
 param(
-    [string]$Repo = "kvitaliq-maker/chat-aggregator-android",
+    [string]$Repo = "kapshytar/chat-aggregator-android",
     [string]$RepoDir = "C:\chat-aggregator-android",
     [string]$Workflow = "Build Android Artifacts",
     [string]$Branch = "main",

@@ -177,7 +177,7 @@ enum MergeApiClient {
                     chatHistory: chatHistory,
                     providerId: config.provider.id,
                     extraHeaders: config.provider.id == "openrouter_api" ? [
-                        "HTTP-Referer": "https://github.com/kvitaliq-maker/chat-aggregator-mobile",
+                        "HTTP-Referer": "https://github.com/kapshytar/chat-aggregator-mobile",
                         "X-Title": "VerityMobile"
                     ] : [:],
                     attemptedModels: attempted,
