@@ -1,0 +1,28 @@
+{
+  "sseDataPrefix": "data:",
+  "doneTokens": [
+    "[DONE]"
+  ],
+  "modelPaths": [
+    "model",
+    "modelVersion"
+  ],
+  "deltaTextPaths": [
+    "choices[0].delta.content",
+    "choices[0].delta.text",
+    "choices[0].text",
+    "choices[0].message.content",
+    "delta.text",
+    "delta.content"
+  ],
+  "finalTextPaths": [
+    "choices[0].message.content",
+    "choices[0].delta.content",
+    "choices[0].delta.text",
+    "choices[0].text",
+    "delta.text",
+    "delta.content",
+    "content[0].text",
+    "candidates[0].content.parts[0].text"
+  ]
+}

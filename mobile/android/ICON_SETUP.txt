@@ -1,0 +1,36 @@
+Gunshi Icon Setup для Android проекта
+=====================================
+
+ФАЙЛЫ:
+- .github/assets/gunshi-icon.svg — SVG логотип (для документации и GitHub)
+
+ИНСТРУКЦИИ ДЛЯ КОНВЕРТАЦИИ SVG В PNG:
+
+Вариант 1: Online (быстро)
+1. Перейди на https://cloudconvert.com/svg-to-png
+2. Загрузи gunshi-icon.svg
+3. Установи размеры:
+   - 192x192 для ic_app_icon.png
+   - 96x96 для меньших размеров
+   - 48x48 для миниатюр
+4. Конвертируй и скачай
+
+Вариант 2: Local (если у тебя установлены инструменты)
+Используй ImageMagick:
+  convert gunshi-icon.svg -density 300 -resize 192x192 ic_app_icon-192.png
+  convert gunshi-icon.svg -density 300 -resize 96x96 ic_app_icon-96.png
+  convert gunshi-icon.svg -density 300 -resize 48x48 ic_app_icon-48.png
+
+Вариант 3: Через Figma/Adobe XD
+1. Импортируй SVG
+2. Экспортируй как PNG в нужных размерах
+
+ПОСЛЕ КОНВЕРТАЦИИ:
+Положи PNG файлы сюда:
+app/src/main/res/drawable/ic_launcher_foreground.png
+app/src/main/res/drawable/ic_app_icon.png
+
+Затем:
+git add .github/assets/ app/src/main/res/drawable/
+git commit -m "Add Gunshi premium icon design"
+git push origin main

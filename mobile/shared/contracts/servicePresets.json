@@ -1,0 +1,102 @@
+{
+  "defaultSlots": ["chatgpt", "claude", "gemini", "grok"],
+  "services": {
+    "chatgpt": {
+      "id": "chatgpt",
+      "name": "ChatGPT",
+      "url": "https://chatgpt.com",
+      "phoneZoomPercent": 90,
+      "selectors": {
+        "textarea": ["textarea[id*=\"prompt\"]"],
+        "contenteditable": [],
+        "button": ["button[data-testid=\"send-button\"]"]
+      }
+    },
+    "claude": {
+      "id": "claude",
+      "name": "Claude",
+      "url": "https://claude.ai",
+      "phoneZoomPercent": 90,
+      "selectors": {
+        "textarea": [],
+        "contenteditable": ["div[contenteditable=\"true\"][enterkeyhint=\"enter\"]"],
+        "button": ["button[aria-label*=\"Send\"]"]
+      }
+    },
+    "gemini": {
+      "id": "gemini",
+      "name": "Gemini",
+      "url": "https://gemini.google.com",
+      "phoneZoomPercent": 90,
+      "selectors": {
+        "textarea": [],
+        "contenteditable": ["div.ql-editor[contenteditable=\"true\"]"],
+        "button": ["button[aria-label*=\"Send\"]"]
+      }
+    },
+    "grok": {
+      "id": "grok",
+      "name": "Grok",
+      "url": "https://grok.com",
+      "phoneZoomPercent": 90,
+      "selectors": {
+        "textarea": [],
+        "contenteditable": ["div[contenteditable=\"true\"]"],
+        "button": ["button[data-testid=\"sendButton\"]"]
+      }
+    },
+    "deepseek": {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "url": "https://chat.deepseek.com",
+      "phoneZoomPercent": 90,
+      "selectors": {
+        "textarea": [
+          "textarea#chat-input",
+          "textarea[placeholder*=\"Message\"]",
+          "textarea[placeholder*=\"Ask\"]",
+          "textarea"
+        ],
+        "contenteditable": [
+          "div[contenteditable=\"true\"][role=\"textbox\"]",
+          "div[contenteditable=\"true\"]"
+        ],
+        "button": [
+          "button[data-testid=\"send-button\"]",
+          "button[aria-label*=\"Send\"]",
+          "button[class*=\"send\"]",
+          "button[type=\"submit\"]"
+        ]
+      }
+    },
+    "perplexity": {
+      "id": "perplexity",
+      "name": "Perplexity",
+      "url": "https://www.perplexity.ai",
+      "phoneZoomPercent": 90,
+      "selectors": {
+        "textarea": [
+          "textarea[placeholder*=\"Ask\"]",
+          "textarea[placeholder*=\"Message\"]",
+          "textarea"
+        ],
+        "contenteditable": [
+          "div[contenteditable=\"true\"][role=\"textbox\"]",
+          "div[contenteditable=\"true\"]",
+          "[role=\"textbox\"][contenteditable=\"true\"]"
+        ],
+        "button": [
+          "button[aria-label*=\"Ask\"]",
+          "button[aria-label*=\"Submit\"]",
+          "button[aria-label*=\"Send\"]",
+          "button[aria-label*=\"query\"]",
+          "button[data-testid*=\"submit\"]",
+          "button[data-testid*=\"send\"]",
+          "button[type=\"submit\"]",
+          "button.bg-super",
+          "button.bg-sideBar"
+        ]
+      }
+    }
+  }
+}
