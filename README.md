@@ -1,18 +1,26 @@
-# Quaestio — the only AI aggregator where YOUR OWN accounts and YOUR OWN history actually work
+<sub>Q U A E S T I O&nbsp;&nbsp;|&nbsp;&nbsp;V E R I T Y _ D B</sub>
 
-Love web ChatGPT, Gemini, Grok and Claude? Want to know what they **ALL** think?
-Want to **compare answers side by side**, fast? **Not via API — via the real web UI?**
-With **your own account, your own history, your own context?**
+# The only AI aggregator where YOUR OWN accounts and YOUR OWN history actually work!
 
-Welcome, you found it.
+<p>
+Love web ChatGPT, Gemini, Grok and Claude? Want to know what they ALL think?<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Want to COMPARE answers SIDE BY SIDE fast? NOT via API, via REAL WEB UI?<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;With YOUR OWN account, YOUR OWN history, YOUR OWN context?
+</p>
 
-- You can **Merge** everything, so you don't need to read every LLM's answer separately.
-- You can **jump back into previous discussions** across multiple LLMs.
-- You can manage **real projects and subprojects**, run **fast search**, and compress giant model outputs into **clean, compact notes**.
+**Welcome, you FOUND IT!!!**
 
-**Real Web UI, not API wrappers** — native provider websites in one place, keeping your real account state (subscriptions, settings, memory). No API metering for the chats; a key is needed only for the optional Merge step (bring your own — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, or any OpenAI-compatible endpoint).
+<p>
+You also can MERGE everything so you don't need to read every LLM's answer separately.<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Also you can JUMP BACK into PREVIOUS DISCUSSIONS across multiple LLMs,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;manage REAL PROJECTS and subPROJECTS,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;run FAST SEARCH,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;compress giant model outputs into CLEAN COMPACT notes.
+</p>
 
-> Why: every model is good at different things, and the same model answers the same question differently run to run. Asking several of them at once — with their full context — and merging is the cheapest reliability trick there is. Quaestio makes it one click instead of eight copy-pastes.
+**It is all here.**
+
+<sub>No API metering for the chats — the slots are the real provider websites with your real account state (subscriptions, settings, memory). A key is needed only for the optional Merge step: bring your own — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, or any OpenAI-compatible endpoint.</sub>
 
 🔗 **Waitlist / early access: [veritydb.vercel.app](https://veritydb.vercel.app)**
 
