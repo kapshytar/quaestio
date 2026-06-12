@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you reference Quaestio, please cite it as below."
+title: "Quaestio — multi-LLM chat aggregator (desktop + mobile)"
+type: software
+authors:
+  - family-names: "K."
+    given-names: "Vitalii"
+    email: k.vitaliq@gmail.com
+repository-code: "https://github.com/kapshytar/quaestio"
+url: "https://veritydb.vercel.app"
+license: AGPL-3.0-only
+keywords:
+  - multi-LLM
+  - AI chat aggregator
+  - ChatGPT
+  - Claude
+  - Gemini
+  - Grok
+  - answer merge
+  - knowledge base
+abstract: >-
+  Open-source multi-LLM chat aggregator: ask web ChatGPT, Claude, Gemini and
+  Grok the same question at once through their real web UIs with your own
+  accounts, compare answers side by side, merge them into one synthesis, and
+  keep everything in VerityDB — a searchable personal knowledge base.

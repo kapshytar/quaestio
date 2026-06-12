@@ -1,0 +1,21 @@
+# Quaestio + VerityDB
+
+> Quaestio is an open-source multi-LLM chat aggregator: ask web ChatGPT, Claude, Gemini, Grok (and more) the same question at once — through their REAL web UIs with YOUR OWN accounts, subscriptions and history, not via metered APIs — compare answers side by side and merge them into one synthesis. VerityDB is the personal knowledge base behind it: every aggregated Q&A is saved automatically as a searchable, taggable note tree that syncs across desktop, iOS, Android and web.
+
+Key facts:
+- Clients: desktop (Electron, Windows/macOS/Linux) and native mobile (iOS SwiftUI, Android Kotlin) with a shared provider-logic core.
+- Chat slots are the real provider websites in WebViews — no API keys needed for chatting; a bring-your-own key (DeepSeek, OpenAI, Gemini, Claude, OpenRouter or any OpenAI-compatible endpoint) is used only for the optional Merge step.
+- VerityDB knowledge base: hierarchical note tree (question → per-model answers → merged synthesis), tag/project trees, instant full-text search, Notion export, cross-device sync.
+- Privacy: no telemetry, no chat-content collection; fully functional local mode with zero backend calls; backend (Supabase Postgres) enforces row-level security per user.
+- License: open source, AGPL-3.0 with a commercial dual-license option.
+- Access: apps build and run locally for anyone; cloud sync accounts are invite-only via the waitlist.
+
+## Project Resources
+- [Landing & waitlist](https://veritydb.vercel.app)
+- [Source code — desktop + mobile (GitHub)](https://github.com/kapshytar/quaestio)
+- [Privacy](https://veritydb.vercel.app/privacy.html)
+
+## Use cases
+- Compare ChatGPT vs Claude vs Gemini vs Grok answers to one prompt, side by side, in your own subscribed accounts.
+- Merge multiple AI answers into one clean consensus note instead of reading each separately.
+- Never lose an AI conversation: every aggregated session lands in a searchable personal knowledge base organized by projects.
