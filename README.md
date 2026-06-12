@@ -53,6 +53,23 @@ Quaestio can run fully standalone and local. But signed-in, it syncs into **Veri
 
 Accounts are currently **invite-only**: request access at [veritydb.vercel.app](https://veritydb.vercel.app). Until approved — and entirely by choice — the apps work in local mode: everything stays on your device, zero backend calls.
 
+## ⚠️ KNOWN ISSUES
+
+**Google sign-in inside the chat slots is a pain.** Google actively blocks
+sign-in from embedded WebViews ("This browser or app may not be secure"), so
+logging into Gemini — and into ChatGPT/Grok via the "Continue with Google"
+button — can take a few attempts. Workarounds, in order of reliability:
+
+1. **Cookie import — the bulletproof option.** Sign in to the service in your
+   normal browser, export the cookies, import them into the app (desktop:
+   `Ctrl+I` / Import 🍪, see [desktop/docs/COOKIE_IMPORT.md](desktop/docs/COOKIE_IMPORT.md)).
+   The slot picks up your real session instantly.
+2. **User-agent switching (iOS).** The iPhone app can change the WebView
+   user agent specifically so Google's WebView detection backs off — switch
+   the UA, sign in, switch back if needed.
+3. Sign in with the service's **native email/password** login instead of the
+   "Continue with Google" button where possible — it usually passes.
+
 ## Privacy
 
 - The apps ship **no LLM provider keys and no secrets**. Merge uses your own key, stored on-device.
