@@ -1,10 +1,13 @@
-﻿name: Build macOS DMG
+name: Build macOS DMG
 on:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: desktop
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,4 +29,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Gunshi-macOS-Intel-DMG
-          path: dist/*.dmg
+          path: desktop/dist/*.dmg

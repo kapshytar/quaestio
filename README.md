@@ -1,55 +1,46 @@
-# Quaestio — Verity Desktop: ask every AI at once, keep the best answer
+# Quaestio — ask every AI at once, keep the best answer
 
-**Quaestio** is the desktop client of **Verity**, a multi-LLM chat aggregator: one prompt goes to **ChatGPT, Claude, Gemini, Grok, DeepSeek and Perplexity side by side**, you see all the answers next to each other, and a one-click **Merge** synthesizes them into a single, best-of-all response. Electron app for Windows / macOS / Linux.
+**Quaestio is a chat aggregator that lets you work with multiple AI assistants simultaneously.** One prompt goes to **ChatGPT, Claude, Gemini, Grok, DeepSeek and Perplexity side by side**; you see every answer next to the others, and a one-click **Merge** synthesizes them into a single, best-of-all response.
 
-No per-message API costs for the chats themselves: the slots are real WebView sessions of the services you already use, logged in with **your own accounts and subscriptions**. An API key is only needed for the optional Merge step (bring your own — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, or any OpenAI-compatible endpoint).
+The part nobody else gives you: the slots are **real sessions of your own accounts** — your subscriptions, your settings, and most importantly **your conversation history**. Every model keeps its own context between questions, exactly as if you were using it directly. No API metering for the chats themselves; an API key is needed only for the optional Merge step (bring your own — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, or any OpenAI-compatible endpoint).
 
-> Why: every model is good at different things, and the same model answers the same question differently run to run. Asking four of them at once and merging is the cheapest reliability trick there is — Quaestio makes it one click instead of eight copy-pastes.
+> Why: every model is good at different things, and the same model answers the same question differently run to run. Asking several of them at once — with their full context — and merging is the cheapest reliability trick there is. Quaestio makes it one click instead of eight copy-pastes.
 
-## Features
+## Clients in this repo
 
-- **4-slot chat grid** — four simultaneous WebView sessions; assign any supported AI service to any slot, with per-slot URL and zoom control.
-- **Broadcast send** — type once, `Enter` sends to all enabled slots at the same time.
-- **Merge / synthesis** — collect all replies and feed them to an LLM API of your choice for one consolidated answer; right-side panel manages providers and API keys.
-- **Cookie import** — pull sessions from Chrome/Edge (`Ctrl+I`) for instant sign-in to the chat services.
-- **Sessions** — save and restore grid layouts; signed-in sessions sync across devices (desktop ↔ [iOS/Android](https://github.com/kapshytar/chat-aggregator-mobile) ↔ web).
-- **Local-first** — choose *Use Locally* at first run and nothing leaves your machine. Optional accounts are **invite-only**: request access at [veritydb.vercel.app](https://veritydb.vercel.app).
-- **Search** — `Ctrl+F` across a slot, the merge output, or all slots at once.
+| Directory | Client | Stack |
+| --- | --- | --- |
+| [`desktop/`](desktop/) | Windows / macOS / Linux | Electron |
+| [`mobile/`](mobile/) | iOS + Android | SwiftUI / Kotlin, shared JS provider core |
 
-## Quick start
+Both clients consume the same provider contracts (`mobile/shared/contracts/`) and injected DOM scripts (`mobile/shared/js/`), so "how to talk to each chat service" is defined once.
+
+Quick start — desktop:
 
 ```bash
-npm install
-npm start        # or start.bat (Windows) / start.sh (macOS, Linux)
+cd desktop && npm install && npm start
 ```
 
-Then sign in to the chat services inside the slots (or import cookies — see [docs/COOKIE_IMPORT.md](docs/COOKIE_IMPORT.md)).
+Mobile builds: see [`mobile/README.md`](mobile/README.md).
 
-## Keyboard shortcuts
+## Verity — the knowledge base behind it *(invite-only for now)*
 
-| Keys | Action |
-| --- | --- |
-| `Enter` | Send to all active slots |
-| `Shift+Enter` | New line |
-| `Ctrl+I` | Import cookies |
-| `Ctrl+F` | Search (slot / merge / all) |
-| `Ctrl+R` | Reload all slots |
-| `Ctrl +/−/0` | Zoom / reset |
-| `F12` | DevTools |
+Quaestio can run fully standalone and local. But signed-in, it syncs into **Verity** ([veritydb.vercel.app](https://veritydb.vercel.app)) — the part that turns aggregated answers into something you keep:
 
-## Project structure
+- **Every aggregated Q&A becomes a note** — the question, each model's answer, and the merged synthesis land as a structured record, automatically.
+- **Graph-hierarchical structure at your fingertips** — notes form a tree (question → answers → merges → clarifications), reorganizable by drag, with tag trees on top.
+- **You cannot lose a chat.** Search across everything you ever aggregated — full-text, instant. The conversation you half-remember from a month ago is three keystrokes away.
+- **Multi-project binding** — the same knowledge base slices into separate projects/workspaces.
+- **Cross-device** — sessions and notes sync between desktop, iOS, Android and the web app.
+- **Notion export** — push takeaways or whole notes into Notion via a server-side OAuth integration.
 
-- `main.js` — Electron main process
-- `renderer.js` — front-end logic and broadcast send
-- `index.html` — UI (4 WebViews + merge panel)
-- `merge-api-client.js` — LLM API client for the Merge step
-- `auth-store.js` — optional account sign-in (user JWT; no privileged keys ship in the app)
+Accounts are currently **invite-only**: request access at [veritydb.vercel.app](https://veritydb.vercel.app). Until approved — and entirely by choice — the apps work in local mode: everything stays on your device, zero backend calls.
 
-More docs: [QUICKSTART.md](QUICKSTART.md), [TECHNICAL_DOCS.md](TECHNICAL_DOCS.md), [docs/](docs/).
+## Privacy
 
-## Related repos
-
-- [chat-aggregator-mobile](https://github.com/kapshytar/chat-aggregator-mobile) — native iOS + Android clients sharing the same provider contracts.
+- The apps ship **no LLM provider keys and no secrets**. Merge uses your own key, stored on-device.
+- Chat slots authenticate through each service's own login inside the WebView; credentials never pass through any Quaestio/Verity server.
+- No analytics, no telemetry, no chat content collection. In local mode the apps make zero backend calls (covered by tests on all platforms).
 
 ## License
 
@@ -63,8 +54,8 @@ Dual-licensed (see [NOTICE](NOTICE)): `AGPL-3.0-only OR LicenseRef-Commercial`
   conditions) is available from the owner: k.vitaliq@gmail.com.
 
 Contributions are welcome under the inbound-license terms in
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md). Changelogs: [desktop](desktop/CHANGELOG.md) · [mobile](mobile/CHANGELOG.md).
 
 ---
 
-*Keywords: multi-LLM desktop client, AI chat aggregator, compare ChatGPT Claude Gemini Grok DeepSeek Perplexity side by side, send one prompt to multiple AI models, merge AI answers, LLM answer synthesis, ensemble prompting, Electron AI app.*
+*Keywords: multi-LLM client, AI chat aggregator, compare ChatGPT Claude Gemini Grok DeepSeek Perplexity side by side, one prompt to multiple AI models, merge AI answers, LLM answer synthesis, ensemble prompting, AI knowledge base, personal AI notes, Electron iOS Android.*

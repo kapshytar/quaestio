@@ -1,6 +1,6 @@
 # Quaestio Mobile — ask every AI at once, keep the best answer
 
-**Quaestio** is a multi-LLM chat aggregator: one prompt goes to **ChatGPT, Claude, Gemini, Grok, DeepSeek and Perplexity side by side**, you see all the answers next to each other, and a one-tap **Merge** synthesizes them into a single, best-of-all response. This repo is the mobile half — native **iOS and Android** apps sharing one provider-logic core. (Quaestio is part of the Verity project; the optional sync backend is [VerityDB](https://veritydb.vercel.app).)
+**Quaestio** is a multi-LLM chat aggregator: one prompt goes to **ChatGPT, Claude, Gemini, Grok, DeepSeek and Perplexity side by side**, you see all the answers next to each other, and a one-tap **Merge** synthesizes them into a single, best-of-all response. This directory is the mobile half of the Quaestio monorepo — native **iOS and Android** apps sharing one provider-logic core. (Quaestio is part of the Verity project; the optional sync backend is [VerityDB](https://veritydb.vercel.app).)
 
 No per-message API costs for the chats themselves: the slots are real WebView sessions of the services you already use, logged in with **your own accounts and subscriptions**. API keys are only needed for the optional Merge step (bring your own key — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, Hugging Face, or any OpenAI-compatible endpoint).
 
