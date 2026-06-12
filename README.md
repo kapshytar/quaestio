@@ -1,10 +1,20 @@
-# Quaestio — ask every AI at once, keep the best answer
+# Quaestio — the only AI aggregator where YOUR OWN accounts and YOUR OWN history actually work
 
-**Quaestio is a chat aggregator that lets you work with multiple AI assistants simultaneously.** One prompt goes to **ChatGPT, Claude, Gemini, Grok, DeepSeek and Perplexity side by side**; you see every answer next to the others, and a one-click **Merge** synthesizes them into a single, best-of-all response.
+Love web ChatGPT, Gemini, Grok and Claude? Want to know what they **ALL** think?
+Want to **compare answers side by side**, fast? **Not via API — via the real web UI?**
+With **your own account, your own history, your own context?**
 
-The part nobody else gives you: the slots are **real sessions of your own accounts** — your subscriptions, your settings, and most importantly **your conversation history**. Every model keeps its own context between questions, exactly as if you were using it directly. No API metering for the chats themselves; an API key is needed only for the optional Merge step (bring your own — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, or any OpenAI-compatible endpoint).
+Welcome, you found it.
+
+- You can **Merge** everything, so you don't need to read every LLM's answer separately.
+- You can **jump back into previous discussions** across multiple LLMs.
+- You can manage **real projects and subprojects**, run **fast search**, and compress giant model outputs into **clean, compact notes**.
+
+**Real Web UI, not API wrappers** — native provider websites in one place, keeping your real account state (subscriptions, settings, memory). No API metering for the chats; a key is needed only for the optional Merge step (bring your own — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, or any OpenAI-compatible endpoint).
 
 > Why: every model is good at different things, and the same model answers the same question differently run to run. Asking several of them at once — with their full context — and merging is the cheapest reliability trick there is. Quaestio makes it one click instead of eight copy-pastes.
+
+🔗 **Waitlist / early access: [veritydb.vercel.app](https://veritydb.vercel.app)**
 
 ## Clients in this repo
 
