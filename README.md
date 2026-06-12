@@ -1,69 +1,72 @@
-# chat-aggregator-mobile
+# Verity Mobile — ask every AI at once, keep the best answer
 
-Shared mobile monorepo for the Verity clients:
+**Verity** is a multi-LLM chat aggregator: one prompt goes to **ChatGPT, Claude, Gemini, Grok, DeepSeek and Perplexity side by side**, you see all the answers next to each other, and a one-tap **Merge** synthesizes them into a single, best-of-all response. This repo is the mobile half of the project — native **iOS and Android** apps sharing one provider-logic core.
 
-- `android/`
-- `ios/`
-- `shared/`
-- `docs/`
+No per-message API costs for the chats themselves: the slots are real WebView sessions of the services you already use, logged in with **your own accounts and subscriptions**. API keys are only needed for the optional Merge step (bring your own key — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, Hugging Face, or any OpenAI-compatible endpoint).
 
-## Current Status
+> Why: every model is good at different things, and the same model answers the same question differently run to run. Asking four of them at once and merging is the cheapest reliability trick there is — Verity makes it one tap instead of eight copy-pastes.
 
-This repo is now the target mobile workspace.
+## Features
 
-- iOS work lives here and is actively developed in `ios/`.
-- Android is being moved here under `android/`.
-- `shared/js` and `shared/contracts` are the shared source of truth for cross-platform WebView/provider behavior.
-- The legacy standalone `chat-aggregator-android` repo has been merged into `android/` here; this repo is the single home for iOS + Android.
+- **Parallel chat grid** — 4 simultaneous chat slots (WebView), each running a real session of ChatGPT, Claude, Gemini, Grok, DeepSeek or Perplexity. Swap any slot to any service.
+- **Broadcast send** — type once, send to all enabled slots at the same time. File attachments supported where the service allows it.
+- **Answer collection** — replies are scraped from each slot and aggregated into a single structured record per question.
+- **Merge / synthesis** — feed all collected answers to an LLM API of your choice and get one consolidated answer (with streaming). Provider catalog is config-driven (`shared/contracts/mergeConfig.json`).
+- **Sessions** — save a working layout (which services, which conversations) and restore it later; per-session history.
+- **Local-first** — works fully offline-from-the-backend: choose *Use Locally* at first run and nothing ever leaves the device.
+- **Optional account sync** — sign in to sync sessions and aggregated notes across devices (mobile ↔ desktop ↔ web) to a Supabase backend. Accounts are currently **invite-only**: request access at [veritydb.vercel.app](https://veritydb.vercel.app). Until approved, everything works in local mode.
+- **Notes / journal backend** — aggregated Q&A lands in a personal notes tree (the [dream-tracker](https://github.com/kapshytar/dream-tracker) web app), with tagging and Notion export.
 
-## Goal
+## How it works
 
-Keep mobile development in one repo where:
+```text
+            ┌────────────────────────────────────────────┐
+ one prompt │  slot 1     slot 2     slot 3     slot 4   │
+ ──────────▶│ ChatGPT     Gemini      Grok     DeepSeek  │  real WebView sessions,
+            │  answer      answer     answer    answer   │  your own accounts
+            └──────┬──────────┬──────────┬─────────┬─────┘
+                   └────── collected & aggregated ─┘
+                                  │
+                          Merge (your API key)
+                                  │
+                       one synthesized answer
+                                  │
+              local store ── or ── account sync (Supabase)
+```
 
-- Android lives under `android/`
-- iOS lives under `ios/`
-- shared JS lives under `shared/js/`
-- shared payload/contracts docs live under `shared/contracts/`
+The DOM logic that knows how to type into / read out of each chat service is **shared JavaScript** (`shared/js/`), injected into the WebViews on both platforms, so iOS and Android stay in lockstep. Per-service selectors and behavior live in JSON contracts (`shared/contracts/servicePresets.json`).
 
-## Planned Layout
+## Repo layout
 
 ```text
 chat-aggregator-mobile/
-├── android/
-├── ios/
+├── android/   # Kotlin, single-activity, 4 WebView slots + Merge tab
+├── ios/       # SwiftUI (VerityMobile), xcodegen project
 ├── shared/
-│   ├── js/
-│   └── contracts/
-└── docs/
+│   ├── js/         # injected provider scripts: send, scrape, attach, stream-parse
+│   └── contracts/  # servicePresets.json, mergeConfig.json, cross-client rules
+├── docs/
+└── scripts/   # canonical build/deploy/smoke-check scripts
 ```
 
-## Working Rule
+Sibling repos: [dream-tracker](https://github.com/kapshytar/dream-tracker) (web app + Supabase backend), `chat-aggregator` (Electron desktop client).
 
-- `Android first during migration`
-- `shared first as the target state`
-- `native only where necessary`
+## Build
 
-## Canonical Local Commands
+```bash
+./scripts/mobile-doctor.sh           # environment / device sanity check
+./scripts/deploy-ios-device.sh      # build & install on a connected iPhone
+./scripts/deploy-android-device.sh  # build & install on a connected Android device
+```
 
-- environment / device sanity check:
-  - `./scripts/mobile-doctor.sh`
-- iPhone deploy:
-  - `./scripts/deploy-ios-device.sh`
-- Android deploy:
-  - `./scripts/deploy-android-device.sh`
-- ingest / DB smoke check:
-  - `./scripts/ingest-smoke-check.sh <session_id> [platform_code]`
-  - example:
-    - `./scripts/ingest-smoke-check.sh 121 IOS`
+iOS: the Xcode project is generated — `cd ios && xcodegen` (config in `project.yml`).
+Android: pinned JDK comes from `android/gradle.properties`; use the script rather than raw `./gradlew`.
 
-These are the canonical local device workflows for this repo. Prefer them over one-off manual `xcodebuild install`, ad-hoc `devicectl` sequences, or manually reconstructed `adb install` flows.
+## Keys & privacy
 
-## Current Migration Direction
-
-1. Keep the migrated Android project in `android/` as the mobile Android home.
-2. Keep shared provider DOM logic in `shared/js/`.
-3. Keep shared payload/config/contracts in `shared/contracts/`.
-4. Let iOS and Android wrap shared logic only where platform-native behavior is required.
+- The app ships **no API keys**. Merge requires your own key, entered in the app and stored on-device.
+- Chat slots authenticate through each service's own login inside the WebView; credentials never pass through any Verity server.
+- In local mode the app makes zero backend calls (enforced and covered by tests on both platforms).
 
 ## License
 
@@ -75,3 +78,7 @@ Dual-licensed (see [NOTICE](NOTICE)):
 - **Commercial** — to build a closed-source or commercial product on this code
   without AGPL obligations, contact k.vitaliq@gmail.com for a commercial
   license.
+
+---
+
+*Keywords: multi-LLM client, AI chat aggregator, compare ChatGPT Claude Gemini Grok DeepSeek Perplexity side by side, send one prompt to multiple AI models, merge AI answers, LLM answer synthesis, ensemble prompting, iOS Android AI app.*
