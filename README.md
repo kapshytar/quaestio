@@ -26,10 +26,14 @@ You also can MERGE everything so you don't need to read every LLM's answer separ
 
 ![Quaestio desktop — Grok, Gemini and ChatGPT answering side by side with one-click Merge consensus](docs/screens/desktop.png)
 
+![VerityDB web — chats become a searchable project tree with per-model answers and the merged synthesis](docs/screens/web-dark.png)
+
 <p align="center">
   <img src="docs/screens/ios.png" alt="Quaestio on iPhone" width="32%" />
   <img src="docs/screens/android.png" alt="Quaestio on Android" width="32%" />
 </p>
+
+<sub>VerityDB web also ships a light mode: [docs/screens/web-light.png](docs/screens/web-light.png)</sub>
 
 ## Clients in this repo
 
