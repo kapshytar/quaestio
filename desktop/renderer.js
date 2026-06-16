@@ -1006,6 +1006,23 @@ function resetActiveSessionContext() {
   mergeLog('Session context reset by user from Sessions tab', 'info');
 }
 
+// Switching projects mid-work must not keep appending new questions to the
+// previous project's session. The cached context is keyed only by slot
+// fingerprint (not by project), so without this the next send/collect reuses
+// the old session id (e.g. everything piling under #250). Clearing it makes the
+// next send resolve or create a fresh question root under the new project.
+function resetSessionContextOnProjectSwitch(nextProjectId) {
+  const hasActiveContext = Number.isInteger(activeSessionId) || !!readSessionContext();
+  if (!hasActiveContext) return; // nothing in flight -> no reset needed
+  clearStoredSessionContext();
+  clearIngestSessionIndicator();
+  if (window.mergeApiClient) {
+    window.mergeApiClient.lastSourcePrompt = '';
+  }
+  mergeLog(`Session context auto-reset on project switch -> ${nextProjectId || 'No Project'}`, 'info');
+  try { updateSessionsUI(); } catch (_) { /* sessions tab may be unmounted */ }
+}
+
 function getStoredSessionIdForFingerprint(fingerprint) {
   const normalizedFingerprint = String(fingerprint || '').trim();
   if (!normalizedFingerprint) return null;
@@ -2137,7 +2154,10 @@ function renderProjectTreeNode(container, node, depth) {
   row.appendChild(name);
 
   row.addEventListener('click', async () => {
+    const nextId = String(node?.id || '').trim() || null;
+    const projectChanged = (activeProjectId || null) !== nextId;
     await setActiveProject(node);
+    if (projectChanged) resetSessionContextOnProjectSwitch(nextId);
     hideProjectPanel();
   });
 
@@ -2169,7 +2189,9 @@ function renderProjectPanel(nodes = projectTreeNodes) {
   noProjectRow.style.paddingLeft = '6px';
   noProjectRow.innerHTML = '<button type="button" class="project-tree-chevron placeholder">?</button><span class="project-tree-name">No Project</span>';
   noProjectRow.addEventListener('click', async () => {
+    const projectChanged = (activeProjectId || null) !== null;
     await setActiveProject(null);
+    if (projectChanged) resetSessionContextOnProjectSwitch(null);
     hideProjectPanel();
   });
   if (projectPanelFooterEl) {
