@@ -92,6 +92,14 @@
     #webview-grid.split-slot {
       grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
     }
+    /* Side-by-side: single row of full-height columns. Column count + per-slot
+       placement are set inline by setSideBySide(). */
+    #webview-grid.side-by-side {
+      grid-template-rows: 1fr;
+    }
+    #webview-grid.side-by-side .webview-container {
+      border-radius: 0;
+    }
     webview { width: 100%; height: 100%; background: #000; }
     .webview-container {
       position: relative; background: #2a2a2a; border-radius: 4px;
@@ -180,7 +188,9 @@
     }
     .zoom-btn:hover { background: #444; }
     .split-slot-btn, .expand-slot-btn { min-width: 34px; }
-    .split-slot-btn.active, .expand-slot-btn.active { border-color: #777; background: #444; color: #fff; }
+    .sidebyside-slot-btn { min-width: 26px; font-size: 13px; line-height: 1; }
+    .split-slot-btn.active, .expand-slot-btn.active,
+    .sidebyside-slot-btn.active { border-color: #777; background: #444; color: #fff; }
     .zoom-level { font-size: 10px; color: #999; min-width: 35px; text-align: center; }
     .webview-wrapper { flex: 1; position: relative; background: #000; }
     #bottom-panel {
@@ -1213,7 +1223,8 @@
     }
     .zoom-level { color: var(--text-faint); }
     .split-slot-btn.active,
-    .expand-slot-btn.active {
+    .expand-slot-btn.active,
+    .sidebyside-slot-btn.active {
       background: rgba(var(--accent-rgb), 0.16);
       border-color: rgba(var(--accent-rgb), 0.46);
       color: var(--accent-strong);
@@ -1732,6 +1743,11 @@
       padding-inline: 3px;
       font-size: 9px;
     }
+    .webview-header .sidebyside-slot-btn {
+      min-width: 22px;
+      padding-inline: 3px;
+      font-size: 12px;
+    }
     @media (max-width: 720px) {
       .about-meta-grid {
         grid-template-columns: 1fr;
@@ -1766,6 +1782,7 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+            <button class="zoom-btn sidebyside-slot-btn" data-action="side-by-side-toggle" title="Side-by-side: enabled chats as vertical columns">&#9707;</button>
             <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
             <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
@@ -1795,6 +1812,7 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+            <button class="zoom-btn sidebyside-slot-btn" data-action="side-by-side-toggle" title="Side-by-side: enabled chats as vertical columns">&#9707;</button>
             <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
             <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
@@ -1824,6 +1842,7 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+            <button class="zoom-btn sidebyside-slot-btn" data-action="side-by-side-toggle" title="Side-by-side: enabled chats as vertical columns">&#9707;</button>
             <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
             <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
@@ -1853,6 +1872,7 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
+            <button class="zoom-btn sidebyside-slot-btn" data-action="side-by-side-toggle" title="Side-by-side: enabled chats as vertical columns">&#9707;</button>
             <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
             <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>

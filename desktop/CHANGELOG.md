@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.112.8
+
+- New "◫" side-by-side view toggle next to Split in each slot header: lays out
+  every enabled chat as a full-height vertical column in a single row (2 enabled
+  → 2 vertical panes, N enabled → N columns; disabled slots hidden). Mutually
+  exclusive with the per-slot Split/Full modes — entering one clears the other.
+  Active state is highlighted, persisted to `localStorage`, restored on startup,
+  and the column layout recomputes when chats are enabled/disabled.
+
 ## 1.112.7
 
 - Merge-panel toggle restyled into a round neon disc: layered radial gradients

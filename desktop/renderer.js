@@ -166,6 +166,7 @@ const slotFavicons = {};
 let expandedSlot = null;
 let leftSplitSlot = null;
 let rightSplitSlot = null;
+let sideBySideActive = false;
 let appBackgrounded = false;
 
 function applyAppBackgroundMode(backgrounded) {
@@ -2453,6 +2454,8 @@ SLOTS.forEach(slot => {
     updateSlotToggleVisualState(slot);
     updateSlotWindowVisualState(slot);
     saveSlotEnabledState(slotEnabledState);
+    // Recompute the column layout when the set of enabled chats changes.
+    if (sideBySideActive) setSideBySide(true);
   });
 });
 saveSlotEnabledState(getCurrentSlotEnabledState());
@@ -2817,8 +2820,17 @@ function updateExpandedSlotControls() {
     const slot = header.dataset.slot;
     const splitBtn = header.querySelector('[data-action="split-toggle"]');
     const expandBtn = header.querySelector('[data-action="expand-toggle"]');
+    const sideBtn = header.querySelector('[data-action="side-by-side-toggle"]');
     const isSplitActive = leftSplitSlot === slot || rightSplitSlot === slot;
     const isFullActive = expandedSlot === slot;
+
+    if (sideBtn) {
+      sideBtn.classList.toggle('active', sideBySideActive);
+      sideBtn.title = sideBySideActive
+        ? 'Exit side-by-side view'
+        : 'Side-by-side: enabled chats as vertical columns';
+      sideBtn.setAttribute('aria-pressed', sideBySideActive ? 'true' : 'false');
+    }
 
     if (splitBtn) {
       splitBtn.classList.toggle('active', isSplitActive);
@@ -2871,6 +2883,7 @@ function renderSplitSlotLayout() {
 }
 
 function setSplitSlot(slot) {
+  clearSideBySideGrid();
   const nextSlot = slot && SLOTS.includes(slot) ? slot : null;
   normalizeSplitSlotsForVisualOrder();
 
@@ -2894,6 +2907,7 @@ function setSplitSlot(slot) {
 }
 
 function setExpandedSlot(slot) {
+  clearSideBySideGrid();
   expandedSlot = slot && SLOTS.includes(slot) ? slot : null;
   if (expandedSlot) {
     leftSplitSlot = null;
@@ -2917,6 +2931,80 @@ function setExpandedSlot(slot) {
   });
 
   updateExpandedSlotControls();
+}
+
+// Reset the side-by-side inline grid template + flag. Called when entering
+// expand/split modes, which own the grid via their own CSS classes.
+function clearSideBySideGrid() {
+  sideBySideActive = false;
+  webviewGridEl?.classList.toggle('side-by-side', false);
+  if (webviewGridEl) {
+    webviewGridEl.style.gridTemplateColumns = '';
+    webviewGridEl.style.gridTemplateRows = '';
+  }
+}
+
+// Side-by-side view: lay out every enabled chat as a full-height vertical
+// column in a single row (2 enabled -> 2 vertical panes). Independent of the
+// per-slot Split/Full modes; toggling it on clears those, and vice versa.
+function setSideBySide(active) {
+  sideBySideActive = !!active;
+  if (sideBySideActive) {
+    expandedSlot = null;
+    leftSplitSlot = null;
+    rightSplitSlot = null;
+  }
+  webviewGridEl?.classList.toggle('side-by-side', sideBySideActive);
+  webviewGridEl?.classList.toggle('expanded-slot', false);
+  webviewGridEl?.classList.toggle('split-slot', false);
+  webviewGridEl?.classList.toggle('both-split', false);
+
+  if (sideBySideActive) {
+    const columns = SLOTS
+      .filter((slot) => toggles[slot]?.checked)
+      .sort((a, b) => getSlotVisualIndex(a) - getSlotVisualIndex(b));
+    if (webviewGridEl) {
+      webviewGridEl.style.gridTemplateColumns = `repeat(${Math.max(1, columns.length)}, 1fr)`;
+      webviewGridEl.style.gridTemplateRows = '1fr';
+    }
+    SLOTS.forEach((slot) => {
+      const container = getSlotContainer(slot);
+      if (!container) return;
+      container.classList.toggle('expanded', false);
+      container.classList.toggle('split-left', false);
+      container.classList.toggle('split-right', false);
+      const colIndex = columns.indexOf(slot);
+      if (colIndex >= 0) {
+        container.style.gridColumn = `${colIndex + 1} / ${colIndex + 2}`;
+        container.style.gridRow = '1 / -1';
+        container.classList.toggle('hidden-by-expansion', false);
+      } else {
+        clearSlotGridPlacement(container);
+        container.classList.toggle('hidden-by-expansion', true);
+      }
+    });
+  } else {
+    if (webviewGridEl) {
+      webviewGridEl.style.gridTemplateColumns = '';
+      webviewGridEl.style.gridTemplateRows = '';
+    }
+    SLOTS.forEach((slot) => {
+      const container = getSlotContainer(slot);
+      if (!container) return;
+      clearSlotGridPlacement(container);
+      container.classList.toggle('expanded', false);
+      container.classList.toggle('split-left', false);
+      container.classList.toggle('split-right', false);
+      container.classList.toggle('hidden-by-expansion', false);
+    });
+  }
+
+  localStorage.setItem('side-by-side-view', sideBySideActive ? 'true' : 'false');
+  updateExpandedSlotControls();
+}
+
+function toggleSideBySide() {
+  setSideBySide(!sideBySideActive);
 }
 
 // ========== WEBVIEW CONTROLS ==========
@@ -3092,6 +3180,13 @@ document.querySelectorAll('.webview-header').forEach(header => {
   if (splitBtn) {
     splitBtn.addEventListener('click', () => {
       setSplitSlot(slot);
+    });
+  }
+
+  const sideBySideBtn = header.querySelector('[data-action="side-by-side-toggle"]');
+  if (sideBySideBtn) {
+    sideBySideBtn.addEventListener('click', () => {
+      toggleSideBySide();
     });
   }
 
@@ -6961,6 +7056,11 @@ if (document.readyState === 'loading') {
 } else {
   initSessionsTab();
   initAboutButton();
+}
+
+// Restore the side-by-side view if it was active last session.
+if (localStorage.getItem('side-by-side-view') === 'true') {
+  setSideBySide(true);
 }
 
 console.log('Renderer initialized');
