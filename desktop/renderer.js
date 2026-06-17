@@ -322,8 +322,54 @@ function hasActiveWebviewWork() {
     || anySlotBusy;
 }
 
+let mergeChevronBusyOffTimer = null;
+let mergeChevronCoolTimer = null;
+// Pulse the merge-panel chevron while webviews are working. Adding the class is
+// immediate; removing it is debounced so brief busy gaps between phases (e.g.
+// waiting -> scraping) don't restart the animation from 0.
+//
+// Stopping a CSS animation does NOT trigger the base transition (the declared
+// opacity never changed), so it would snap. Instead we freeze the current
+// animated opacity/filter inline, drop the class, then on the next frame set
+// the inline values back to dim — that inline change the transition DOES pick
+// up, fading the pulse out smoothly.
+function setMergeChevronBusy(busy) {
+  const btn = document.getElementById('toggle-merge-panel-btn');
+  if (!btn) return;
+  if (busy) {
+    if (mergeChevronBusyOffTimer) {
+      clearTimeout(mergeChevronBusyOffTimer);
+      mergeChevronBusyOffTimer = null;
+    }
+    if (mergeChevronCoolTimer) {
+      clearTimeout(mergeChevronCoolTimer);
+      mergeChevronCoolTimer = null;
+    }
+    btn.style.opacity = '';
+    btn.style.filter = '';
+    btn.classList.add('llm-busy');
+  } else if (!mergeChevronBusyOffTimer && btn.classList.contains('llm-busy')) {
+    mergeChevronBusyOffTimer = setTimeout(() => {
+      mergeChevronBusyOffTimer = null;
+      const cs = getComputedStyle(btn);
+      btn.style.opacity = cs.opacity;
+      btn.style.filter = cs.filter && cs.filter !== 'none' ? cs.filter : 'brightness(1) saturate(1)';
+      btn.classList.remove('llm-busy'); // stop the pulse, holding the frozen value
+      void btn.offsetWidth;             // commit the frozen value before changing it
+      btn.style.opacity = '0.3';        // transition (0.7s) now fades to dim
+      btn.style.filter = 'brightness(1) saturate(1)';
+      mergeChevronCoolTimer = setTimeout(() => {
+        btn.style.opacity = '';
+        btn.style.filter = '';
+        mergeChevronCoolTimer = null;
+      }, 800);
+    }, 1200);
+  }
+}
+
 function reportBackgroundWorkState() {
   const busy = hasActiveWebviewWork();
+  setMergeChevronBusy(busy);
   if (busy === lastReportedBackgroundWorkActive) return;
   lastReportedBackgroundWorkActive = busy;
   window.electronAPI?.setAppBackgroundWorkActive?.(busy);

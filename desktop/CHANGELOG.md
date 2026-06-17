@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.112.7
+
+- Merge-panel toggle restyled into a round neon disc: layered radial gradients
+  in the brand violet/blue (ported from the web `.landing-neon-bg`), each
+  fading to its own transparent hue (no grey banding), softened by a radial
+  mask so the disc has no hard edge. `clip-path` keeps the transparent corners
+  click-through so the slot buttons underneath stay clickable, and the disc's
+  right half tucks under the panel edge (`#side-panel` z-index above it).
+- The disc is dim and static by default, and pulses bright (opacity + filter
+  brightness) only while webviews are waiting for replies, driven by the
+  existing `hasActiveWebviewWork()` signal via a new `llm-busy` class.
+  Class removal is debounced (1.2s) so brief busy gaps between phases don't
+  restart the animation, and the pulse fades out smoothly by freezing the
+  animated value inline before transitioning back to dim.
+
 ## 1.112.6
 
 - Fix: loading a saved session now also restores its project. Bridge `list`
