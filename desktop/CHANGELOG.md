@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.112.10
+
+- Per-slot Split button is now a two-chevron icon instead of the word "Split":
+  chevrons point apart when inactive and face each other when the slot is split.
+  `updateExpandedSlotControls()` no longer overwrites the button text, just
+  toggles `.active` (CSS swaps the chevron pair).
+
 ## 1.112.9
 
 - Layout controls reshuffled: the per-slot "Split" button is back in each slot

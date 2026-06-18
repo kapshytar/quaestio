@@ -2833,8 +2833,8 @@ function updateExpandedSlotControls() {
     const isFullActive = expandedSlot === slot;
 
     if (splitBtn) {
+      // Icon button — toggle state via class/title only, keep the SVG.
       splitBtn.classList.toggle('active', isSplitActive);
-      splitBtn.textContent = isSplitActive ? 'Exit' : 'Split';
       splitBtn.title = isSplitActive ? 'Return to all slots' : 'Split this slot to its side';
       splitBtn.setAttribute('aria-pressed', isSplitActive ? 'true' : 'false');
     }
