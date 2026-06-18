@@ -1,24 +1,20 @@
 <sub>Q U A E S T I O&nbsp;&nbsp;|&nbsp;&nbsp;V E R I T Y _ D B</sub>
 
-# The only AI aggregator where YOUR OWN accounts and YOUR OWN history actually work!
+# Quaestio + VerityDB
 
-<p>
-Love web ChatGPT, Gemini, Grok and Claude? Want to know what they ALL think?<br>
-&nbsp;&nbsp;&nbsp;&nbsp;Want to COMPARE answers SIDE BY SIDE fast? NOT via API, via REAL WEB UI?<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;With YOUR OWN account, YOUR OWN history, YOUR OWN context?
-</p>
+**Ask EVERY major AI at once — then ACTUALLY KEEP and ORGANIZE what they tell you.**
 
-**Welcome, you FOUND IT!!!**
+I use ChatGPT, Claude, Gemini and Grok every day. And every day, the SAME PAIN:
+my best thinking ended up SCATTERED across a dozen chat tabs — impossible to BRANCH,
+impossible to PRUNE, impossible to FIND a week later. NOT ONE provider lets you
+STRUCTURE your AI work: branch a project, fork a note, throw out the JUNK and keep
+only the GOLD.
 
-<p>
-You also can MERGE everything so you don't need to read every LLM's answer separately.<br>
-&nbsp;&nbsp;&nbsp;&nbsp;Also you can JUMP BACK into PREVIOUS DISCUSSIONS across multiple LLMs,<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;manage REAL PROJECTS and subPROJECTS,<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;run FAST SEARCH,<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;compress giant model outputs into CLEAN COMPACT notes.
-</p>
+So I BUILT IT MYSELF.
 
-**It is all here.**
+Quaestio fires ONE prompt at ALL of them — your REAL WEB ACCOUNTS, not APIs — MERGES
+the answers, and turns the whole thing into a KNOWLEDGE GRAPH — a 2-WAY MULTIBRANCHING
+TREE YOU OWN.
 
 <sub>No API metering for the chats — the slots are the real provider websites with your real account state (subscriptions, settings, memory). A key is needed only for the optional Merge step: bring your own — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, or any OpenAI-compatible endpoint.</sub>
 
@@ -52,18 +48,18 @@ cd desktop && npm install && npm start
 
 Mobile builds: see [`mobile/README.md`](mobile/README.md).
 
-## Verity — the knowledge base behind it *(invite-only for now)*
+## The part NO PROVIDER gives you: STRUCTURE YOU OWN *(invite-only for now)*
 
-Quaestio can run fully standalone and local. But signed-in, it syncs into **Verity** ([veritydb.vercel.app](https://veritydb.vercel.app)) — the part that turns aggregated answers into something you keep:
+Quaestio runs fully standalone and local. Signed in, every aggregated Q&A flows into **VerityDB** ([veritydb.vercel.app](https://veritydb.vercel.app)) — NOT a chat log, a LIVING GRAPH / 2-WAY MULTIBRANCHING TREE:
 
 - **Every aggregated Q&A becomes a note** — the question, each model's answer, and the merged synthesis land as a structured record, automatically.
-- **Graph-hierarchical structure at your fingertips** — notes form a tree (question → answers → merges → clarifications), reorganizable by drag, with tag trees on top.
-- **You cannot lose a chat.** Search across everything you ever aggregated — full-text, instant. The conversation you half-remember from a month ago is three keystrokes away.
-- **Multi-project binding** — the same knowledge base slices into separate projects/workspaces.
-- **Cross-device** — sessions and notes sync between desktop, iOS, Android and the web app.
-- **Notion export** — push takeaways or whole notes into Notion via a server-side OAuth integration.
+- **A GRAPH / 2-WAY MULTIBRANCHING TREE, not a folder.** The SAME note lives in MANY trees at once; a sub-project belongs to SEVERAL projects. Your work is NOT trapped in one linear thread — it's a WEB you re-slice however you think.
+- **CONTINUE ANY VECTOR INSTANTLY.** Grab ANY note, ANYWHERE in the graph, and pick that exact thread back up across ALL the models — a month-old line of thinking is THREE KEYSTROKES away.
+- **PRUNE TO THE GOLD.** Kill the noise, keep the signal, restructure by drag, tag-trees on top. What's left is a CLEAN MAP of what you actually learned — NOT a pile of transcripts.
+- **You CANNOT lose a chat.** INSTANT full-text search across EVERYTHING you ever aggregated.
+- **CROSS-DEVICE + Notion export.** Desktop, iOS, Android and web stay synced; push takeaways straight into Notion via server-side OAuth.
 
-Accounts are currently **invite-only**: request access at [veritydb.vercel.app](https://veritydb.vercel.app). Until approved — and entirely by choice — the apps work in local mode: everything stays on your device, zero backend calls.
+I built this because NO AI PROVIDER gives you ANY of it. Accounts are INVITE-ONLY for now — request access at [veritydb.vercel.app](https://veritydb.vercel.app). Until approved (and by CHOICE anytime) the apps run FULLY LOCAL: everything stays on device, ZERO backend calls.
 
 ## ⚠️ KNOWN ISSUES
 
