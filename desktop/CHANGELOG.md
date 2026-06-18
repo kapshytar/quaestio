@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.113.0
+
+- UI polish pass (batch 1, desktop), all low-risk token/glyph cleanups:
+  - Accent unified: the legacy `#0066ff` focus/accent blue (focus rings, Send /
+    clarification buttons, blockquote, session hover, resize handle) now uses
+    `var(--accent)` (brand neon violet).
+  - Stop button and merge-status error color moved off hardcoded `#ff4444` to
+    `var(--danger)`; muted `#666` text → `var(--text-faint)`.
+  - Text-as-icons replaced with glyphs: config-tabs collapse `v`/`^` → `▾`/`▴`;
+    Sessions/Projects close `x` → `×`; bottom side-by-side `◫` → a two-column SVG.
+  - Added a `button:focus-visible` outline ring (keyboard focus was invisible).
+  - Fixed invalid `font-weight: 750/650` → `700/600`.
+
 ## 1.112.10
 
 - Per-slot Split button is now a two-chevron icon instead of the word "Split":
