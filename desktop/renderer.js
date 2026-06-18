@@ -2816,21 +2816,21 @@ if (showAddressBar === 'false') {
 applyAddressBarVisibility();
 
 function updateExpandedSlotControls() {
+  const sideBySideBtn = document.getElementById('side-by-side-btn');
+  if (sideBySideBtn) {
+    sideBySideBtn.classList.toggle('active', sideBySideActive);
+    sideBySideBtn.title = sideBySideActive
+      ? 'Exit side-by-side view'
+      : 'Side-by-side: enabled chats as vertical columns';
+    sideBySideBtn.setAttribute('aria-pressed', sideBySideActive ? 'true' : 'false');
+  }
+
   document.querySelectorAll('.webview-header[data-slot]').forEach(header => {
     const slot = header.dataset.slot;
     const splitBtn = header.querySelector('[data-action="split-toggle"]');
     const expandBtn = header.querySelector('[data-action="expand-toggle"]');
-    const sideBtn = header.querySelector('[data-action="side-by-side-toggle"]');
     const isSplitActive = leftSplitSlot === slot || rightSplitSlot === slot;
     const isFullActive = expandedSlot === slot;
-
-    if (sideBtn) {
-      sideBtn.classList.toggle('active', sideBySideActive);
-      sideBtn.title = sideBySideActive
-        ? 'Exit side-by-side view'
-        : 'Side-by-side: enabled chats as vertical columns';
-      sideBtn.setAttribute('aria-pressed', sideBySideActive ? 'true' : 'false');
-    }
 
     if (splitBtn) {
       splitBtn.classList.toggle('active', isSplitActive);
@@ -3180,13 +3180,6 @@ document.querySelectorAll('.webview-header').forEach(header => {
   if (splitBtn) {
     splitBtn.addEventListener('click', () => {
       setSplitSlot(slot);
-    });
-  }
-
-  const sideBySideBtn = header.querySelector('[data-action="side-by-side-toggle"]');
-  if (sideBySideBtn) {
-    sideBySideBtn.addEventListener('click', () => {
-      toggleSideBySide();
     });
   }
 
@@ -3661,6 +3654,12 @@ SLOTS.forEach(slot => {
   const container = document.querySelector(`.webview-header[data-slot="${slot}"]`)?.closest('.webview-container');
   container?.addEventListener('mousedown', () => setFocusedSearchScope(slot));
   webviews[slot]?.addEventListener('focus', () => setFocusedSearchScope(slot));
+});
+
+// Bottom-panel side-by-side button: toggles the vertical-columns view.
+const sideBySideBtn = document.getElementById('side-by-side-btn');
+sideBySideBtn?.addEventListener('click', () => {
+  toggleSideBySide();
 });
 
 sidePanelContentEl?.addEventListener('mousedown', () => {

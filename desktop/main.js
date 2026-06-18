@@ -92,9 +92,10 @@ function extractRecentChangelogEntries(markdown, limit = 30) {
   let section = '';
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    const versionMatch = line.match(/^##\s+\[([^\]]+)\]/);
+    // Accept both "## [1.2.3]" and bare "## 1.2.3" headings.
+    const versionMatch = line.match(/^##\s+(?:\[([^\]]+)\]|(.+?))\s*$/);
     if (versionMatch) {
-      version = versionMatch[1].trim();
+      version = (versionMatch[1] || versionMatch[2] || '').trim();
       section = '';
       continue;
     }

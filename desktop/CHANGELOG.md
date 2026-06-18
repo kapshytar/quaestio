@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.112.9
+
+- Layout controls reshuffled: the per-slot "Split" button is back in each slot
+  header (alongside Full), and the global side-by-side "◫" toggle moved out of
+  the slot headers onto the bottom panel next to the slot chips (it's a global
+  view switch, so it belongs on the global bar).
+- Fix: the in-app About → Changelog listing showed every entry as "Unversioned"
+  — the parser only matched bracketed `## [x.y.z]` headings, but this changelog
+  uses bare `## x.y.z`. The parser now accepts both forms.
+
 ## 1.112.8
 
 - New "◫" side-by-side view toggle next to Split in each slot header: lays out

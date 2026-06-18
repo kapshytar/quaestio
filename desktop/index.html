@@ -188,9 +188,7 @@
     }
     .zoom-btn:hover { background: #444; }
     .split-slot-btn, .expand-slot-btn { min-width: 34px; }
-    .sidebyside-slot-btn { min-width: 26px; font-size: 13px; line-height: 1; }
-    .split-slot-btn.active, .expand-slot-btn.active,
-    .sidebyside-slot-btn.active { border-color: #777; background: #444; color: #fff; }
+    .split-slot-btn.active, .expand-slot-btn.active { border-color: #777; background: #444; color: #fff; }
     .zoom-level { font-size: 10px; color: #999; min-width: 35px; text-align: center; }
     .webview-wrapper { flex: 1; position: relative; background: #000; }
     #bottom-panel {
@@ -1191,6 +1189,12 @@
       border-color: var(--border-strong);
       color: var(--text);
     }
+    #side-by-side-btn { font-size: 15px; line-height: 1; padding-inline: 9px; }
+    #side-by-side-btn.active {
+      background: rgba(var(--accent-rgb), 0.16);
+      border-color: rgba(var(--accent-rgb), 0.46);
+      color: var(--accent-strong);
+    }
     .service-select:focus,
     .webview-url:focus,
     #message-input:focus,
@@ -1223,8 +1227,7 @@
     }
     .zoom-level { color: var(--text-faint); }
     .split-slot-btn.active,
-    .expand-slot-btn.active,
-    .sidebyside-slot-btn.active {
+    .expand-slot-btn.active {
       background: rgba(var(--accent-rgb), 0.16);
       border-color: rgba(var(--accent-rgb), 0.46);
       color: var(--accent-strong);
@@ -1743,11 +1746,6 @@
       padding-inline: 3px;
       font-size: 9px;
     }
-    .webview-header .sidebyside-slot-btn {
-      min-width: 22px;
-      padding-inline: 3px;
-      font-size: 12px;
-    }
     @media (max-width: 720px) {
       .about-meta-grid {
         grid-template-columns: 1fr;
@@ -1782,9 +1780,7 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
-            <button class="zoom-btn sidebyside-slot-btn" data-action="side-by-side-toggle" title="Side-by-side: enabled chats as vertical columns">&#9707;</button>
-            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
-            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
+            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
         </div>
         <div class="webview-wrapper"><webview id="webview-slot-1" partition="persist:shared" allowpopups></webview></div>
@@ -1812,9 +1808,7 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
-            <button class="zoom-btn sidebyside-slot-btn" data-action="side-by-side-toggle" title="Side-by-side: enabled chats as vertical columns">&#9707;</button>
-            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
-            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
+            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
         </div>
         <div class="webview-wrapper"><webview id="webview-slot-2" partition="persist:shared" allowpopups></webview></div>
@@ -1842,9 +1836,7 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
-            <button class="zoom-btn sidebyside-slot-btn" data-action="side-by-side-toggle" title="Side-by-side: enabled chats as vertical columns">&#9707;</button>
-            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
-            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
+            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
         </div>
         <div class="webview-wrapper"><webview id="webview-slot-3" partition="persist:shared" allowpopups></webview></div>
@@ -1872,9 +1864,7 @@
             <span class="zoom-level">70%</span>
             <button class="zoom-btn" data-action="zoom-in">+</button>
             <button class="zoom-btn" data-action="zoom-reset">&#10226;</button>
-            <button class="zoom-btn sidebyside-slot-btn" data-action="side-by-side-toggle" title="Side-by-side: enabled chats as vertical columns">&#9707;</button>
-            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>
-            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
+            <button class="zoom-btn split-slot-btn" data-action="split-toggle" title="Split this slot to its side">Split</button>            <button class="zoom-btn expand-slot-btn" data-action="expand-toggle" title="Expand this slot">Full</button>
           </div>
         </div>
         <div class="webview-wrapper"><webview id="webview-slot-4" partition="persist:shared" allowpopups></webview></div>
@@ -1889,6 +1879,7 @@
           <div class="toggle" draggable="true" data-slot="slot-2" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-2" checked><span class="toggle-icon" aria-hidden="true"></span><label for="toggle-slot-2" id="label-slot-2">Slot 2</label><span class="status" id="status-slot-2"></span></div>
           <div class="toggle" draggable="true" data-slot="slot-3" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-3" checked><span class="toggle-icon" aria-hidden="true"></span><label for="toggle-slot-3" id="label-slot-3">Slot 3</label><span class="status" id="status-slot-3"></span></div>
           <div class="toggle" draggable="true" data-slot="slot-4" title="Drag onto another slot to swap"><input type="checkbox" id="toggle-slot-4" checked><span class="toggle-icon" aria-hidden="true"></span><label for="toggle-slot-4" id="label-slot-4">Slot 4</label><span class="status" id="status-slot-4"></span></div>
+          <button class="control-btn" id="side-by-side-btn" title="Side-by-side: enabled chats as vertical columns">&#9707;</button>
           <button class="control-btn project-toolbar-btn" id="project-toolbar-btn" title="Projects" aria-label="Projects">
             <svg class="project-toolbar-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3.5 6.5h6l2 2h9v9a2 2 0 0 1-2 2h-15v-13Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
