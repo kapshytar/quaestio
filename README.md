@@ -51,7 +51,7 @@ Mobile builds: see [`mobile/README.md`](mobile/README.md).
 The hero above is the *what*. Here is the *how*. Quaestio runs fully standalone and local; signed in, every aggregated Q&A flows into **VerityDB** ([veritydb.vercel.app](https://veritydb.vercel.app)) and becomes part of the graph you own. In practice that means:
 
 - 📝 **Capture is automatic.** The question, each model's answer, and the merged synthesis land as one structured note. No copy paste.
-- 🎯 **It extracts the signal, not just stores it.** Mark a line `[ ]` todo, `💡` insight, or `!` direction and Quaestio pulls those into structured takeaways you can act on. *(Coming: instruct the models to answer in that markup once, and every aggregated answer auto generates its own TODOs, insights and next steps.)*
+- 🎯 **Mark it once, see it everywhere.** Put `[ ]` todo, `💡` insight, or `!` direction on a line (with an optional blockquote under it for detail) and VerityDB surfaces every marked line across your whole graph as one takeaways list. *(Coming: have the merge model emit that markup for you, so the takeaways fill themselves in.)*
 - 🔍 **You cannot lose a chat.** Instant full text search across everything you ever captured.
 - 📱 **Cross-device + Notion export.** Desktop, iOS, Android and web stay synced; push takeaways straight into Notion via server-side OAuth.
 - 🔒 **Yours by default.** Until you request access (and by choice anytime after) the apps run fully local: everything stays on device, zero backend calls.
