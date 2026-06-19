@@ -2,21 +2,19 @@
 
 # Quaestio + VerityDB
 
-**Ask EVERY major AI at once — then ACTUALLY KEEP and ORGANIZE what they tell you.**
+**🕸️ Your AI work, finally STRUCTURED: a knowledge GRAPH you OWN, not another multi-LLM aggregator.**
 
-I use ChatGPT, Claude, Gemini and Grok every day. And every day, the SAME PAIN:
-my best thinking ended up SCATTERED across a dozen chat tabs — impossible to BRANCH,
-impossible to PRUNE, impossible to FIND a week later. NOT ONE provider lets you
-STRUCTURE your AI work: branch a project, fork a note, throw out the JUNK and keep
-only the GOLD.
+Broadcasting one prompt to ChatGPT, Claude, Gemini and Grok at once is just the CAPTURE step. The real PRODUCT is what you KEEP:
 
-So I BUILT IT MYSELF.
+- 🌳 **A multibranching tree, not folders.** The SAME note lives in MANY trees at once; a subproject belongs to several projects.
+- ⚡ **Resume anything, instantly.** Grab any thread, across every model, a month later, and pick it right back up.
+- ✨ **Prune to the GOLD.** Branch a project, fork a note, throw out the noise, keep only what matters.
+- 🔍 **Never lose a chat.** Full text search across everything you ever captured.
+- 📱 **Yours everywhere.** Desktop, iOS, Android and web, always in sync.
 
-Quaestio fires ONE prompt at ALL of them — your REAL WEB ACCOUNTS, not APIs — MERGES
-the answers, and turns the whole thing into a KNOWLEDGE GRAPH — a 2-WAY MULTIBRANCHING
-TREE YOU OWN.
+I use these models every day, and not one of them lets you STRUCTURE the work like this. So I built it myself. 🛠️
 
-<sub>No API metering for the chats — the slots are the real provider websites with your real account state (subscriptions, settings, memory). A key is needed only for the optional Merge step: bring your own — DeepSeek, OpenAI, Gemini, Claude, OpenRouter, or any OpenAI-compatible endpoint.</sub>
+<sub>💡 Aggregation is only the METHOD, not the point. Firing one prompt at every model is just how the tree fills up: each prompt runs against your own signed in model accounts, so you keep your real history, memory and subscriptions (not a stripped down API), and every answer is merged into a structured note you can branch, link, prune and search. The GOAL is bigger than the broadcast: an owned, growing knowledge layer that outlives any single chat. The Merge step uses your own key: DeepSeek, OpenAI, Gemini, Claude, OpenRouter, or any OpenAI compatible endpoint.</sub>
 
 🔗 **Waitlist / early access: [veritydb.vercel.app](https://veritydb.vercel.app)**
 
