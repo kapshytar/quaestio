@@ -46,18 +46,17 @@ cd desktop && npm install && npm start
 
 Mobile builds: see [`mobile/README.md`](mobile/README.md).
 
-## The part NO PROVIDER gives you: STRUCTURE YOU OWN *(invite-only for now)*
+## How the knowledge layer works *(invite-only for now)*
 
-Quaestio runs fully standalone and local. Signed in, every aggregated Q&A flows into **VerityDB** ([veritydb.vercel.app](https://veritydb.vercel.app)) — NOT a chat log, a LIVING GRAPH / 2-WAY MULTIBRANCHING TREE:
+The hero above is the *what*. Here is the *how*. Quaestio runs fully standalone and local; signed in, every aggregated Q&A flows into **VerityDB** ([veritydb.vercel.app](https://veritydb.vercel.app)) and becomes part of the graph you own. In practice that means:
 
-- 📝 **Every aggregated Q&A becomes a note** — the question, each model's answer, and the merged synthesis land as a structured record, automatically.
-- 🕸️ **A GRAPH / 2-WAY MULTIBRANCHING TREE, not a folder.** The SAME note lives in MANY trees at once; a sub-project belongs to SEVERAL projects. Your work is NOT trapped in one linear thread — it's a WEB you re-slice however you think.
-- ⚡ **CONTINUE ANY VECTOR INSTANTLY.** Grab ANY note, ANYWHERE in the graph, and pick that exact thread back up across ALL the models — a month-old line of thinking is THREE KEYSTROKES away.
-- ✨ **PRUNE TO THE GOLD.** Kill the noise, keep the signal, restructure by drag, tag-trees on top. What's left is a CLEAN MAP of what you actually learned — NOT a pile of transcripts.
-- 🔍 **You CANNOT lose a chat.** INSTANT full-text search across EVERYTHING you ever aggregated.
-- 📱 **CROSS-DEVICE + Notion export.** Desktop, iOS, Android and web stay synced; push takeaways straight into Notion via server-side OAuth.
+- 📝 **Capture is automatic.** The question, each model's answer, and the merged synthesis land as one structured note. No copy paste.
+- 🎯 **It extracts the signal, not just stores it.** Mark a line `[ ]` todo, `💡` insight, or `!` direction and Quaestio pulls those into structured takeaways you can act on. *(Coming: instruct the models to answer in that markup once, and every aggregated answer auto generates its own TODOs, insights and next steps.)*
+- 🔍 **You cannot lose a chat.** Instant full text search across everything you ever captured.
+- 📱 **Cross-device + Notion export.** Desktop, iOS, Android and web stay synced; push takeaways straight into Notion via server-side OAuth.
+- 🔒 **Yours by default.** Until you request access (and by choice anytime after) the apps run fully local: everything stays on device, zero backend calls.
 
-I built this because NO AI PROVIDER gives you ANY of it. Accounts are INVITE-ONLY for now — request access at [veritydb.vercel.app](https://veritydb.vercel.app). Until approved (and by CHOICE anytime) the apps run FULLY LOCAL: everything stays on device, ZERO backend calls.
+Accounts are invite only for now. Request access at [veritydb.vercel.app](https://veritydb.vercel.app).
 
 ## ⚠️ KNOWN ISSUES
 
