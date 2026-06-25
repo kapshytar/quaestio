@@ -54,7 +54,7 @@
         app:tabGravity="fill"
         app:tabIndicatorColor="@color/accent"
         app:tabTextColor="@color/text_secondary"
-        app:tabSelectedTextColor="@color/accent"
+        app:tabSelectedTextColor="@color/tab_selected_text"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toEndOf="@id/projectTabContainer"
         app:layout_constraintEnd_toStartOf="@id/btnSettings" />

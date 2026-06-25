@@ -1518,7 +1518,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         val textView = findTextViewInTab(tab.view) ?: return
         if (isSelected) {
             // Soft highlight without neon shadow layer
-            textView.setTextColor(ContextCompat.getColor(this, R.color.action_secondary))
+            textView.setTextColor(ContextCompat.getColor(this, R.color.tab_selected_text))
             textView.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
         } else {
             // Normal unselected text color

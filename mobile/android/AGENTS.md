@@ -2,10 +2,11 @@
 
 ## Core Logic & "Secrets"
 
-### 1. Message Injection (MessageInjector.kt)
+### 1. Message Injection (shared JS)
 - **Problem**: Perplexity and DeepSeek use complex React/Next.js states. Simply setting `textarea.value` often results in the UI thinking the input is empty, keeping the "Send" button disabled.
 - **Solution**: Use `document.execCommand('insertText', false, value)`. This is the only reliable way to trigger internal React listeners.
 - **Fallbacks**: Always dispatch `InputEvent`, `input`, and `change` events after filling.
+- **Implementation**: Injection now goes through `shared/js/sendMessage.js` (namespace `globalThis.VeritySharedSendMessage.run(payload)`) and `shared/js/attachFile.js` (namespace `globalThis.VeritySharedAttachFile.run({})`). Android loads these from assets via the `prepareSharedStreamingJs` Gradle Copy task and invokes them from `ChatFragment.kt` via `buildSharedSendScript` / `buildSharedAttachScript`. `MessageInjector.kt` has been removed.
 
 ### 2. Sending Strategies
 - **Perplexity**: Often requires `Ctrl+Enter` or a click on a button with classes like `.bg-super` or `.bg-sideBar`.
@@ -29,7 +30,7 @@
 - `ChatFragment.kt`: WebView host. Contains JS scraping logic.
 - `MergeFragment.kt`: The synthesis UI. Uses `MergeApiClient` for LLM calls.
 - `ServiceConfig.kt`: The source of truth for service URLs and CSS selectors.
-- `MessageInjector.kt`: Generator for all JS injection scripts.
+- `shared/js/sendMessage.js` + `shared/js/attachFile.js`: Shared JS for send/attach injection (invoked from `ChatFragment.kt` via `buildSharedSendScript` / `buildSharedAttachScript`). `MessageInjector.kt` has been removed.
 
 ## Common Pitfalls
 - **WebView User Agent**: We strip `; wv` to bypass Google Login blocks. Do not spoof the UA entirely to avoid Cloudflare loops.

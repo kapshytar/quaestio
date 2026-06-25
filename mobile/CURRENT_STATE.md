@@ -76,9 +76,9 @@
 - Android-first is temporary because the original mobile implementation started there first.
 - The intended steady state is shared-first, where shared mobile logic becomes the source of truth for both Android and iOS.
 - Shared JS boundaries are still being finalized against real provider behavior.
-- First shared-surface candidates are now identified:
-  - `android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
-  - scrape/injection fragments currently embedded in `android/app/src/main/java/com/chataggregator/app/ChatFragment.kt`
+- First shared-surface candidates have been extracted:
+  - `MessageInjector.kt` — removed; send/attach injection now lives in `shared/js/sendMessage.js` + `shared/js/attachFile.js`, invoked from `ChatFragment.kt` via `buildSharedSendScript` / `buildSharedAttachScript`.
+  - scrape/injection fragments from `android/app/src/main/java/com/chataggregator/app/ChatFragment.kt`
 - First pass of shared reply scraping is now extracted into `shared/js/scrapeReply.js`.
 - iOS `send-to-all` is wired and validated across primary providers (ChatGPT, Claude, Gemini, Grok).
 - Inactive slots are now preloaded and slot switching no longer forces a reload back to the service home URL.

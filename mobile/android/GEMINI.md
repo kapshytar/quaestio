@@ -56,7 +56,7 @@ app/src/main/java/com/chataggregator/app/
 ├── ChatPagerAdapter.kt      — FragmentStateAdapter: 4 ChatFragments + 1 MergeFragment
 ├── SlotManager.kt           — SharedPrefs wrapper for slot service IDs, enabled states, custom URLs
 ├── ServiceConfig.kt         — Defines 6 AI services (id, name, url, CSS selectors for input/button)
-├── MessageInjector.kt       — Builds JS code to fill chat input + click Send in each WebView
+├── (MessageInjector.kt removed — send/attach injection moved to shared/js/sendMessage.js + shared/js/attachFile.js, invoked from ChatFragment.kt)
 ├── MergeApiClient.kt        — HTTP calls to 8 merge providers. Enum MergeProvider has defaults
 ├── SettingsManager.kt       — SharedPrefs for app-wide settings (logging, merge enabled, etc.)
 ├── CookieImporter.kt        — Imports cookies from Cookie-Editor JSON into Android CookieManager
@@ -102,7 +102,9 @@ User types message → taps Send
   → MainActivity.sendToAll()
   → iterates enabled slots with 90ms stagger
   → ChatFragment.sendMessage(text)
-    → MessageInjector.buildSendScript(text, selectors, serviceId)
+    → ChatFragment.buildSharedSendScript(text, selectors, serviceId)
+      → loads shared/js/sendMessage.js from assets
+      → calls globalThis.VeritySharedSendMessage.run({message, serviceId, selectors:{textarea,contenteditable,button}})
     → WebView.evaluateJavascript(jsCode)
     → JS fills input via React-compatible native setter + InputEvent dispatch
     → JS finds and clicks Send button (scored by aria-label/testid/proximity)
@@ -189,9 +191,11 @@ API dispatch in `merge()`:
 
 Fallback chain: on 429/rate-limit errors, tries next model from `fallbackModelsRaw` list.
 
-## WebView JS injection (MessageInjector.kt)
+## WebView JS injection (shared/js/sendMessage.js + shared/js/attachFile.js)
 
-`buildSendScript(message, selectors, serviceId)` returns a JS IIFE that:
+`MessageInjector.kt` has been removed. Send/attach injection is now handled by shared JS loaded from assets.
+
+`ChatFragment.buildSharedSendScript(message, selectors, serviceId)` builds a script that loads `shared/js/sendMessage.js` and calls `globalThis.VeritySharedSendMessage.run({message, serviceId, selectors:{textarea,contenteditable,button}})`. The shared JS:
 1. Searches for chat input: tries service-specific CSS selectors first, then generic fallback (bottom-most visible textarea or contenteditable)
 2. Fills input using `Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, text)` + `new Event('input', {bubbles: true})` (React-compatible)
 3. For contenteditable: `el.innerHTML = text` + dispatch InputEvent
@@ -199,7 +203,7 @@ Fallback chain: on 429/rate-limit errors, tries next model from `fallbackModelsR
 5. Clicks button (or dispatches Enter keypress as fallback)
 6. Returns JSON result
 
-`buildAttachFileScript(serviceId)` clicks the file input or attach button to trigger the OS file chooser.
+`ChatFragment.buildSharedAttachScript(serviceId)` loads `shared/js/attachFile.js` and calls `globalThis.VeritySharedAttachFile.run({})` to click the file input or attach button and trigger the OS file chooser.
 
 ## WebView reply scraping (ChatFragment.kt)
 

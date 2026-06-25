@@ -9,43 +9,17 @@ Define the Android-origin logic that should move into `shared/js/` and later be 
 
 ## Best First Candidates
 
-### 1. Message send injection
+### 1. Message send injection — DONE
 
-Current source:
+- `MessageInjector.kt` removed. Logic now lives in `shared/js/sendMessage.js` (`globalThis.VeritySharedSendMessage.run(payload)`).
+- Android: `ChatFragment.buildSharedSendScript(...)` loads the script from assets and invokes it.
+- iOS: consumes the same JS via `WKWebView.evaluateJavaScript`.
 
-- `android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
+### 2. File attach injection — DONE
 
-Why it is a good first move:
-
-- it already generates platform-agnostic DOM JavaScript
-- native Android code here is mostly string assembly / wrapper glue
-- iOS can consume the same JS via `WKWebView.evaluateJavaScript`
-
-Expected split:
-
-- `shared/js/sendMessage.js`
-  - pure DOM logic
-  - service-specific button/input heuristics
-- Android wrapper
-  - passes message + selectors into the JS runtime
-- iOS wrapper
-  - passes message + selectors into the JS runtime
-
-### 2. File attach injection
-
-Current source:
-
-- `android/app/src/main/java/com/chataggregator/app/MessageInjector.kt`
-
-Why it is a good candidate:
-
-- DOM search/click logic is already platform-neutral
-- only native file picker glue should stay platform-specific
-
-Expected split:
-
-- `shared/js/attachFile.js`
-- thin Android/iOS wrappers around file chooser handling
+- `MessageInjector.kt` removed. Logic now lives in `shared/js/attachFile.js` (`globalThis.VeritySharedAttachFile.run({})`).
+- Android: `ChatFragment.buildSharedAttachScript(...)` loads the script from assets and invokes it.
+- iOS: thin native wrapper around file chooser handling; DOM click logic is shared.
 
 ### 3. Reply scrape / prompt candidate extraction
 
@@ -81,9 +55,9 @@ Target split:
 
 ## Recommended Extraction Order
 
-1. `sendMessage.js`
-2. `attachFile.js`
-3. `scrapeReply.js`
+1. `sendMessage.js` — DONE
+2. `attachFile.js` — DONE
+3. `scrapeReply.js` (first pass extracted; native wrapper work still pending)
 4. shared payload/JSON schema notes under `shared/contracts/`
 
 ## Practical Rule

@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.8.0
+
+- **Fix: prompt not sent to Claude on mobile** (Android + iOS). The injector
+  filled claude.ai's ProseMirror composer via `execCommand('insertText')` +
+  generic events, which does not reliably update the editor's React/ProseMirror
+  model inside a WebView — so the Send button stayed `aria-disabled` and a
+  synthetic Enter was a no-op (text appeared but never submitted; desktop was
+  unaffected). `shared/js/sendMessage.js` now mirrors the working desktop path:
+  contenteditable fill uses a real `InputEvent('beforeinput', {inputType:
+  'insertText', data})` (multiline via synthetic paste so line breaks survive),
+  `findSendButton` rejects `aria-disabled="true"`, and submit is mutually
+  exclusive (click XOR `requestSubmit` XOR Enter).
+- **Consolidation: Android off its divergent injector.** Deleted
+  `MessageInjector.kt` (a Kotlin copy of the send/attach JS) and routed Android
+  through the same shared `shared/js/sendMessage.js` + `shared/js/attachFile.js`
+  that iOS already uses (loaded from assets via the `prepareSharedStreamingJs`
+  gradle task, invoked from `ChatFragment`), so both clients share one
+  implementation. Docs updated to match.
+- **Android tabs: selected tab text purple → pastel pink** (`tab_selected_text`
+  #F9A8D4 day / #F472B6 night), on the Merge tab and the LLM tabs; removed the
+  old `action_secondary` purple.
+
+
 ## 2.7.3
 
 - Fix: restoring a saved session now also restores its project. The bridge

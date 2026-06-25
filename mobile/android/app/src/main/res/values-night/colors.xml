@@ -25,6 +25,6 @@
     <color name="merge_toggle_on">#A78BFA</color>
     <color name="merge_toggle_off">#A3A3A3</color>
     <color name="action_primary">#7BA4F4</color> <!-- Reverted back to pastel blue -->
-    <color name="action_secondary">#C4B5FD</color>
+    <color name="tab_selected_text">#F472B6</color> <!-- Pastel pink (was purple #C4B5FD) -->
     <color name="action_set">#FBBF24</color>
 </resources>

@@ -395,7 +395,7 @@ class ChatFragment : Fragment(), Findable {
 
         val service = ServiceConfig.getById(currentServiceId)
         val selectors = service?.selectors ?: ServiceSelectors()
-        val script = MessageInjector.buildSendScript(message, selectors, currentServiceId)
+        val script = buildSharedSendScript(message, selectors)
         val detailedLogs = SettingsManager.isDetailedLoggingEnabled(requireContext())
         val finish: (Boolean) -> Unit = { success ->
             sendInProgress = false
@@ -529,6 +529,47 @@ $shared
         return requireContext().assets.open("scrapeReply.js").bufferedReader().use { it.readText() }
     }
 
+    // Inject + submit via the shared cross-client script (same source iOS uses), so
+    // Android no longer maintains a divergent Kotlin copy of the send/fill logic.
+    private fun buildSharedSendScript(message: String, selectors: ServiceSelectors): String {
+        val shared = requireContext().assets.open("sendMessage.js").bufferedReader().use { it.readText() }
+        val payloadJson = gson.toJson(
+            mapOf(
+                "message" to message,
+                "serviceId" to currentServiceId,
+                "selectors" to mapOf(
+                    "textarea" to selectors.textarea,
+                    "contenteditable" to selectors.contenteditable,
+                    "button" to selectors.button
+                )
+            )
+        )
+        return """
+$shared
+(function() {
+  try {
+    return globalThis.VeritySharedSendMessage.run($payloadJson);
+  } catch (e) {
+    return JSON.stringify({ success: false, error: e.message || String(e) });
+  }
+})();
+""".trimIndent()
+    }
+
+    private fun buildSharedAttachScript(): String {
+        val shared = requireContext().assets.open("attachFile.js").bufferedReader().use { it.readText() }
+        return """
+$shared
+(function() {
+  try {
+    return globalThis.VeritySharedAttachFile.run({});
+  } catch (e) {
+    return JSON.stringify({ success: false, error: e.message || String(e) });
+  }
+})();
+""".trimIndent()
+    }
+
     fun isStillGenerating(callback: (Boolean) -> Unit) {
         if (!webViewReady) { callback(false); return }
         val serviceIdJson = gson.toJson(currentServiceId)
@@ -591,7 +632,7 @@ $shared
     }
 
     private fun triggerAttachScript(uri: Uri, allowRetry: Boolean) {
-        val script = MessageInjector.buildAttachFileScript()
+        val script = buildSharedAttachScript()
         retainedWebView?.evaluateJavascript(script) { result ->
             try {
                 val cleaned = result?.trim()?.removeSurrounding("\"")?.replace("\\\"", "\"")?.replace("\\\\", "\\")

@@ -30,25 +30,70 @@
     return best;
   }
 
-  function fillInput(el, value) {
-    el.focus();
-    document.execCommand('selectAll', false, null);
-    if (!document.execCommand('insertText', false, value)) {
-      if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
-        el.value = value;
-      } else {
-        el.innerText = value;
-      }
+  function dispatchInputEvents(el, value) {
+    try {
+      el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: value }));
+    } catch (_) {
+      el.dispatchEvent(new Event('beforeinput', { bubbles: true, cancelable: true }));
     }
-    ['input', 'change', 'beforeinput'].forEach((name) => {
-      el.dispatchEvent(new Event(name, { bubbles: true }));
-    });
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Unidentified' }));
+  }
+
+  function pasteIntoContentEditable(el, value) {
+    const sel = window.getSelection ? window.getSelection() : null;
+    if (sel) {
+      try {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      } catch (_) {}
+    }
+    const dt = new DataTransfer();
+    dt.setData('text/plain', value);
+    el.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+  }
+
+  function fillInput(el, value, serviceId) {
+    el.focus();
+
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+      document.execCommand('selectAll', false, null);
+      if (!document.execCommand('insertText', false, value)) {
+        el.value = value;
+      }
+      ['input', 'change', 'beforeinput'].forEach((name) => {
+        el.dispatchEvent(new Event(name, { bubbles: true }));
+      });
+      return;
+    }
+
+    // Contenteditable (Claude/Gemini/Grok). Mirror the working desktop path:
+    // execCommand('insertText') fills the DOM but doesn't reliably update the
+    // editor's ProseMirror/React model in a WebView, so the send button stays
+    // aria-disabled and Enter is a no-op. A real InputEvent('beforeinput')
+    // registers; multiline needs a synthetic paste so line breaks survive
+    // (textContent alone collapses them). Gemini's Quill editor uses textContent.
+    const hasNewline = String(value || '').indexOf('\n') !== -1;
+    if (serviceId === 'gemini' || !hasNewline) {
+      el.textContent = value;
+      dispatchInputEvents(el, value);
+      return;
+    }
+    try {
+      pasteIntoContentEditable(el, value);
+    } catch (_) {
+      el.textContent = value;
+      dispatchInputEvents(el, value);
+    }
   }
 
   function findSendButton(inputEl, selectors) {
     for (const sel of selectors.button || []) {
       const btn = document.querySelector(sel);
-      if (btn && !btn.disabled && isVisible(btn)) return btn;
+      if (btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' && isVisible(btn)) return btn;
     }
 
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
@@ -56,7 +101,7 @@
     let maxScore = -1;
 
     buttons.forEach((btn) => {
-      if (btn.disabled || !isVisible(btn)) return;
+      if (btn.disabled || btn.getAttribute('aria-disabled') === 'true' || !isVisible(btn)) return;
       if (btn.closest('article')) return;
 
       const cls = btn.className || '';
@@ -115,9 +160,9 @@
       }
 
       if (serviceId === 'perplexity') {
-        fillInput(inputEl, ' ');
+        fillInput(inputEl, ' ', serviceId);
         setTimeout(() => {
-          fillInput(inputEl, message);
+          fillInput(inputEl, message, serviceId);
           setTimeout(() => {
             const btn = findSendButton(inputEl, selectors);
             if (btn) {
@@ -129,12 +174,17 @@
           }, 400);
         }, 100);
       } else {
-        fillInput(inputEl, message);
+        fillInput(inputEl, message, serviceId);
         const delay = serviceId === 'deepseek' ? 400 : 150;
         setTimeout(() => {
           const btn = findSendButton(inputEl, selectors);
-          if (btn) btn.click();
-          pressEnter(inputEl, false);
+          if (btn) {
+            btn.click();
+          } else if (inputEl.form && typeof inputEl.form.requestSubmit === 'function') {
+            inputEl.form.requestSubmit();
+          } else {
+            pressEnter(inputEl, false);
+          }
         }, delay);
       }
 
