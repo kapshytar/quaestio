@@ -103,6 +103,10 @@ class ChatFragment : Fragment(), Findable {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createConfiguredWebView(context: Context): WebView {
+        // Allow chrome://inspect remote DOM debugging on debug builds only.
+        if (BuildConfig.DEBUG) {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
         return WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,

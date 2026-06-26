@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.8.1
+
+- **Fix (real): Claude prompt still not submitting on Android.** 2.8.0's
+  `InputEvent('beforeinput')` + synthetic-paste fill carries `isTrusted=false`,
+  which claude.ai's TipTap/ProseMirror editor ignores inside Android System
+  WebView — the model stayed empty, Send never rendered, and submit then clicked
+  the wrong button (the account/Settings button: `findSendButton`'s generic
+  scoring gave any icon button `+20` for `path d=`, so it won). Verified on-device
+  via CDP. Fixes in `shared/js/sendMessage.js`: (1) non-Gemini contenteditable
+  now fills via `document.execCommand('insertText')` — the only path that routes
+  through the editor's real `beforeinput` and updates the model (multiline → `<p>`
+  paragraph breaks); paste/textContent kept as fallbacks. (2) `findSendButton`
+  drops the over-broad `path d=` heuristic and hard-negatives composer-adjacent
+  controls (settings/account/voice/attach/model/…) so Send can't be mistaken.
+  (3) submit polls for the enabled Send button instead of a single fixed-delay
+  click. Applies to iOS too (shared injector).
+- Debug builds enable `WebView.setWebContentsDebuggingEnabled(true)` for
+  `chrome://inspect` on-device DOM debugging (no-op in release).
+
+
 ## 2.8.0
 
 - **Fix: prompt not sent to Claude on mobile** (Android + iOS). The injector

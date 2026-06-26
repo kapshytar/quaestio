@@ -70,16 +70,22 @@
       return;
     }
 
-    // Contenteditable (Claude/Gemini/Grok). Mirror the working desktop path:
-    // execCommand('insertText') fills the DOM but doesn't reliably update the
-    // editor's ProseMirror/React model in a WebView, so the send button stays
-    // aria-disabled and Enter is a no-op. A real InputEvent('beforeinput')
-    // registers; multiline needs a synthetic paste so line breaks survive
-    // (textContent alone collapses them). Gemini's Quill editor uses textContent.
-    const hasNewline = String(value || '').indexOf('\n') !== -1;
-    if (serviceId === 'gemini' || !hasNewline) {
+    // Contenteditable. Gemini's Quill editor syncs from textContent + input
+    // events. Claude/Grok use a ProseMirror/TipTap editor whose model is NOT
+    // updated by textContent, a synthetic paste, or a synthetic InputEvent in
+    // an Android System WebView — they all carry isTrusted=false, so the editor
+    // ignores them: the DOM may show text but the model stays empty, Send never
+    // renders, and Enter is a no-op. document.execCommand('insertText') is the
+    // one path that routes through the editor's real beforeinput pipeline and
+    // updates the model (verified on-device via CDP). '\n' becomes paragraph
+    // breaks, so multiline survives. Paste/textContent remain as fallbacks.
+    if (serviceId === 'gemini') {
       el.textContent = value;
       dispatchInputEvents(el, value);
+      return;
+    }
+    document.execCommand('selectAll', false, null);
+    if (document.execCommand('insertText', false, value)) {
       return;
     }
     try {
@@ -112,7 +118,9 @@
       if (aria === 'submit' || aria === 'send' || aria === 'ask') score += 50;
       else if (aria.includes('submit') || aria.includes('send') || aria.includes('ask') || aria.includes('query')) score += 30;
 
-      if (html.includes('arrow-up') || html.includes('m12 19') || html.includes('path d=')) score += 20;
+      // Real send-icon signals only. A blanket 'path d=' match scored every
+      // icon button (Settings, voice, attach…) and let the account button win.
+      if (html.includes('arrow-up') || html.includes('m12 19')) score += 20;
       if (cls.includes('bg-button-bg') || cls.includes('bg-super')) score += 15;
 
       if (inputEl) {
@@ -121,6 +129,8 @@
       }
 
       if (aria.includes('edit') || aria.includes('new') || aria.includes('thread') || cls.includes('side') || cls.includes('thread')) score -= 100;
+      // Composer-adjacent buttons that must never be mistaken for Send.
+      if (/setting|account|profile|sidebar|menu|voice|record|attach|file|connector|model|incognito|upgrade|gift|help|language|log out|search/.test(aria)) score -= 100;
 
       if (score > maxScore) {
         maxScore = score;
@@ -175,17 +185,30 @@
         }, 100);
       } else {
         fillInput(inputEl, message, serviceId);
-        const delay = serviceId === 'deepseek' ? 400 : 150;
-        setTimeout(() => {
+        // The editor may take a moment to enable Send after the paste lands.
+        // Poll findSendButton (it rejects disabled/aria-disabled buttons) until
+        // it returns an enabled button, then click. Only after the editor never
+        // enables it within the window do we fall back to form submit / Enter.
+        const startDelay = serviceId === 'deepseek' ? 400 : 150;
+        const maxWait = serviceId === 'deepseek' ? 2000 : 1500;
+        const start = Date.now();
+        const trySubmit = () => {
           const btn = findSendButton(inputEl, selectors);
           if (btn) {
             btn.click();
-          } else if (inputEl.form && typeof inputEl.form.requestSubmit === 'function') {
+            return;
+          }
+          if (Date.now() - start < maxWait) {
+            setTimeout(trySubmit, 100);
+            return;
+          }
+          if (inputEl.form && typeof inputEl.form.requestSubmit === 'function') {
             inputEl.form.requestSubmit();
           } else {
             pressEnter(inputEl, false);
           }
-        }, delay);
+        };
+        setTimeout(trySubmit, startDelay);
       }
 
       return JSON.stringify({ success: true, via: 'shared-send-message-v1', sent: true });
