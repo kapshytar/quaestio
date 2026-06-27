@@ -1,0 +1,4 @@
+theme: jekyll-theme-cayman
+title: "Quaestio + VerityDB — your multi-LLM work, structured into a knowledge graph you own"
+description: "Broadcast one prompt to ChatGPT, Claude, Gemini & Grok at once, then keep every answer in a multibranching knowledge graph you own. Desktop, iOS, Android & web. Free & open-source."
+show_downloads: true
