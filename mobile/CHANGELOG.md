@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.8.7
+
+- **Fix (iOS): session list now shows the whole question chain, not just one card**
+  A session is a chain of questions (q1 → q2 → q3 …) under one `session_id`. The note-backed
+  session list built one `SessionSnapshot` per `note_type=1` question root, then **collapsed them
+  by `note_session_id`, keeping only the latest** — so a multi-question session (e.g. #277)
+  appeared as a single card on iPhone while desktop/Android correctly showed every turn. The list
+  now keys by `noteId` (one card per question root), matching the cross-client contract. No data
+  or backend change — `aggregator_sessions` rows and the note chain were always intact.
+  Cross-client rule now documented for **all** clients incl. iOS in
+  `docs/domains/SESSION_AND_INGEST_RULES.md` §"Session = Full Question Chain" and
+  `CODEX_BOOTSTRAP.md` (Android already implemented this; iOS converged onto it).
+
+
 ## 2.8.6
 
 - **Fix (iOS + Android): re-asking a question or re-opening an old session no longer spawns duplicate sessions**

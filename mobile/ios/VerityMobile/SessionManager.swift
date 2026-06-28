@@ -580,9 +580,12 @@ final class SessionManager {
             }
         }
 
-        // Build snapshots from note rows, then deduplicate by session ID
-        // to keep only the latest note's snapshot per session.
-        var bySession: [Int: SessionSnapshot] = [:]
+        // Build ONE snapshot per note_type=1 question root so the FULL session
+        // chain is shown (q1 → q2 → q3 …), matching desktop/web. Keying by
+        // session_id collapsed a multi-question chain to a single card — that was
+        // the "iPhone shows only one #277" bug. See
+        // docs/domains/SESSION_AND_INGEST_RULES.md "Session = Full Question Chain".
+        var byNote: [String: SessionSnapshot] = [:]
         print("[loadNoteBacked] notes rows=\(rows.count), rpc snapshots=\(snapshots.count)")
         print("[loadNoteBacked] snapshotByNote keys=\(snapshotByNote.keys.sorted())")
         print("[loadNoteBacked] latestBySession keys=\(latestSnapshotBySession.keys.sorted())")
@@ -656,14 +659,11 @@ final class SessionManager {
                     ?? rpcFallback?.projectTagId
             )
 
-            // Keep only the latest snapshot per session
-            let existing = bySession[rowSessionId]
-            if existing == nil || snapshot.timestamp >= existing!.timestamp {
-                bySession[rowSessionId] = snapshot
-            }
+            // One card per question note — do NOT collapse the chain by session.
+            byNote[noteId] = snapshot
         }
 
-        return Array(bySession.values)
+        return Array(byNote.values)
             .sorted(by: { $0.timestamp > $1.timestamp })
             .prefix(maxSessions)
             .map { $0 }
