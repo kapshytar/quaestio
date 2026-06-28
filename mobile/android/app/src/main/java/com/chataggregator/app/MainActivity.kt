@@ -2379,13 +2379,39 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             .toSet()
         if (enabledSlotKeys.isEmpty()) return false
 
-        val currentFingerprint = buildSessionFingerprint(collectCurrentSlotUrls(), enabledSlotKeys)
-        if (currentFingerprint.isBlank()) return false
+        // Returns the conversation key and whether the slot's URL is a real,
+        // loaded conversation (not home/landing/blank). Real-ness uses the shared
+        // `conversationKeyTailIsReal` so this matcher and
+        // `fingerprintHasRealConversation` cannot drift apart. Mirrors iOS keyInfo().
+        fun keyInfo(slotKey: String, urls: Map<String, String>): Pair<String, Boolean> {
+            val slotIndex = slotKey.removePrefix("slot-").toIntOrNull()?.minus(1) ?: return "" to false
+            val rawUrl = urls[slotKey]?.trim().orEmpty()
+            val serviceId = ServiceConfig.detectServiceByUrl(rawUrl)
+                ?: slotManager.getServiceId(slotIndex)
+                ?: "unknown"
+            val key = extractConversationKey(serviceId, rawUrl)
+            return key to (rawUrl.isNotBlank() && conversationKeyTailIsReal(key))
+        }
+
+        val currentSlotUrls = collectCurrentSlotUrls()
 
         return sessionManager.getAllSessions().any { snapshot ->
-            snapshot.sessionId == activeSessionId &&
-                snapshot.noteId == activeNoteId &&
-                buildSessionFingerprint(snapshot.slotUrls, enabledSlotKeys) == currentFingerprint
+            if (snapshot.sessionId != activeSessionId ||
+                snapshot.noteId?.trim().orEmpty() != activeNoteId
+            ) return@any false
+
+            var agreements = 0
+            for (slotKey in enabledSlotKeys) {
+                val (curKey, curIsReal) = keyInfo(slotKey, currentSlotUrls)
+                val (snapKey, snapIsReal) = keyInfo(slotKey, snapshot.slotUrls)
+                if (!curIsReal || !snapIsReal) continue
+                if (curKey == snapKey) agreements++ else return@any false
+            }
+            // Require a loaded slot to agree. A new chat (slots still on home /
+            // a different real conversation) yields no agreement → not a match →
+            // a new session is correctly minted (preserves the guard against
+            // attaching a new question to a stale session).
+            agreements >= 1
         }
     }
 
@@ -2404,12 +2430,24 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             val serviceId = ServiceConfig.detectServiceByUrl(rawUrl)
                 ?: slotManager.getServiceId(slotIndex)
                 ?: "unknown"
-            val tail = extractConversationKey(serviceId, rawUrl).substringAfter(":", "")
-            tail.isNotBlank() &&
-                tail != "temporary" &&
-                tail != "no-url" &&
-                !tail.contains("://")
+            conversationKeyTailIsReal(extractConversationKey(serviceId, rawUrl))
         }
+    }
+
+    // True when a conversation key's tail is an actual chat id (a single
+    // [a-z0-9_-] token of length >= 6), not a service home page (host has a dot),
+    // a multi-segment path (has a slash), an origin fallback (has "://"), a
+    // Temporary Chat, or a blank slot. extractConversationKey can fall back to a
+    // host/origin for a home page; that must NOT count as a real conversation, or
+    // a slot still loading the home page would look like a real-but-different
+    // conversation and wrongly clear the session. IGNORE_CASE because Android
+    // does not lowercase the extracted id (iOS does). Single source of truth
+    // shared by the session matcher and fingerprintHasRealConversation. Mirrors iOS.
+    private val realConversationTailRegex = Regex("^[a-z0-9][a-z0-9_-]{5,}$", RegexOption.IGNORE_CASE)
+    private fun conversationKeyTailIsReal(key: String): Boolean {
+        val tail = key.substringAfter(":", "")
+        if (tail.isBlank() || tail == "temporary" || tail == "no-url") return false
+        return realConversationTailRegex.matches(tail)
     }
 
     private fun buildSessionFingerprint(slotUrls: Map<String, String>, slotKeys: Set<String>): String {

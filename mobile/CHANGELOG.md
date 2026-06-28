@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.8.6
+
+- **Fix (iOS + Android): re-asking a question or re-opening an old session no longer spawns duplicate sessions**
+  After an app relaunch the WebViews reload their chats from scratch and a slot is briefly on
+  the service home page; the session match compared the whole fingerprint, failed against that
+  transient home URL, and cleared the session — so the next Collect minted a new
+  `note_session_id` instead of appending. The match now keys on the per-slot conversation id,
+  ignores slots not yet on a real conversation, and only treats a slot that loaded a *different*
+  real conversation as a context switch. Re-asking the same question, and continuing in a
+  re-opened old session, now append to the existing session; a genuinely new chat still
+  correctly starts a new session. Shared `conversationKeyTailIsReal` predicate so the matcher
+  and the restore guard cannot drift.
+
 ## 2.8.5
 
 - **Fix (cross-client parity): nested/indented bullets now render on iOS**

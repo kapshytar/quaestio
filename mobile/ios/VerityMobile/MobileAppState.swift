@@ -1526,13 +1526,45 @@ final class MobileAppState: ObservableObject {
         let enabledSlotKeys = Set(slots.filter(\.isEnabled).map { "slot-\($0.id)" })
         if enabledSlotKeys.isEmpty { return false }
 
-        let currentFingerprint = buildSessionFingerprint(slotURLs: currentSessionSnapshotSlotURLs(), slotKeys: enabledSlotKeys)
-        if currentFingerprint.isEmpty { return false }
+        // Per-slot conversation key + whether the slot currently points at a real,
+        // loaded conversation (vs a home/landing/blank page mid-load). Real-ness
+        // uses the shared `conversationKeyTailIsReal` so this matcher and
+        // `fingerprintHasRealConversation` cannot drift apart.
+        func keyInfo(forSlotKey slotKey: String, in urls: [String: String]) -> (key: String, isReal: Bool) {
+            let slotIndex = Int(slotKey.replacingOccurrences(of: "slot-", with: ""))
+            let serviceId = slots.first(where: { $0.id == slotIndex })?.serviceId ?? "unknown"
+            let rawURL = urls[slotKey]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let key = extractConversationKey(serviceId: serviceId, rawURL: rawURL)
+            return (key, !rawURL.isEmpty && conversationKeyTailIsReal(key))
+        }
+
+        // On iOS the WKWebViews are recreated on cold start / app relaunch and on
+        // `loadSession` re-navigation, so a Collect can fire before a slot has
+        // navigated back to its conversation URL — its live URL is briefly the
+        // service home page. Comparing the whole fingerprint then fails and the
+        // session is wrongly cleared (→ a new note_session_id). Instead, ignore
+        // slots that are not yet on a real conversation and require at least one
+        // loaded slot to agree with the stored snapshot; a slot pointing at a
+        // *different* real conversation is treated as a genuine context switch.
+        let currentSlotURLs = currentSessionSnapshotSlotURLs()
 
         return sessionManager.getAllSessions().contains { snapshot in
-            snapshot.sessionId == activeSessionId &&
-                (snapshot.noteId ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == activeNoteId &&
-                buildSessionFingerprint(slotURLs: snapshot.slotURLs, slotKeys: enabledSlotKeys) == currentFingerprint
+            guard snapshot.sessionId == activeSessionId,
+                  (snapshot.noteId ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == activeNoteId
+            else { return false }
+
+            var agreements = 0
+            for slotKey in enabledSlotKeys {
+                let current = keyInfo(forSlotKey: slotKey, in: currentSlotURLs)
+                let stored = keyInfo(forSlotKey: slotKey, in: snapshot.slotURLs)
+                guard current.isReal, stored.isReal else { continue }
+                if current.key == stored.key { agreements += 1 } else { return false }
+            }
+            // Require a loaded slot to agree. A new chat (slots still on home /
+            // a different real conversation) yields no agreement → not a match →
+            // a new session is correctly minted (preserves the 4b6e5a1 guard
+            // against attaching a new question to a stale session).
+            return agreements >= 1
         }
     }
 
@@ -1548,9 +1580,23 @@ final class MobileAppState: ObservableObject {
             let slotIndex = Int(slotKey.replacingOccurrences(of: "slot-", with: ""))
             let serviceId = slots.first(where: { $0.id == slotIndex })?.serviceId ?? "unknown"
             let key = extractConversationKey(serviceId: serviceId, rawURL: rawURL)
-            let tail = key.contains(":") ? String(key[key.index(after: key.firstIndex(of: ":")!)...]) : ""
-            return !tail.isEmpty && tail != "temporary" && tail != "no-url" && !tail.contains("://")
+            return conversationKeyTailIsReal(key)
         }
+    }
+
+    /// True when a conversation key's tail is an actual chat id (a single
+    /// [a-z0-9_-] token of length >= 6), not a service home page (host has a
+    /// dot), a multi-segment path (has a slash), an origin fallback (has "://"),
+    /// a Temporary Chat, or a blank slot. `extractConversationKey` falls back to
+    /// the bare host for a home page ("chatgpt:chatgpt.com"); that must NOT count
+    /// as a real conversation, or a slot still loading the home page would look
+    /// like a real-but-different conversation and wrongly clear the session.
+    /// Single source of truth shared by the session matcher and
+    /// `fingerprintHasRealConversation` so the two cannot drift.
+    private func conversationKeyTailIsReal(_ key: String) -> Bool {
+        let tail = key.contains(":") ? String(key[key.index(after: key.firstIndex(of: ":")!)...]) : ""
+        if tail.isEmpty || tail == "temporary" || tail == "no-url" { return false }
+        return tail.range(of: #"^[a-z0-9][a-z0-9_-]{5,}$"#, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     private func buildSessionFingerprint(slotURLs: [String: String], slotKeys: Set<String>) -> String {
