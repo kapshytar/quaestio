@@ -4,6 +4,7 @@ import WebKit
 enum MergeAggregationSlotStatus: String {
     case ready
     case waiting
+    case collected
     case error
 }
 
@@ -693,7 +694,13 @@ final class MobileAppState: ObservableObject {
                     mergeAggregationSnapshots = lastResult.snapshots
                 }
                 if lastResult.responses.count >= enabledSlots.count {
-                    mergeAggregationSummary = "All \(enabledSlots.count) slot(s) ready. Collecting now..."
+                    let collectedSnapshots = makeCollectedSnapshots(enabledSlots: enabledSlots, responses: lastResult.responses)
+                    mergeAggregationSnapshots = collectedSnapshots
+                    // BUG-A FIX: prior code set "Collecting now..." here then returned
+                    // immediately, leaving the summary permanently stuck at that transient
+                    // string. Android MergeFragment shows "Collected N/M" after the loop;
+                    // mirror that terminal state so the user sees a settled status.
+                    mergeAggregationSummary = "Collected \(lastResult.responses.count)/\(enabledSlots.count) source reply(s)"
                     appendIngestEvent("collect-success all-ready responses=\(lastResult.responses.count)")
                     return lastResult.responses
                 }
@@ -715,6 +722,8 @@ final class MobileAppState: ObservableObject {
         }
 
         if mergeAggregationPolicy.allowPartialResults && lastResult.responses.count >= minimumRepliesRequired {
+            let collectedSnapshots = makeCollectedSnapshots(enabledSlots: enabledSlots, responses: lastResult.responses)
+            mergeAggregationSnapshots = collectedSnapshots
             mergeAggregationSummary = "Collected \(lastResult.responses.count)/\(enabledSlots.count) source reply(s)"
             appendIngestEvent("collect-partial responses=\(lastResult.responses.count)/\(enabledSlots.count)")
         } else {
@@ -725,6 +734,21 @@ final class MobileAppState: ObservableObject {
         return mergeAggregationPolicy.allowPartialResults && lastResult.responses.count >= minimumRepliesRequired
             ? lastResult.responses
             : [:]
+    }
+
+    /// Builds post-collect snapshots mirroring Android's MergeFragment behaviour:
+    /// after replies are collected, slots that contributed a response become
+    /// `.collected`; the rest become `.error`. Mirrors:
+    ///   status = if (hasResponse) AggregationSlotStatus.COLLECTED else AggregationSlotStatus.ERROR
+    private func makeCollectedSnapshots(enabledSlots: [SlotState], responses: [String: String]) -> [MergeAggregationSlotSnapshot] {
+        enabledSlots.map { slot in
+            let hasResponse = responses[slot.title] != nil
+            return MergeAggregationSlotSnapshot(
+                id: slot.id,
+                title: slot.title,
+                status: hasResponse ? .collected : .error
+            )
+        }
     }
 
     func resetMergeConversation() {
@@ -1267,7 +1291,9 @@ final class MobileAppState: ObservableObject {
 
     private func formatAggregationSummary(_ snapshots: [MergeAggregationSlotSnapshot]) -> String {
         guard !snapshots.isEmpty else { return "Slot aggregation idle" }
-        let readyCount = snapshots.filter { $0.status == .ready }.count
+        // Mirror Android AggregationStatusFormatter.summarize:
+        // READY and COLLECTED both count as "ready" for summary purposes.
+        let readyCount = snapshots.filter { $0.status == .ready || $0.status == .collected }.count
         let waitingCount = snapshots.filter { $0.status == .waiting }.count
         let errorCount = snapshots.filter { $0.status == .error }.count
 

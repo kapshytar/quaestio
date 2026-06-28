@@ -1,5 +1,148 @@
 # Changelog
 
+## 2.8.5
+
+- **Fix (cross-client parity): nested/indented bullets now render on iOS**
+  (`ios/VerityMobile/MergeMarkdownView.swift`).
+  The block parser trimmed each line before detecting bullets, discarding leading
+  indentation — so every sub-bullet collapsed to the top level and the output
+  looked flat, while the desktop/web canon showed indented sub-lists. Added
+  `bulletIndentLevel(of:)` (leading whitespace → nesting level; tab = 4 columns,
+  ~2 columns per level, capped at 3); `.bullet` now carries a `level`, renders
+  with `level * 18pt` leading indent and a tiered marker (•/◦/▪) mirroring the
+  canon. Bold/italic/code inside bullets continues to work (unchanged inline path).
+  Not yet verified by an Xcode build/on-device run — needs a build + device pass.
+
+
+## 2.8.4
+
+Three corrections to the 2.8.2/2.8.3 fixes that addressed the right symptoms at
+the wrong layer and therefore did not work on a real device.
+
+- **Correction (BUG C): bold/italic/code Markdown now actually renders on iOS**
+  (`ios/VerityMobile/MergeMarkdownView.swift`).
+  The 2.8.2 fix added `inlineMarkdown(_:)` (using `AttributedString(markdown:)`)
+  and changed block renders to `Text(inlineMarkdown(text))` — correct direction,
+  wrong detail.  Every block also carried a `.font(.system(size:weight:))` view
+  modifier.  On iOS, a view-level `.font()` modifier applied to a `Text` built
+  from an `AttributedString` overrides every per-run `inlinePresentationIntent`
+  the markdown parser set on the string: all runs receive the uniform modifier
+  weight, so `**bold**` renders at `.medium` just like plain text.  Desktop's
+  `<strong>` is a CSS property independent of the container font; Markwon on
+  Android sets span-level typeface flags that survive the layout pass.  Fix:
+  replaced `inlineMarkdown(_:)` with a version that accepts `baseSize`/
+  `baseWeight` parameters and bakes a SwiftUI `Font` attribute directly into each
+  `AttributedString` run (`.stronglyEmphasized` → `.bold`, `.emphasized` →
+  `.italic()`, `.code` → `.monospaced`), then removed the competing `.font(weight:)`
+  modifiers from all block and table-cell renders.  Heading size+weight are now
+  baked via a new `inlineMarkdownHeading(_:level:)` helper so bold-inside-heading
+  still works.  `headingFont(for:)` removed (no longer needed).  Table cells
+  benefit from the same fix — they already called `inlineMarkdown()` and now
+  also get per-run bold/italic/code.
+  Not yet verified by an Xcode build/on-device run — needs a build + device
+  pass before release.
+
+- **Correction (BUG A): aggregation summary no longer stuck on "Collecting now..."**
+  (`ios/VerityMobile/MobileAppState.swift`).
+  The 2.8.2 fix added a `.collected` case to `MergeAggregationSlotStatus` and
+  wired `makeCollectedSnapshots` to set it — the per-slot chips were correct.
+  But `mergeAggregationSummary` (the line of text directly below the Collect
+  button that the user actually reads) was set to
+  `"All N slot(s) ready. Collecting now..."` at the all-ready early-exit point
+  inside `collectLatestRepliesForMerge`, and then the function immediately
+  returned without updating it.  The partial-result path at the bottom of the
+  same function correctly wrote `"Collected N/M source reply(s)"`, but that path
+  is only reached when polling times out; the common all-ready success path was
+  never fixed.  Fix: changed the all-ready early-exit to write
+  `"Collected N/N source reply(s)"` before returning, matching Android
+  `AggregationStatusFormatter` which summarizes a post-collect state the same way.
+  Not yet verified by an Xcode build/on-device run — needs a build + device
+  pass before release.
+
+- **Correction (BUG B): pasted merge API key now actually persists across restart**
+  (`ios/VerityMobile/MergeView.swift`).
+  The 2.8.2 fix added Keychain save/load correctly, but two ordering bugs meant
+  the loaded key was never used in practice.  (1) `selectedProviderId` (a
+  `@State` var) was never written to UserDefaults, so on cold launch
+  `bootstrapDefaults` always resolved it from `catalog?.defaultProviderId` — if
+  the user had previously selected a non-default provider, the Keychain load in
+  `syncProviderDefaults` ran against the wrong provider id and returned "".
+  (2) `usePreinstalledKey` defaults to `true`; `syncProviderDefaults` only reset
+  it to `false` for providers where `!supportsPreinstalledKey`.  For providers
+  that do support a preinstalled key (e.g. DeepSeek), `usePreinstalledKey` stayed
+  `true` even after loading a non-empty custom key, which (a) kept the API key
+  field hidden so `.onChange` never fired to re-save, and (b) caused
+  `resolvedApiKey()` to return the preinstalled key instead of the Keychain-loaded
+  custom key, silently discarding it.  Fix: `selectedProviderId` is now persisted
+  to UserDefaults on every change and restored in `bootstrapDefaults` before the
+  Keychain load runs; `syncProviderDefaults` now sets `usePreinstalledKey = false`
+  whenever a non-empty custom key is found in the Keychain for the selected
+  provider, regardless of provider type.  Mirrors Android where selecting a
+  provider always loads the saved key into the field.  Provider id is stored in
+  plain UserDefaults (non-secret); key stays in Keychain.
+  Not yet verified by an Xcode build/on-device run — needs a build + device
+  pass before release.
+
+
+## 2.8.3
+
+- **Fix (cross-client parity): GFM pipe-tables now render on iOS** (`ios/VerityMobile/MergeMarkdownView.swift`).
+  The custom block parser recognised headings, bullets, fenced code, `---`, and
+  inline bold/italic/code (added in 2.8.2) but had no table case; any pipe-table
+  in merge output fell through to `.paragraph` and was shown as raw `| … |` text.
+  Added GFM pipe-table parsing: a pipe row followed immediately by a
+  separator row (`| --- | --- |`) is recognised as a table header; all
+  subsequent pipe rows become body rows. Rendered as a SwiftUI `VStack`/`HStack`
+  grid with a tinted header background (`AppTheme.panelStrong` at 45% opacity),
+  a bold header/body divider, alternating-row shading for body rows, and a
+  rounded-rectangle border — matching the visual style of the existing block
+  elements. Cell content goes through the existing `inlineMarkdown()` helper so
+  bold/italic/code inside cells is rendered. Android already renders tables via
+  `Markwon` + `TablePlugin` (correctly wired); desktop renders tables via
+  `marked.js` (GFM on by default). This change brings iOS to parity with both.
+  Not yet verified by an Xcode build/on-device run (no macOS/Xcode in the
+  authoring environment) — needs a build + device pass before release.
+
+
+## 2.8.2
+
+- **Fix (iOS parity): merge slot status stuck on "collecting", never "collected".**
+  iOS `MergeAggregationSlotStatus` (`MobileAppState.swift`) only had
+  `ready`/`waiting`/`error` and never mirrored Android's
+  `AggregationSlotStatus.COLLECTED`, so after a successful collect the per-slot
+  chips never flipped to a done state (Android already did via
+  `AggregationState.kt`). Added the `collected` case (rawValue `"collected"`,
+  matching Android's code), rebuilt the post-collect snapshots so slots that
+  returned a reply become `.collected` and the rest `.error` (mirrors
+  `MergeFragment`'s post-collect loop) at both the all-ready and partial return
+  paths, and updated `formatAggregationSummary` to count `collected` as ready
+  (mirrors `AggregationStatusFormatter.summarize`). UI label/color in
+  `MergeView.swift` handle the new case.
+- **Fix (iOS parity): pasted merge API key not persisted across app restart.**
+  The merge key lived only in `MergeView`'s in-memory `@State`, with no store
+  write, so every relaunch lost it; Android already persists per-provider in
+  `EncryptedSharedPreferences`. iOS now persists the key in the Keychain — the
+  same secure store and access pattern as `AuthStore` (session tokens), service
+  `verity.merge.apikey`, per-provider account `merge.<providerId>.api_key`,
+  `kSecAttrAccessibleAfterFirstUnlock`. Saved on edit, loaded on launch and on
+  provider switch, and consumed by `resolvedApiKey` -> `MergeApiClient`. Not
+  cleared on sign-out (matches Android, where merge keys live outside the auth
+  session store).
+- **Fix (iOS parity): merge output did not render inline Markdown (bold).**
+  `MergeMarkdownView` parsed block syntax (headings, bullets, fences) but
+  rendered each block as plain `Text(String)`, so `**bold**`/`*italic*`/inline
+  code showed their literal markers; Android renders the same output through
+  Markwon. iOS now converts inline spans via `AttributedString(markdown:)`
+  (`.inlineOnlyPreservingWhitespace`, `.returnPartiallyParsedIfPossible`, with a
+  plain-text fallback) for paragraph/heading/bullet text; code blocks stay
+  verbatim. Note: Markwon tables on Android are still not at parity on iOS
+  (tracked separately).
+- Scope: all three are iOS-native catch-ups to existing Android behavior; no
+  Android or shared code changed. Not yet verified by an Xcode build/on-device
+  run (no macOS/Xcode in the authoring environment) — needs a build + device
+  pass before release.
+
+
 ## 2.8.1
 
 - **Fix (real): Claude prompt still not submitting on Android.** 2.8.0's

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Security
 
 struct MergeView: View {
     @EnvironmentObject private var appState: MobileAppState
@@ -11,6 +12,13 @@ struct MergeView: View {
     @State private var clarificationInstructions: String = ""
     @State private var selectedProviderId: String = ""
     @State private var usePreinstalledKey = true
+
+    // UserDefaults key for persisting the selected provider across cold launches.
+    // Non-secret (just a provider id string like "deepseek_api"), so UserDefaults
+    // is appropriate — mirrors Android where the selected provider is stored in
+    // plain SharedPreferences alongside the other merge config (only the key
+    // itself lives in EncryptedSharedPreferences / Keychain).
+    private static let selectedProviderIdDefaultsKey = "verity.merge.selectedProviderId"
     @State private var showAdvancedConfig = false
     @State private var showInstructionConfig = false
     @State private var showActivityDetails = false
@@ -164,7 +172,11 @@ struct MergeView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .onChange(of: selectedProviderId) { _, _ in
+                .onChange(of: selectedProviderId) { _, newId in
+                    // BUG-B FIX: persist the chosen provider id to UserDefaults so
+                    // bootstrapDefaults() on the next cold launch restores it before
+                    // loading the Keychain key (which is keyed per-provider).
+                    UserDefaults.standard.set(newId, forKey: Self.selectedProviderIdDefaultsKey)
                     syncProviderDefaults()
                 }
 
@@ -178,6 +190,9 @@ struct MergeView: View {
 
                 if !selectedProvider.supportsPreinstalledKey || !usePreinstalledKey {
                     compactField("API key", text: $apiKey, secure: true)
+                        .onChange(of: apiKey) { _, newValue in
+                            mergeApiKeySave(providerId: selectedProviderId, key: newValue)
+                        }
                 }
 
                 if shouldShowAdvancedConfig(for: selectedProvider) {
@@ -322,7 +337,21 @@ struct MergeView: View {
     private func bootstrapDefaults() {
         guard !providers.isEmpty else { return }
         if selectedProviderId.isEmpty {
-            selectedProviderId = catalog?.defaultProviderId ?? providers.first?.id ?? ""
+            // BUG-B FIX (part 1): restore the provider id that was persisted on the
+            // previous launch BEFORE loading the Keychain key. Prior code always fell
+            // through to catalog?.defaultProviderId here, so if the user had selected
+            // a non-default provider the Keychain load below ran against the wrong
+            // (default) provider and loaded "" for the key.
+            let persisted = UserDefaults.standard.string(forKey: Self.selectedProviderIdDefaultsKey) ?? ""
+            let restoredId = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !restoredId.isEmpty, providers.contains(where: { $0.id == restoredId }) {
+                selectedProviderId = restoredId
+            } else {
+                selectedProviderId = catalog?.defaultProviderId ?? providers.first?.id ?? ""
+            }
+            // Persist whatever we resolved — .onChange(of: selectedProviderId) only
+            // fires on user-driven changes, not programmatic assignments here.
+            UserDefaults.standard.set(selectedProviderId, forKey: Self.selectedProviderIdDefaultsKey)
         }
         if mergeInstructions.isEmpty {
             mergeInstructions = catalog?.defaultMergeInstructions ?? ""
@@ -330,14 +359,33 @@ struct MergeView: View {
         if clarificationInstructions.isEmpty {
             clarificationInstructions = catalog?.defaultClarificationInstructions ?? ""
         }
+        // syncProviderDefaults loads the persisted API key from Keychain for the
+        // current provider, so no separate load is needed here.
         syncProviderDefaults()
     }
 
     private func syncProviderDefaults() {
         guard let selectedProvider else { return }
+        // Load the persisted API key for the newly-selected provider.
+        // Mirrors Android MergeFragment.loadFieldsForProvider which reads
+        // prefs.getString(prefsKey(p, "api_key"), "") for each provider.
+        apiKey = mergeApiKeyLoad(providerId: selectedProvider.id)
+        let hasCustomKey = !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if !selectedProvider.supportsPreinstalledKey {
+            // Provider has no preinstalled key option — custom key is the only path.
             usePreinstalledKey = false
-        } else if selectedProvider.id == "deepseek_api" && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        } else if hasCustomKey {
+            // BUG-B FIX (part 2): when a custom key was previously saved to Keychain
+            // for this provider, switch the picker to "custom" mode so:
+            //   (a) the API key field becomes visible (condition: !supportsPreinstalledKey || !usePreinstalledKey)
+            //   (b) resolvedApiKey() returns apiKey instead of the preinstalled key.
+            // Prior code left usePreinstalledKey = true (the @State default), which
+            // hid the field and caused resolvedApiKey to ignore the loaded key entirely.
+            // Mirrors Android where selecting a provider always loads the saved key into
+            // the field regardless of the preinstalled-key toggle state.
+            usePreinstalledKey = false
+        } else {
+            // No custom key stored — default to preinstalled key if supported.
             usePreinstalledKey = true
         }
         if customEndpoint.isEmpty || customEndpoint == providers.first(where: { $0.id == selectedProviderId })?.defaultEndpoint {
@@ -349,6 +397,58 @@ struct MergeView: View {
         if !shouldShowAdvancedConfig(for: selectedProvider) {
             showAdvancedConfig = false
         }
+    }
+
+    // MARK: - Merge API key Keychain persistence
+    //
+    // Mirrors Android's MergeFragment.saveFields / loadFieldsForProvider which
+    // use EncryptedSharedPreferences keyed as "merge_<providerId>_api_key".
+    // iOS uses the Keychain (same security tier) with:
+    //   service  = "verity.merge.apikey"
+    //   account  = "merge.<providerId>.api_key"
+    // Not cleared on sign-out — Android does not clear merge keys on sign-out
+    // either (they live in a separate SharedPreferences file from the auth session).
+
+    private static let mergeApiKeyKeychainService = "verity.merge.apikey"
+
+    private func mergeApiKeyKeychainAccount(providerId: String) -> String {
+        "merge.\(providerId).api_key"
+    }
+
+    private func mergeApiKeySave(providerId: String, key: String) {
+        guard !providerId.isEmpty else { return }
+        let account = mergeApiKeyKeychainAccount(providerId: providerId)
+        let service = Self.mergeApiKeyKeychainService
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+        guard let data = key.data(using: .utf8), !key.isEmpty else { return }
+        var add = query
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    private func mergeApiKeyLoad(providerId: String) -> String {
+        guard !providerId.isEmpty else { return "" }
+        let account = mergeApiKeyKeychainAccount(providerId: providerId)
+        let service = Self.mergeApiKeyKeychainService
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let value = String(data: data, encoding: .utf8)
+        else { return "" }
+        return value
     }
 
     private var activityCard: some View {
@@ -538,6 +638,8 @@ struct MergeView: View {
         switch status {
         case .ready:
             return Color(red: 0.36, green: 0.86, blue: 0.64)
+        case .collected:
+            return Color(red: 0.36, green: 0.86, blue: 0.64)
         case .waiting:
             return Color(red: 0.96, green: 0.75, blue: 0.33)
         case .error:
@@ -549,6 +651,8 @@ struct MergeView: View {
         switch status {
         case .ready:
             return "Ready"
+        case .collected:
+            return "Collected"
         case .waiting:
             return "Waiting"
         case .error:
