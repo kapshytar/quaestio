@@ -5,7 +5,7 @@
 - This file is the authoritative summary of the current functional state and migration intent for `chat-aggregator-mobile`.
 - Root docs in `Verity/` still win for workspace-wide or cross-repo rules.
 - Integration keys, Supabase MCP access, OAuth state, and secret-file locations are tracked in:
-  - [docs/handoff/INTEGRATIONS_AND_KEYS.md](../docs/handoff/INTEGRATIONS_AND_KEYS.md)
+  - [docs/handoff/INTEGRATIONS_AND_KEYS.md](../../docs/handoff/INTEGRATIONS_AND_KEYS.md)
 - `README.md` explains repo purpose and directory layout.
 - `CHANGELOG.md` is the required running history for meaningful mobile milestones.
 - `VERSIONING.md` is the canonical versioning contract and points to the required bump/check scripts.
