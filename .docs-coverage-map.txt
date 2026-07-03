@@ -1,0 +1,72 @@
+# chat-aggregator doc-coverage rules (monorepo: desktop/ + mobile/)
+#
+# Format: <code-regex><TAB><doc-regex>
+# - One rule per line; lines starting with `#` are comments.
+# - Regex is matched against full repo-relative path with `^...$` (repo root
+#   is chat-aggregator/, since push-ritual.sh's TARGET_DIR for this repo is
+#   the monorepo root — see rituals/push-ritual.sh [3/6] eval_subtree calls).
+# - For each rule, push-ritual.sh checks the about-to-push commits: if any
+#   touched file matches <code-regex>, at least one touched file must also
+#   match <doc-regex>. Otherwise the push is blocked (strict mode).
+# - Rules apply independently; a single file may satisfy multiple rules.
+# - Order matters only for log output, not for correctness.
+# - Doc targets must be repo-relative (chat-aggregator/...): the ritual only
+#   ever sees paths inside this repo's unpushed-commit file list, so a rule
+#   pointing outside the repo (e.g. ../docs/domains/SESSION_AND_INGEST_RULES.md)
+#   could never be satisfied and would permanently block pushes. Cross-repo
+#   ingest/session doc updates (docs/domains/SESSION_AND_INGEST_RULES.md at
+#   the workspace root) are out of scope for this map; use repo-local
+#   CURRENT_STATE.md / CHANGELOG.md / docs/*.md instead, same as dream-tracker.
+# - To bypass once (legitimate exception):
+#     VERITY_PUSH_RITUAL_STRICT=0 git push …
+#
+# When a rule fires on an unrelated change, prefer either:
+#   (a) updating the doc with a single line about the change, or
+#   (b) refining this map so the noisy code path is excluded from the rule.
+# Do not silently turn strict mode off as a habit.
+#
+# Build artifacts / non-source noise are excluded from every code-regex below.
+# grep -E is POSIX ERE (no negative lookaheads), so exclusion relies on two
+# layers instead of a single "not build/dist/node_modules" pattern:
+#   1. these paths are git-ignored (node_modules/, dist/, build/, .gradle/,
+#      .build/, DerivedData/, *.tsbuildinfo, .DS_Store — see desktop/.gitignore
+#      and mobile/.gitignore) and therefore never appear in a real `git log
+#      --name-only` file list in the first place, and
+#   2. as defense in depth, every code-regex is anchored to the flat file
+#      directly inside its owning file (e.g. `desktop/[a-z-]+\.js`, not
+#      `desktop/.+\.js`) or to a named non-artifact subdirectory
+#      (`desktop/test/`, `mobile/android/app/src/`), so a stray tracked file
+#      under node_modules/, dist/, or build/ can never match even if someone
+#      force-added it against .gitignore.
+
+# --- desktop/ (Electron app: main/renderer/providers/auth/cookie-import) ---
+desktop/(main|renderer|preload)\.js	desktop/(docs/.+\.md|CURRENT_STATE\.md)
+desktop/(auth-gate|auth-store)\.js	desktop/(docs/.+\.md|CURRENT_STATE\.md)
+desktop/(cookie-import|cookie-import-simple)\.js	desktop/docs/(COOKIE_FORMATS|COOKIE_IMPORT|MANUAL_COOKIE_IMPORT)\.md
+desktop/(merge-api-client|aggregation-control|side-panel-controls|incognito-policy)\.js	desktop/(docs/.+\.md|CURRENT_STATE\.md)
+desktop/test/.+\.(js|mjs|cjs)	desktop/(docs/.+\.md|CURRENT_STATE\.md)
+desktop/index\.html	desktop/(docs/.+\.md|CURRENT_STATE\.md)
+
+# --- mobile/shared/ (cross-platform JS + contracts used by iOS + Android) ---
+mobile/shared/js/.+\.js	mobile/(docs/.+\.md|CURRENT_STATE\.md)
+mobile/shared/contracts/.+\.(json|md)	mobile/(docs/.+\.md|CURRENT_STATE\.md)
+
+# --- mobile/ios/ (SwiftUI app) ---
+mobile/ios/VerityMobile/.+\.swift	mobile/(docs/.+\.md|CURRENT_STATE\.md)
+mobile/ios/VerityMobileTests/.+\.swift	mobile/(docs/.+\.md|CURRENT_STATE\.md)
+
+# --- mobile/android/ (Kotlin app) — has its own CURRENT_STATE.md/docs/ ---
+mobile/android/app/src/.+\.(kt|java|xml)	mobile/android/(docs/.+\.md|CURRENT_STATE\.md)
+mobile/android/(build\.gradle\.kts|settings\.gradle\.kts|version\.properties)	mobile/android/(docs/.+\.md|CURRENT_STATE\.md)
+
+# --- mobile/scripts/ (deploy, versioning, bootstrap tooling shared by both platforms) ---
+mobile/scripts/.+\.sh	mobile/(docs/.+\.md|CURRENT_STATE\.md)
+
+# --- catch-all fallbacks per subtree (flat file in desktop/, or a named
+#     non-artifact subdirectory — never a bare `desktop/.+` / `mobile/.+`,
+#     which would also match desktop/node_modules/... or
+#     mobile/android/app/build/...) ---
+desktop/[A-Za-z0-9_.-]+\.(js|mjs|cjs|html|css)	desktop/(docs/.+\.md|CURRENT_STATE\.md|CHANGELOG\.md)
+mobile/shared/(js|contracts)/[A-Za-z0-9_.-]+	mobile/(docs/.+\.md|CURRENT_STATE\.md|CHANGELOG\.md)
+mobile/ios/(VerityMobile|VerityMobileTests)/[A-Za-z0-9_.-]+\.swift	mobile/(docs/.+\.md|CURRENT_STATE\.md|CHANGELOG\.md)
+mobile/android/app/src/.+\.(kt|java|xml)	mobile/android/(docs/.+\.md|CURRENT_STATE\.md|CHANGELOG\.md)

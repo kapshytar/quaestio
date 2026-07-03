@@ -10,6 +10,7 @@
 - `CHANGELOG.md` is the required running history for meaningful mobile milestones.
 - `VERSIONING.md` is the canonical versioning contract and points to the required bump/check scripts.
 - Migration notes under `docs/` explain the move into this repo and should reflect actual migration status.
+- 2026-07-03: this monorepo (`desktop/` + `mobile/`) is now under push-ritual doc-coverage enforcement — see `../.docs-coverage-map.txt` at the repo root and `rituals/push-ritual.sh` step `[4/6]`; pushing mobile code (`shared/`, `ios/`, `android/`) without a matching doc/CURRENT_STATE.md touch is blocked in strict mode.
 
 ## Stable
 

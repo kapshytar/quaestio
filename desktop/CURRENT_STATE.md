@@ -6,6 +6,7 @@
 - Root docs in `Verity/` still win for workspace-wide or cross-repo rules.
 - `CHANGELOG.md`, dated handoff docs, and older session notes are historical context only.
 - `CLAUDE.md` is operational/task-entry guidance; if it disagrees with this file about current product behavior, treat that as a doc mismatch and update the docs instead of guessing.
+- 2026-07-03: this monorepo (`desktop/` + `mobile/`) is now under push-ritual doc-coverage enforcement — see `../.docs-coverage-map.txt` at the repo root and `rituals/push-ritual.sh` step `[4/6]`; pushing desktop code without a matching doc/CURRENT_STATE.md touch is blocked in strict mode.
 
 ## Stable
 
