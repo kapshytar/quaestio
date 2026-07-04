@@ -2013,7 +2013,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         }
         val slotUrls = collectCurrentSlotUrls()
         sessionManager.saveCurrentSession(
-            name = prompt.take(60).ifBlank { "Session" },
+            name = prompt.take(500).ifBlank { "Session" },
             dreamSessionId = localId,
             slotUrls = slotUrls,
             noteId = null
@@ -2593,7 +2593,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                     }
                 }
                 val snapshot = sessionManager.saveCurrentSession(
-                    name = prompt.take(60).ifBlank { "Session" },
+                    name = prompt.take(500).ifBlank { "Session" },
                     dreamSessionId = result.sessionId,
                     slotUrls = slotUrls,
                     noteId = result.noteId

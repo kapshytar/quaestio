@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.8.8
+
+- Session name limit raised from 60 to 500 chars (Android + iOS)
+
+
 ## 2.8.7
 
 - **Fix (iOS): session list now shows the whole question chain, not just one card**

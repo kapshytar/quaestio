@@ -245,7 +245,7 @@ final class MobileAppState: ObservableObject {
         }
         let slotURLs = currentSessionSnapshotSlotURLs()
         _ = sessionManager.saveCurrentSession(
-            name: String(prompt.prefix(60)).ifEmpty("Session"),
+            name: String(prompt.prefix(500)).ifEmpty("Session"),
             dreamSessionId: localId,
             slotStates: slots,
             slotURLs: slotURLs,
@@ -1112,7 +1112,7 @@ final class MobileAppState: ObservableObject {
             // slot-fingerprint continuation is safe again.
             sessionManager.suppressSlotRestore = false
             let snapshot = sessionManager.saveCurrentSession(
-                name: String(prompt.prefix(60)).ifEmpty("Session"),
+                name: String(prompt.prefix(500)).ifEmpty("Session"),
                 dreamSessionId: sessionId,
                 slotStates: slots,
                 slotURLs: slotSourceURLs,
