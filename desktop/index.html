@@ -665,6 +665,19 @@
       background: #232323; color: #ddd; padding: 7px 10px; font-size: 11px;
     }
     .sessions-search::placeholder { color: #777; }
+    .sessions-project-filter-wrap { position: relative; display: inline-flex; }
+    .sessions-project-filter-btn { display: inline-flex; align-items: center; justify-content: center; }
+    .sessions-project-filter-btn.active { color: #7ca8ff; border-color: #3a4a6a; }
+    .sessions-project-filter-pop {
+      position: absolute; top: 100%; right: 0; left: auto; width: 260px; z-index: 60; margin-top: 4px;
+      box-sizing: border-box; background: #232323; border: 1px solid #333; border-radius: 6px;
+      padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.55);
+    }
+    .sessions-project-filter-pop[hidden] { display: none; }
+    .sessions-project-filter-pop .sessions-project-search { margin-bottom: 6px; }
+    .sessions-project-filter-tree {
+      box-sizing: border-box; max-height: 220px; overflow-y: auto;
+    }
     .session-item {
       padding: 8px 10px; background: #333; border-radius: 4px; cursor: pointer;
       transition: all 0.2s; border-left: 3px solid transparent; font-size: 11px;
@@ -880,8 +893,9 @@
     }
     #sessions-popup-actions {
       display: grid;
-      grid-template-columns: 1fr auto auto;
+      grid-template-columns: 1fr auto auto auto;
       gap: 6px;
+      align-items: center;
     }
     #sessions-popup-list {
       display: flex;
@@ -1916,7 +1930,14 @@
       <div id="sessions-popup-actions">
         <button class="control-btn save-session-action">Save Current</button>
         <button class="control-btn reset-session-action">Reset</button>
-          <button class="control-btn icon-refresh-btn refresh-sessions-action" title="Refresh sessions" aria-label="Refresh sessions">&#10227;</button>
+        <div class="sessions-project-filter-wrap">
+          <button type="button" class="control-btn icon-refresh-btn sessions-project-filter-btn" title="Filter by project" aria-haspopup="listbox" aria-expanded="false" aria-label="Filter by project"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg></button>
+          <div class="sessions-project-filter-pop" hidden>
+            <input class="sessions-search sessions-project-search" type="text" placeholder="Filter projects...">
+            <div class="sessions-project-filter-tree" role="listbox" aria-label="Filter sessions by project"></div>
+          </div>
+        </div>
+        <button class="control-btn icon-refresh-btn refresh-sessions-action" title="Refresh sessions" aria-label="Refresh sessions">&#10227;</button>
       </div>
         <input class="sessions-search sessions-search-input" type="text" placeholder="Search by session id or title...">
         <div id="sessions-popup-list" class="sessions-list"></div>
@@ -2027,10 +2048,17 @@
               <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
                 <button class="control-btn save-session-action" id="save-session-btn" style="flex:1;">Save Current</button>
                 <button class="control-btn reset-session-action" id="reset-session-btn">Reset</button>
+                <div class="sessions-project-filter-wrap">
+                  <button type="button" class="control-btn icon-refresh-btn sessions-project-filter-btn" title="Filter by project" aria-haspopup="listbox" aria-expanded="false" aria-label="Filter by project"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg></button>
+                  <div class="sessions-project-filter-pop" hidden>
+                    <input class="sessions-search sessions-project-search" type="text" placeholder="Filter projects...">
+                    <div id="sessions-project-filter" class="sessions-project-filter-tree" role="listbox" aria-label="Filter sessions by project"></div>
+                  </div>
+                </div>
                 <button class="control-btn icon-refresh-btn refresh-sessions-action" id="refresh-sessions-btn" title="Refresh sessions" aria-label="Refresh sessions">&#10227;</button>
               </div>
-              <div style="margin-bottom:8px;">
-                <input id="sessions-search-input" class="sessions-search sessions-search-input" type="text" placeholder="Search by session id or title...">
+              <div style="margin-bottom:8px;display:flex;gap:6px;">
+                <input id="sessions-search-input" class="sessions-search sessions-search-input" type="text" placeholder="Search by session id or title..." style="flex:1;">
               </div>
               <div id="sessions-list" class="sessions-list" style="display:flex;flex-direction:column;gap:4px;flex:1;overflow-y:auto;"></div>
             </div>

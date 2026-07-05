@@ -18,6 +18,7 @@ VerityMobile.xcodeproj/
 *.xcuserstate
 .swiftpm/
 .tools/
+ios/VerityMobile/Resources/ChangelogLatest.txt
 
 # Node / shared tooling
 node_modules/

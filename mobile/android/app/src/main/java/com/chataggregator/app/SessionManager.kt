@@ -91,7 +91,8 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
         name: String = "",
         dreamSessionId: Int? = null,
         slotUrls: Map<String, String> = emptyMap(),
-        noteId: String? = null
+        noteId: String? = null,
+        projectTagId: String? = null
     ): SessionSnapshot {
         val timestamp = System.currentTimeMillis()
         val sessionName = name.ifEmpty {
@@ -123,7 +124,8 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
                 "slot-${i + 1}" to slotManager.isSlotEnabled(i)
             },
             createdAt = existing?.createdAt ?: now,
-            updatedAt = now
+            updatedAt = now,
+            projectTagId = projectTagId?.takeIf { it.isNotBlank() }
         )
 
         addSessionToList(session)

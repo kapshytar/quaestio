@@ -279,13 +279,31 @@ function getSupabaseConfig() {
   };
 }
 
+// Size-capped rotation per docs/LOGGING_AND_VERSIONING.md: no unbounded appends.
+// At >5 MB the file is truncated to its newest half (line-aligned).
+const SESSION_RPC_LOG_MAX_BYTES = 5 * 1024 * 1024;
+function rotateLogIfNeeded(logPath) {
+  try {
+    const stat = fs.statSync(logPath);
+    if (stat.size <= SESSION_RPC_LOG_MAX_BYTES) return;
+    const content = fs.readFileSync(logPath, 'utf8');
+    const tail = content.slice(content.length / 2);
+    const firstNewline = tail.indexOf('\n');
+    fs.writeFileSync(logPath, firstNewline >= 0 ? tail.slice(firstNewline + 1) : tail, 'utf8');
+  } catch (_) {
+    // Missing file / read error — nothing to rotate.
+  }
+}
+
 function logSessionRpc(message, meta = null) {
   const ts = new Date().toISOString();
   const line = `[${ts}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ''}\n`;
   try {
     const logsDir = path.join(__dirname, 'debug-runs');
     fs.mkdirSync(logsDir, { recursive: true });
-    fs.appendFileSync(path.join(logsDir, 'session-rpc.log'), line, 'utf8');
+    const logPath = path.join(logsDir, 'session-rpc.log');
+    rotateLogIfNeeded(logPath);
+    fs.appendFileSync(logPath, line, 'utf8');
   } catch (_) {
     // Ignore logging failure.
   }

@@ -126,7 +126,12 @@ struct SlotGridView: View {
     @State private var showsProjectSheet = false
     @State private var showsSessionSheet = false
     @State private var showsSettingsQuickMenu = false
+    @State private var showsChangelogSheet = false
     @State private var sessionSearchText = ""
+    @State private var sessionProjectFilter: MobileAppState.ProjectFilter = .all
+    @State private var showsSessionProjectFilterPopover = false
+    @State private var sessionProjectFilterQuery = ""
+    @State private var filterExpandedIds: Set<String> = []
     @State private var composerHeight: CGFloat = 22
     @State private var isComposerFocused = false
     @State private var keepsTrayDuringWebInput = false
@@ -280,6 +285,11 @@ struct SlotGridView: View {
         }
         .sheet(isPresented: $showsSessionSheet) {
             sessionSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showsChangelogSheet) {
+            changelogSheet
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -473,7 +483,185 @@ struct SlotGridView: View {
     }
 
     private var filteredSessions: [SessionSnapshot] {
-        appState.sessionsForDisplay(matching: sessionSearchText)
+        appState.sessionsForDisplay(matching: sessionSearchText, projectFilter: sessionProjectFilter)
+    }
+
+    private struct ProjectFilterOption: Identifiable {
+        let id: String        // pathKey — unique per DAG placement (node.id duplicates identities)
+        let projectId: String
+        let name: String
+        let depth: Int
+    }
+
+    private func flattenedProjectFilterOptions(matching query: String = "") -> [ProjectFilterOption] {
+        func flatten(_ nodes: [ProjectTreeNode], depth: Int) -> [ProjectFilterOption] {
+            nodes.flatMap { node -> [ProjectFilterOption] in
+                [ProjectFilterOption(id: node.pathKey, projectId: node.id, name: node.name, depth: depth)] + flatten(node.children, depth: depth + 1)
+            }
+        }
+        let all = flatten(appState.projectTreeNodes, depth: 0)
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return all }
+        return all.filter { $0.name.lowercased().contains(normalized) }
+    }
+
+    private var sessionProjectFilterDisplayName: String {
+        switch sessionProjectFilter {
+        case .all:
+            return "All projects"
+        case .none:
+            return "No project"
+        case .project(let id):
+            return flattenedProjectFilterOptions().first { $0.projectId == id }?.name ?? "All projects"
+        }
+    }
+
+    private var sessionProjectFilterButton: some View {
+        Button {
+            showsSessionProjectFilterPopover = true
+        } label: {
+            Image(systemName: sessionProjectFilter == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+        }
+        .foregroundStyle(sessionProjectFilter == .all ? AppTheme.textSecondary : AppTheme.actionFill)
+        .accessibilityLabel("Filter by project: \(sessionProjectFilterDisplayName)")
+        .popover(isPresented: $showsSessionProjectFilterPopover) {
+            sessionProjectFilterPopoverContent
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func selectSessionProjectFilter(_ filter: MobileAppState.ProjectFilter) {
+        sessionProjectFilter = filter
+        showsSessionProjectFilterPopover = false
+    }
+
+    private var sessionProjectFilterPopoverContent: some View {
+        NavigationStack {
+            List {
+                TextField("Filter projects…", text: $sessionProjectFilterQuery)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .foregroundStyle(AppTheme.textPrimary)
+
+                Section {
+                    Button {
+                        selectSessionProjectFilter(.all)
+                    } label: {
+                        sessionProjectFilterRowLabel("All projects", selected: sessionProjectFilter == .all)
+                    }
+                    Button {
+                        selectSessionProjectFilter(.none)
+                    } label: {
+                        sessionProjectFilterRowLabel("No project", selected: sessionProjectFilter == .none)
+                    }
+                }
+
+                Section {
+                    if sessionProjectFilterQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        ForEach(visibleFilterTreeRows()) { row in
+                            sessionProjectFilterTreeRow(row)
+                        }
+                    } else {
+                        ForEach(flattenedProjectFilterOptions(matching: sessionProjectFilterQuery)) { option in
+                            Button {
+                                selectSessionProjectFilter(.project(option.projectId))
+                            } label: {
+                                sessionProjectFilterRowLabel(
+                                    String(repeating: "  ", count: option.depth) + option.name,
+                                    selected: sessionProjectFilter == .project(option.projectId)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Filter Projects")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") { showsSessionProjectFilterPopover = false }
+                }
+            }
+        }
+    }
+
+    // Visible tree rows as plain data (SwiftUI can't recurse inside a `some View`
+    // builder — the opaque type would be defined in terms of itself). The DAG-
+    // expanded tree can show one project under several parents, so row identity
+    // and expand state key off pathKey (unique per placement), selection off id.
+    private struct FilterTreeRow: Identifiable {
+        let id: String        // pathKey — unique per placement
+        let projectId: String
+        let name: String
+        let depth: Int
+        let hasChildren: Bool
+    }
+
+    private func visibleFilterTreeRows() -> [FilterTreeRow] {
+        var rows: [FilterTreeRow] = []
+        func walk(_ nodes: [ProjectTreeNode], depth: Int) {
+            for node in nodes {
+                rows.append(FilterTreeRow(
+                    id: node.pathKey,
+                    projectId: node.id,
+                    name: node.name,
+                    depth: depth,
+                    hasChildren: !node.children.isEmpty
+                ))
+                if !node.children.isEmpty && filterExpandedIds.contains(node.pathKey) {
+                    walk(node.children, depth: depth + 1)
+                }
+            }
+        }
+        walk(appState.projectTreeNodes, depth: 0)
+        return rows
+    }
+
+    private func sessionProjectFilterTreeRow(_ row: FilterTreeRow) -> some View {
+        HStack(spacing: 6) {
+            if row.hasChildren {
+                Button {
+                    if filterExpandedIds.contains(row.id) {
+                        filterExpandedIds.remove(row.id)
+                    } else {
+                        filterExpandedIds.insert(row.id)
+                    }
+                } label: {
+                    Image(systemName: filterExpandedIds.contains(row.id) ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppTheme.textMuted)
+                        .frame(width: 16)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Spacer().frame(width: 16)
+            }
+
+            Button {
+                selectSessionProjectFilter(.project(row.projectId))
+            } label: {
+                sessionProjectFilterRowLabel(
+                    String(repeating: "  ", count: row.depth) + row.name,
+                    selected: sessionProjectFilter == .project(row.projectId)
+                )
+            }
+        }
+    }
+
+    private func sessionProjectFilterRowLabel(_ text: String, selected: Bool) -> some View {
+        HStack {
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AppTheme.textPrimary)
+                .lineLimit(1)
+            Spacer()
+            if selected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppTheme.actionFill)
+            }
+        }
     }
 
     private var sessionSheet: some View {
@@ -608,18 +796,57 @@ struct SlotGridView: View {
                     .accessibilityLabel("Refresh sessions")
                 }
 
+                ToolbarItem(placement: .topBarLeading) {
+                    sessionProjectFilterButton
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Close") { showsSessionSheet = false }
                 }
             }
             .task {
                 await appState.loadSessionsIfNeeded()
+                await appState.loadProjectTreeIfNeeded()
             }
             .onDisappear {
                 sessionSearchText = ""
+                sessionProjectFilter = .all
                 expandedSessionTitleIds.removeAll()
+                filterExpandedIds.removeAll()
+                sessionProjectFilterQuery = ""
             }
         }
+    }
+
+    private var changelogSheet: some View {
+        NavigationStack {
+            ScrollView {
+                Text(loadLatestChangelogText())
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
+            .navigationTitle("Latest 30 changes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") { showsChangelogSheet = false }
+                }
+            }
+        }
+    }
+
+    private func loadLatestChangelogText() -> String {
+        guard
+            let url = Bundle.main.url(forResource: "ChangelogLatest", withExtension: "txt"),
+            let text = try? String(contentsOf: url, encoding: .utf8)
+        else {
+            return "No changelog entries found."
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "No changelog entries found." : trimmed
     }
 
     private func slotControlStrip(for slot: SlotState) -> some View {
@@ -1003,6 +1230,19 @@ struct SlotGridView: View {
                 appState.statusMessage = "Find in Page is coming here next."
             } label: {
                 Label("Find in Page", systemImage: "text.magnifyingglass")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(AppTheme.textPrimary)
+
+            Divider()
+                .overlay(Color.white.opacity(0.08))
+
+            Button {
+                showsSettingsQuickMenu = false
+                showsChangelogSheet = true
+            } label: {
+                Label("Changelog", systemImage: "list.bullet.clipboard")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)

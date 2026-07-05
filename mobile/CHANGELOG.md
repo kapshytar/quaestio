@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.8.9
+
+- **Sessions: filter by project (Android + iOS + desktop parity)** — compact
+  funnel icon in the session list opens a popover with a "Filter projects…"
+  search and the collapsible project tree (default collapsed): `All projects` /
+  `No project` / a project incl. its whole subtree. Subtree scope is a 1:1 port
+  of the canonical web DAG walk (`collectDescendantTagIds`, dream-tracker
+  `queries/tagGraph.ts`) — one spec for all clients in
+  `docs/PROJECT_SESSION_FILTER.md`. Android/desktop now also stamp
+  `projectTagId` into locally saved sessions (iOS already did); the save RPC is
+  unchanged.
+- **Fix (Android): session dialog chrome no longer bleeds into the underlying
+  UI** — dialogs now blur the activity root behind them (view-level
+  `RenderEffect`, works on hardware where system cross-window blur doesn't,
+  e.g. S10+) + dim; the transparent window chrome stays readable without an
+  extra card frame.
+- **In-app changelog fixed & brought to iOS** — Android's "Latest 30 changes"
+  showed the frozen legacy `mobile/android/CHANGELOG.md` (v1.x) because the
+  gradle task read `rootProject.file("CHANGELOG.md")`; it now reads the
+  maintained joint `mobile/CHANGELOG.md`. The extractor also lost version
+  prefixes on `## X.Y.Z` headers (bracket-only regex) and cut wrapped bullets
+  mid-sentence — both fixed (versions shown, continuations joined, `**`
+  stripped). iOS gets the same screen for the first time: settings menu →
+  Changelog, fed by `scripts/generate-changelog-resource.py` (same parsing as
+  gradle — keep in sync per `docs/LOGGING_AND_VERSIONING.md`).
+
+
 ## 2.8.8
 
 - Session name limit raised from 60 to 500 chars (Android + iOS)

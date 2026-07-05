@@ -48,7 +48,9 @@ val hasCustomSigning =
     !signingStorePassword.isNullOrBlank() &&
     !signingKeyAlias.isNullOrBlank() &&
     !signingKeyPassword.isNullOrBlank()
-val changelogSourceFile = rootProject.file("CHANGELOG.md")
+// The maintained changelog is the joint mobile one (mobile/CHANGELOG.md, 2.8.x),
+// NOT the legacy per-android CHANGELOG.md (v1.x) sitting next to this gradle root.
+val changelogSourceFile = rootProject.file("../CHANGELOG.md")
 val generatedChangelogResDir = layout.buildDirectory.dir("generated/res/changelog")
 val generatedSharedAssetsDir = layout.buildDirectory.dir("generated/assets/shared")
 val generateLatestChangelogResource = tasks.register("generateLatestChangelogResource") {
@@ -58,34 +60,53 @@ val generateLatestChangelogResource = tasks.register("generateLatestChangelogRes
     outputs.file(outputFile)
     doLast {
         outputDir.mkdirs()
+        // Parsing rules — keep in sync with mobile/scripts/generate-changelog-resource.py
+        // (the iOS twin): version headers match `## 2.8.9` AND legacy `## [v1.102.0]`;
+        // wrapped bullet continuations are joined into ONE entry; **emphasis** stripped.
         val markdown = if (changelogSourceFile.exists()) changelogSourceFile.readText() else ""
         val entries = mutableListOf<String>()
         var currentVersion = ""
         var currentSection = ""
+        var openEntry = false
+        fun clean(text: String) = text.replace(Regex("""\*\*|__"""), "").trim()
         markdown.lineSequence().forEach { rawLine ->
             val line = rawLine.trim()
-            val versionMatch = Regex("""^##\s+\[([^\]]+)]""").find(line)
-            if (versionMatch != null) {
+            val versionMatch = Regex("""^##\s+\[?(v?[\w.]+)]?""").find(line)
+            if (line.startsWith("## ") && versionMatch != null) {
                 currentVersion = versionMatch.groupValues[1].trim()
+                currentSection = ""
+                openEntry = false
                 return@forEach
             }
             val sectionMatch = Regex("""^###\s+(.+)$""").find(line)
             if (sectionMatch != null) {
                 currentSection = sectionMatch.groupValues[1].trim()
+                openEntry = false
                 return@forEach
             }
-            if ((line.startsWith("- ") || line.startsWith("* ")) && entries.size < 30) {
-                val text = line.substring(2).trim()
+            if (line.startsWith("- ") || line.startsWith("* ")) {
+                if (entries.size >= 30) {
+                    openEntry = false
+                    return@forEach
+                }
                 val prefix = buildString {
                     if (currentVersion.isNotBlank()) append("[").append(currentVersion).append("] ")
                     if (currentSection.isNotBlank()) append(currentSection).append(": ")
                 }
-                entries += "${prefix}${text}"
+                entries += "${prefix}${clean(line.substring(2))}"
+                openEntry = true
+                return@forEach
             }
+            // Wrapped continuation of the previous bullet: indented, plain line.
+            if (openEntry && line.isNotBlank() && (rawLine.startsWith(" ") || rawLine.startsWith("\t"))) {
+                entries[entries.lastIndex] = "${entries.last()} ${clean(line)}"
+                return@forEach
+            }
+            openEntry = false
         }
         outputFile.writeText(
             if (entries.isEmpty()) "No changelog entries found."
-            else entries.joinToString(System.lineSeparator())
+            else entries.joinToString("\n\n") // pinned LF: must stay byte-identical with generate-changelog-resource.py
         )
     }
 }

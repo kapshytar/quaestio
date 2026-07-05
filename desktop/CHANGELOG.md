@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.114.0
+
+- **Sessions: filter by project.** Compact funnel icon button in the Sessions
+  action row (popup + main panel, next to refresh) opens a right-aligned
+  popover: "Filter projects…" search on top, below it `All projects` /
+  `No project` and the collapsible project tree (filter-local expand state,
+  default collapsed; reuses `renderProjectTreeNode`). Selecting a project
+  scopes the session list to it **and its whole subtree** via
+  `collectDescendantTagIds` — a faithful port of the dream-tracker web canon
+  (`queries/tagGraph.ts`, DAG walk, cycle-safe); combined with the text search
+  by AND; stale filter ids fall back to All. Locally saved sessions now keep
+  `projectTagId` (stamped from `activeProjectId`, preserved over the RPC
+  round-trip in the localStorage cache) — the save RPC itself is unchanged.
+  One cross-client spec: `docs/PROJECT_SESSION_FILTER.md`.
+- **Log rotation for `debug-runs/session-rpc.log`** — the session-RPC trace
+  appended forever; it is now size-capped at 5 MB (truncated to the newest
+  half, line-aligned) per the new cross-client logging/versioning design
+  (`docs/LOGGING_AND_VERSIONING.md`).
+
 ## 1.113.0
 
 - UI polish pass (batch 1, desktop), all low-risk token/glyph cleanups:

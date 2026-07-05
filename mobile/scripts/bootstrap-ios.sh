@@ -24,6 +24,9 @@ if [ ! -x "$XCODEGEN_BIN" ]; then
   chmod +x "$XCODEGEN_BIN"
 fi
 
+echo "Generating latest-changelog resource..."
+"$ROOT_DIR/scripts/generate-changelog-resource.py"
+
 echo "Generating Xcode project..."
 "$XCODEGEN_BIN" generate --spec "$ROOT_DIR/project.yml"
 

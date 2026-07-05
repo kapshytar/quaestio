@@ -2137,6 +2137,44 @@ function findProjectNodeById(nodes, projectId) {
   return null;
 }
 
+// Faithful port of dream-tracker `queries/tagGraph.ts` collectDescendantTagIds
+// (ECOSYSTEM_MAP id=tag-graph): a project (tag) + all descendants as a flat id
+// set — iterative, global-dedup, cycle-safe. The Verity tag layer is a DAG
+// (multi-parent), so we walk a parentId->children adjacency, not a plain tree.
+// The adjacency is reconstructed from the DAG-expanded projectTreeNodes (built
+// by buildProjectTreeNodes), so this works on cache-only loads without the raw
+// tag_parents edges. See docs/PROJECT_SESSION_FILTER.md.
+function collectDescendantTagIds(nodes, rootTagId) {
+  const rootId = String(rootTagId || '').trim();
+  const ids = new Set();
+  if (!rootId) return ids;
+
+  const childrenByParent = new Map();
+  const indexNode = (node) => {
+    if (!node) return;
+    const parentId = String(node.id || '').trim();
+    if (!childrenByParent.has(parentId)) {
+      childrenByParent.set(parentId, (Array.isArray(node.children) ? node.children : [])
+        .map((child) => String(child?.id || '').trim())
+        .filter(Boolean));
+    }
+    (Array.isArray(node.children) ? node.children : []).forEach(indexNode);
+  };
+  (Array.isArray(nodes) ? nodes : []).forEach(indexNode);
+
+  ids.add(rootId);
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    for (const childId of childrenByParent.get(current) || []) {
+      if (ids.has(childId)) continue;
+      ids.add(childId);
+      stack.push(childId);
+    }
+  }
+  return ids;
+}
+
 function findProjectNodeByPathKey(nodes, pathKey) {
   const targetKey = String(pathKey || '').trim();
   if (!targetKey) return null;
@@ -2171,11 +2209,15 @@ function updateProjectSelectorAppearance() {
   }
 }
 
-function renderProjectTreeNode(container, node, depth) {
+function renderProjectTreeNode(container, node, depth, opts = {}) {
+  const expandedSet = opts.expandedSet || expandedProjectNodeIds;
+  const rerender = opts.rerender || (() => renderProjectPanel(projectTreeNodes));
   const hasChildren = Array.isArray(node.children) && node.children.length > 0;
   const nodeKey = node.pathKey || node.id;
-  const isExpanded = expandedProjectNodeIds.has(nodeKey);
-  const isSelected = activeProjectId === node.id && (!activeProjectPathKey || activeProjectPathKey === nodeKey);
+  const isExpanded = expandedSet.has(nodeKey);
+  const isSelected = opts.isSelected
+    ? opts.isSelected(node, nodeKey)
+    : (activeProjectId === node.id && (!activeProjectPathKey || activeProjectPathKey === nodeKey));
 
   const row = document.createElement('div');
   row.className = `project-tree-row${isSelected ? ' selected' : ''}`;
@@ -2188,9 +2230,9 @@ function renderProjectTreeNode(container, node, depth) {
   if (hasChildren) {
     chevron.addEventListener('click', (event) => {
       event.stopPropagation();
-      if (expandedProjectNodeIds.has(nodeKey)) expandedProjectNodeIds.delete(nodeKey);
-      else expandedProjectNodeIds.add(nodeKey);
-      renderProjectPanel(projectTreeNodes);
+      if (expandedSet.has(nodeKey)) expandedSet.delete(nodeKey);
+      else expandedSet.add(nodeKey);
+      rerender();
     });
   }
   row.appendChild(chevron);
@@ -2201,6 +2243,7 @@ function renderProjectTreeNode(container, node, depth) {
   row.appendChild(name);
 
   row.addEventListener('click', async () => {
+    if (opts.onSelect) { opts.onSelect(node, nodeKey); return; }
     const nextId = String(node?.id || '').trim() || null;
     const projectChanged = (activeProjectId || null) !== nextId;
     await setActiveProject(node);
@@ -2211,11 +2254,12 @@ function renderProjectTreeNode(container, node, depth) {
   container.appendChild(row);
 
   if (hasChildren && isExpanded) {
-    node.children.forEach((child) => renderProjectTreeNode(container, child, depth + 1));
+    node.children.forEach((child) => renderProjectTreeNode(container, child, depth + 1, opts));
   }
 }
 
 function renderProjectPanel(nodes = projectTreeNodes) {
+  renderSessionsProjectFilterTree();
   if (!projectTreeEl) return;
   projectTreeEl.innerHTML = '';
   if (projectPanelFooterEl) projectPanelFooterEl.innerHTML = '';
@@ -6295,6 +6339,9 @@ async function runMerge(isClarification = false, clarificationText = '', previou
   }
   let sessionsNotice = { text: '', kind: 'info' };
   let sessionsSearchQuery = '';
+  let sessionsProjectFilter = '';
+  const sessionsFilterExpandedIds = new Set();
+  let sessionsProjectFilterQuery = '';
   const expandedSessionTitleIds = new Set();
   let sessionsListMemoryCache = null;
 
@@ -6388,7 +6435,8 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
       `Session ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`,
     slotConfig: { ...slotConfig },
     slotUrls: {},
-    slotEnabled: { ...getCurrentSlotEnabledState() }
+    slotEnabled: { ...getCurrentSlotEnabledState() },
+    projectTagId: activeProjectId || null
   };
 
   SLOTS.forEach(slot => {
@@ -6407,9 +6455,13 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
       }
       console.log('[saveSessionSnapshot] Saved to DB:', result);
       setSessionsNotice('Saved to database.', 'ok');
-        // Also update local cache
+        // Also update local cache (preserve local project tag — backend doesn't return it)
         const cachedSessions = await loadSessionsList({ preferCache: true });
-        const sessions = mergeSessionSnapshots([result], cachedSessions);
+        const resultWithProjectTag = {
+          ...result,
+          projectTagId: sessionData.projectTagId ?? result.projectTagId ?? result.project_tag_id ?? null
+        };
+        const sessions = mergeSessionSnapshots([resultWithProjectTag], cachedSessions);
         localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
         writeJsonCache(SESSIONS_META_KEY, { fetchedAt: Date.now() });
         sessionsListMemoryCache = sessions;
@@ -6874,19 +6926,137 @@ function renderSessionsIntoContainer(container, sessions) {
   });
 }
 
+// Session project filter = the SAME collapsible project tree as the project
+// panel (reuses renderProjectTreeNode), NOT a flat dropdown. Own expand state
+// so it defaults to fully collapsed. Single-select scope. See
+// docs/PROJECT_SESSION_FILTER.md.
+function appendSessionsFilterSpecialRow(container, label, value, glyph) {
+  const row = document.createElement('div');
+  row.className = `project-tree-row${sessionsProjectFilter === value ? ' selected' : ''}`;
+  row.style.paddingLeft = '6px';
+  const chevron = document.createElement('button');
+  chevron.type = 'button';
+  chevron.className = 'project-tree-chevron placeholder';
+  chevron.textContent = glyph;
+  row.appendChild(chevron);
+  const name = document.createElement('span');
+  name.className = 'project-tree-name';
+  name.textContent = label;
+  row.appendChild(name);
+  row.addEventListener('click', () => setSessionsProjectFilter(value));
+  container.appendChild(row);
+}
+
+function sessionsProjectFilterLabel() {
+  if (!sessionsProjectFilter) return 'All projects';
+  if (sessionsProjectFilter === '__none__') return 'No project';
+  const node = findProjectNodeById(projectTreeNodes, sessionsProjectFilter);
+  return node ? (node.name || 'Project') : 'All projects';
+}
+
+function updateSessionsProjectFilterButtons() {
+  const label = sessionsProjectFilterLabel();
+  const active = !!sessionsProjectFilter; // '' (All) = inactive
+  document.querySelectorAll('.sessions-project-filter-label').forEach((el) => { el.textContent = label; });
+  document.querySelectorAll('.sessions-project-filter-btn').forEach((btn) => {
+    btn.title = `Filter by project: ${label}`;
+    btn.classList.toggle('active', active);
+  });
+}
+
+function closeSessionsProjectFilterPopovers() {
+  document.querySelectorAll('.sessions-project-filter-pop').forEach((pop) => { pop.hidden = true; });
+  document.querySelectorAll('.sessions-project-filter-btn').forEach((btn) => btn.setAttribute('aria-expanded', 'false'));
+}
+
+function setSessionsProjectFilter(value) {
+  sessionsProjectFilter = String(value || '');
+  updateSessionsProjectFilterButtons();
+  closeSessionsProjectFilterPopovers();
+  renderSessionsProjectFilterTree();
+  updateSessionsUI().catch((err) => console.warn('[sessions-project-filter] refresh failed:', err));
+}
+
+// Flat, selectable project row (used in search mode — no collapse chevron).
+function appendSessionsFilterProjectRow(container, node, depth) {
+  const row = document.createElement('div');
+  row.className = `project-tree-row${sessionsProjectFilter === node.id ? ' selected' : ''}`;
+  row.style.paddingLeft = `${6 + depth * 14}px`;
+  const chevron = document.createElement('button');
+  chevron.type = 'button';
+  chevron.className = 'project-tree-chevron placeholder';
+  chevron.textContent = '▸';
+  row.appendChild(chevron);
+  const name = document.createElement('span');
+  name.className = 'project-tree-name';
+  name.textContent = node.name || 'Untitled';
+  row.appendChild(name);
+  row.addEventListener('click', () => setSessionsProjectFilter(node.id));
+  container.appendChild(row);
+}
+
+function renderSessionsProjectFilterTree() {
+  // Drop a stale selection (project removed from the tree) back to "All".
+  if (sessionsProjectFilter && sessionsProjectFilter !== '__none__' &&
+      !findProjectNodeById(projectTreeNodes, sessionsProjectFilter)) {
+    sessionsProjectFilter = '';
+  }
+
+  const query = String(sessionsProjectFilterQuery || '').trim().toLowerCase();
+  const opts = {
+    expandedSet: sessionsFilterExpandedIds,
+    rerender: renderSessionsProjectFilterTree,
+    isSelected: (node) => sessionsProjectFilter === node.id,
+    onSelect: (node) => setSessionsProjectFilter(node.id),
+  };
+
+  document.querySelectorAll('.sessions-project-filter-tree').forEach((container) => {
+    container.innerHTML = '';
+    appendSessionsFilterSpecialRow(container, 'All projects', '', '●');
+    appendSessionsFilterSpecialRow(container, 'No project', '__none__', '○');
+    if (query) {
+      // Search mode: flat list of projects whose name matches (like the web SCOPE search).
+      const walk = (nodes, depth) => (Array.isArray(nodes) ? nodes : []).forEach((node) => {
+        if (String(node.name || '').toLowerCase().includes(query)) {
+          appendSessionsFilterProjectRow(container, node, depth);
+        }
+        walk(node.children, depth + 1);
+      });
+      walk(projectTreeNodes, 0);
+    } else {
+      (Array.isArray(projectTreeNodes) ? projectTreeNodes : [])
+        .forEach((node) => renderProjectTreeNode(container, node, 0, opts));
+    }
+  });
+  updateSessionsProjectFilterButtons();
+}
+
 async function updateSessionsUI(options = {}) {
   const containers = Array.from(document.querySelectorAll('.sessions-list'));
   if (containers.length === 0) return;
 
+  if (!isProjectTreeLoaded && projectTreeNodes.length === 0) {
+    await loadAndRenderProjectTree();
+  }
+
+  renderSessionsProjectFilterTree();
   const allSessions = await loadSessionsList(options);
   const query = String(sessionsSearchQuery || '').trim().toLowerCase();
-  const sessions = query
-    ? allSessions.filter((session) => {
-        const sessionId = String(session.sessionId ?? session.session_id ?? '').trim().toLowerCase();
-        const name = String(session.name || session.title || '').trim().toLowerCase();
-        return sessionId.includes(query) || name.includes(query);
-      })
-    : allSessions;
+  const projectFilter = String(sessionsProjectFilter || '');
+  const allowedProjectIds = projectFilter && projectFilter !== '__none__'
+    ? collectDescendantTagIds(projectTreeNodes, projectFilter)
+    : null;
+  const sessions = allSessions.filter((session) => {
+    const sessionId = String(session.sessionId ?? session.session_id ?? '').trim().toLowerCase();
+    const name = String(session.name || session.title || '').trim().toLowerCase();
+    const matchesQuery = !query || sessionId.includes(query) || name.includes(query);
+    if (!matchesQuery) return false;
+
+    const sessionProjectTagId = session.projectTagId ?? session.project_tag_id;
+    if (projectFilter === '') return true;
+    if (projectFilter === '__none__') return !sessionProjectTagId;
+    return allowedProjectIds.has(String(sessionProjectTagId || ''));
+  });
   containers.forEach((container) => renderSessionsIntoContainer(container, sessions));
 }
 
@@ -6910,6 +7080,41 @@ async function initSessionsTab() {
       updateSessionsUI().catch(err => console.warn('[sessions-search] refresh failed:', err));
     });
   });
+
+  const syncSessionsProjectSearchInputs = () => {
+    document.querySelectorAll('.sessions-project-search').forEach((input) => {
+      if (input.value !== sessionsProjectFilterQuery) input.value = sessionsProjectFilterQuery;
+    });
+  };
+  document.querySelectorAll('.sessions-project-search').forEach((input) => {
+    input.value = sessionsProjectFilterQuery;
+    input.addEventListener('input', (event) => {
+      sessionsProjectFilterQuery = String(event?.target?.value || '');
+      syncSessionsProjectSearchInputs();
+      renderSessionsProjectFilterTree();
+    });
+  });
+
+  document.querySelectorAll('.sessions-project-filter-btn').forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const wrap = btn.closest('.sessions-project-filter-wrap');
+      const pop = wrap?.querySelector('.sessions-project-filter-pop');
+      if (!pop) return;
+      const willOpen = pop.hidden;
+      closeSessionsProjectFilterPopovers();
+      if (willOpen) {
+        pop.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+        wrap.querySelector('.sessions-project-search')?.focus();
+      }
+    });
+  });
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.sessions-project-filter-wrap')) closeSessionsProjectFilterPopovers();
+  });
+
+  renderSessionsProjectFilterTree();
 
   document.querySelectorAll('.save-session-action').forEach((saveSessionBtn) => {
     saveSessionBtn.addEventListener('click', async () => {

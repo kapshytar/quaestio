@@ -35,8 +35,10 @@ import android.widget.AbsListView
 import android.widget.CheckBox
 import android.widget.CompoundButton
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ListView
+import android.widget.PopupWindow
 import android.widget.ScrollView
 import android.widget.TextView
 import android.view.ViewGroup
@@ -127,6 +129,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     @Volatile private var projectRefreshInFlight: Boolean = false
     @Volatile private var sessionsRefreshInFlight: Boolean = false
     private val expandedProjectNodeIds = mutableSetOf<String>()
+    private var blurDialogCount = 0
     private var pendingProjectSelectionArmed: Boolean = false
     private var pendingProjectSelectionNode: ProjectTreeNode? = null
     @Volatile private var lastProjectFetchError: String? = null
@@ -813,7 +816,36 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     }
 
     private fun styleDialogWindow(dialog: AlertDialog) {
-        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.window?.let { w ->
+            // Transparent window: the blurred+dimmed activity behind (below) keeps
+            // the title/button zones readable without an extra card frame.
+            w.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            // Real background blur: cross-window blur is unsupported on this
+            // hardware class (e.g. S10+), so blur the ACTIVITY root view with a
+            // view-level RenderEffect while the dialog is up, and lift it when
+            // the dialog's decor detaches (survives any setOnDismissListener
+            // the caller installs afterwards).
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                val activityRoot = binding.root
+                blurDialogCount += 1
+                activityRoot.setRenderEffect(
+                    android.graphics.RenderEffect.createBlurEffect(
+                        24f, 24f, android.graphics.Shader.TileMode.CLAMP
+                    )
+                )
+                w.decorView.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v: View) = Unit
+                    override fun onViewDetachedFromWindow(v: View) {
+                        // Refcounted: overlapping styled dialogs share the activity-root
+                        // blur; only the LAST one to close lifts it.
+                        blurDialogCount = (blurDialogCount - 1).coerceAtLeast(0)
+                        if (blurDialogCount == 0) activityRoot.setRenderEffect(null)
+                    }
+                })
+            }
+            w.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            w.setDimAmount(0.45f)
+        }
     }
 
     private fun showProjectDialogWithData(projects: List<ProjectTreeNode>) {
@@ -1174,6 +1206,186 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             }
         }
         walk(nodes)
+    }
+
+    /** Sessions-dialog project filter popover (docs/PROJECT_SESSION_FILTER.md).
+     *  Compact PopupWindow anchored to the filter button: search field on top,
+     *  "All projects" + "No project" rows, then either the collapsible project
+     *  tree (empty query, filter-local expand state, default all collapsed —
+     *  reuses the renderProjectTreeNode row look) or a flat depth-indented
+     *  name-match list (non-empty query). Row tap reports the chosen filter id
+     *  (null = All, "__none__" = No project, else project id) and dismisses. */
+    private fun showProjectFilterPopup(
+        anchor: View,
+        currentFilterId: String?,
+        onSelect: (String?) -> Unit
+    ) {
+        val filterExpandedIds = mutableSetOf<String>()
+
+        val rowsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val rowsScroll = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(300)
+            )
+            addView(rowsContainer)
+        }
+
+        lateinit var popup: PopupWindow
+        lateinit var renderRows: (String) -> Unit
+
+        fun simpleRow(label: String, filterId: String?, depth: Int = 0): TextView {
+            return TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                setPadding(dp(14 + depth * 14), dp(10), dp(14), dp(10))
+                text = label
+                textSize = 14f
+                setTextColor(
+                    ContextCompat.getColor(
+                        this@MainActivity,
+                        if (filterId == currentFilterId) R.color.action_primary else R.color.text_primary
+                    )
+                )
+                setOnClickListener {
+                    popup.dismiss()
+                    onSelect(filterId)
+                }
+            }
+        }
+
+        // Same row pattern as renderProjectTreeNode (chevron + indent), but
+        // with filter-local expand state and a filter-select tap action.
+        fun addTreeRow(node: ProjectTreeNode, depth: Int) {
+            val hasChildren = node.children.isNotEmpty()
+            val nodeKey = node.pathKey.ifBlank { node.id }
+            val isExpanded = filterExpandedIds.contains(nodeKey)
+
+            val row = LinearLayout(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(8 + depth * 14), dp(8), dp(10), dp(8))
+            }
+            val toggle = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(14), ViewGroup.LayoutParams.WRAP_CONTENT)
+                textSize = 12f
+                gravity = android.view.Gravity.CENTER
+                text = when {
+                    !hasChildren -> ""
+                    isExpanded -> "▾"
+                    else -> "▸"
+                }
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+                if (hasChildren) {
+                    setOnClickListener {
+                        if (filterExpandedIds.contains(nodeKey)) filterExpandedIds.remove(nodeKey)
+                        else filterExpandedIds.add(nodeKey)
+                        renderRows("")
+                    }
+                }
+            }
+            row.addView(toggle)
+            row.addView(TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                text = node.name
+                textSize = 14f
+                setTextColor(
+                    ContextCompat.getColor(
+                        this@MainActivity,
+                        if (node.id == currentFilterId) R.color.action_primary else R.color.text_primary
+                    )
+                )
+            })
+            row.setOnClickListener {
+                popup.dismiss()
+                onSelect(node.id)
+            }
+            rowsContainer.addView(row)
+
+            if (hasChildren && isExpanded) {
+                node.children.forEach { child -> addTreeRow(child, depth + 1) }
+            }
+        }
+
+        fun flattenMatches(nodes: List<ProjectTreeNode>, query: String, depth: Int): List<Pair<ProjectTreeNode, Int>> {
+            return nodes.flatMap { node ->
+                val self = if (node.name.lowercase(Locale.ROOT).contains(query)) listOf(node to depth) else emptyList()
+                self + flattenMatches(node.children, query, depth + 1)
+            }
+        }
+
+        renderRows = { query ->
+            rowsContainer.removeAllViews()
+            rowsContainer.addView(simpleRow("All projects", null))
+            rowsContainer.addView(simpleRow("No project", "__none__"))
+            val normalized = query.trim().lowercase(Locale.ROOT)
+            if (normalized.isBlank()) {
+                projectTreeNodes.forEach { node -> addTreeRow(node, depth = 0) }
+            } else {
+                flattenMatches(projectTreeNodes, normalized, depth = 0).forEach { (node, depth) ->
+                    rowsContainer.addView(simpleRow(node.name, node.id, depth))
+                }
+            }
+        }
+
+        val searchField = EditText(this).apply {
+            hint = "Filter projects…"
+            setSingleLine(true)
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#888888"))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(10).toFloat()
+                setColor(Color.parseColor("#2B2B2B"))
+                setStroke(dp(1), Color.parseColor("#474747"))
+            }
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    renderRows(s?.toString().orEmpty())
+                }
+                override fun afterTextChanged(s: Editable?) = Unit
+            })
+        }
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = AppCompatResources.getDrawable(this@MainActivity, R.drawable.bg_dialog_surface)
+            clipToOutline = true
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            addView(searchField, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            addView(rowsScroll, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(6)
+            })
+        }
+
+        renderRows("")
+
+        popup = PopupWindow(
+            content,
+            dp(280),
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true
+        ).apply {
+            isOutsideTouchable = true
+            elevation = dp(8).toFloat()
+        }
+        popup.showAsDropDown(anchor, 0, dp(4))
     }
 
     private fun loadProjectTreeFromApi(): List<ProjectTreeNode> {
@@ -2016,7 +2228,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             name = prompt.take(500).ifBlank { "Session" },
             dreamSessionId = localId,
             slotUrls = slotUrls,
-            noteId = null
+            noteId = null,
+            projectTagId = activeProjectId
         )
         updateSessionIndicator()
         Toast.makeText(this, "Saved locally (S$localId)", Toast.LENGTH_SHORT).show()
@@ -2596,7 +2809,8 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                     name = prompt.take(500).ifBlank { "Session" },
                     dreamSessionId = result.sessionId,
                     slotUrls = slotUrls,
-                    noteId = result.noteId
+                    noteId = result.noteId,
+                    projectTagId = activeProjectId
                 )
                 if (rpcUrl.isNotBlank() && apiKey.isNotBlank()) {
                     thread {
@@ -2802,6 +3016,33 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             if (nested != null) return nested
         }
         return null
+    }
+
+    /** Canonical DAG-descendant walk — port of dream-tracker's
+     *  collectDescendantTagIds (docs/PROJECT_SESSION_FILTER.md). Builds a
+     *  parentId->childIds map by walking the whole forest once, then does an
+     *  iterative, global-deduped ArrayDeque walk from projectId. Cycle-safe. */
+    private fun collectProjectAndDescendantIds(nodes: List<ProjectTreeNode>, projectId: String): Set<String> {
+        val childrenByParent = mutableMapOf<String, MutableList<String>>()
+        fun indexEdges(list: List<ProjectTreeNode>) {
+            list.forEach { node ->
+                if (node.children.isNotEmpty()) {
+                    childrenByParent.getOrPut(node.id) { mutableListOf() }.addAll(node.children.map { it.id })
+                }
+                indexEdges(node.children)
+            }
+        }
+        indexEdges(nodes)
+
+        val ids = mutableSetOf(projectId)
+        val queue = ArrayDeque<String>().apply { add(projectId) }
+        while (queue.isNotEmpty()) {
+            val cur = queue.removeFirst()
+            childrenByParent[cur]?.forEach { child ->
+                if (ids.add(child)) queue.add(child)
+            }
+        }
+        return ids
     }
 
     private fun findTextViewInTab(view: View): TextView? {
@@ -3203,6 +3444,13 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             if (sessionsRefreshInFlight) return
             sessionsRefreshInFlight = true
         }
+        if (projectTreeNodes.isEmpty()) {
+            val persisted = loadPersistedProjectTree()
+            if (persisted.isNotEmpty()) {
+                projectTreeNodes = persisted
+                projectTreeLoadedAtMs = persistedProjectTreeLoadedAtMs()
+            }
+        }
         setContextChipLoading(binding.chipSessions, true, "Loading…")
         val rpcUrl = SettingsManager.getDreamTrackerRpcUrl(this)
         val apiKey = SettingsManager.getDreamTrackerApiKey(this)
@@ -3403,6 +3651,19 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             }
             setPadding(dp(12), dp(10), dp(12), dp(10))
         }
+        // Stale selected id (project deleted from the tree) falls back to All —
+        // checked lazily in applySessionFilter via findProjectNode.
+        var selectedProjectFilterId: String? = null
+        val filterButton = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_sort_by_size)
+            contentDescription = "Filter by project"
+            background = ColorDrawable(Color.TRANSPARENT)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        val searchRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
         val listView = ListView(this).apply {
             adapter = sessionsAdapter
             divider = ColorDrawable(Color.parseColor("#1A737373"))
@@ -3437,7 +3698,18 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ))
-        surface.addView(searchInput, LinearLayout.LayoutParams(
+        searchRow.addView(searchInput, LinearLayout.LayoutParams(
+            0,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            1f
+        ))
+        searchRow.addView(filterButton, LinearLayout.LayoutParams(
+            dp(40),
+            dp(40)
+        ).apply {
+            leftMargin = dp(6)
+        })
+        surface.addView(searchRow, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ))
@@ -3453,16 +3725,44 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             ViewGroup.LayoutParams.WRAP_CONTENT
         ))
 
+        fun updateFilterButtonTint() {
+            val active = selectedProjectFilterId != null
+            filterButton.setColorFilter(
+                ContextCompat.getColor(
+                    this@MainActivity,
+                    if (active) R.color.action_primary else R.color.text_secondary
+                )
+            )
+        }
         val applySessionFilter = { query: String ->
+            // Stale selected id (project deleted from the tree) falls back to
+            // All — spec rule 6.
+            val projectFilterId = selectedProjectFilterId?.takeIf {
+                it == "__none__" || findProjectNode(projectTreeNodes, it, null) != null
+            }
+            if (projectFilterId != selectedProjectFilterId) {
+                selectedProjectFilterId = projectFilterId
+                updateFilterButtonTint()
+            }
             val normalized = query.trim().lowercase(Locale.ROOT)
-            val next = if (normalized.isBlank()) {
-                mutableSessions
-            } else {
-                mutableSessions.filter { session ->
+            // Computed ONCE per filter run, not per session (O(sessions*tree) otherwise).
+            val allowedProjectIds = projectFilterId
+                ?.takeIf { it != "__none__" }
+                ?.let { collectProjectAndDescendantIds(projectTreeNodes, it) }
+            val next = mutableSessions.filter { session ->
+                val matchesText = if (normalized.isBlank()) {
+                    true
+                } else {
                     val sessionId = (session.sessionId?.toString() ?: "").lowercase(Locale.ROOT)
                     val name = session.name.trim().lowercase(Locale.ROOT)
                     sessionId.contains(normalized) || name.contains(normalized)
                 }
+                val matchesProject = when (projectFilterId) {
+                    null -> true
+                    "__none__" -> session.projectTagId.isNullOrBlank()
+                    else -> session.projectTagId != null && allowedProjectIds?.contains(session.projectTagId) == true
+                }
+                matchesText && matchesProject
             }
             filteredSessions.clear()
             filteredSessions.addAll(next)
@@ -3475,6 +3775,14 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             }
             override fun afterTextChanged(s: Editable?) = Unit
         })
+        updateFilterButtonTint()
+        filterButton.setOnClickListener { anchor ->
+            showProjectFilterPopup(anchor, selectedProjectFilterId) { newFilterId ->
+                selectedProjectFilterId = newFilterId
+                updateFilterButtonTint()
+                applySessionFilter(searchInput.text?.toString().orEmpty())
+            }
+        }
 
         dialog = AlertDialog.Builder(this, R.style.ServiceDialogTheme)
             .setTitle(R.string.sessions_title)

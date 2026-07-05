@@ -2003,15 +2003,42 @@ final class MobileAppState: ObservableObject {
         return "Projects"
     }
 
-    func sessionsForDisplay(matching query: String = "") -> [SessionSnapshot] {
+    func sessionsForDisplay(matching query: String = "", projectFilter: ProjectFilter = .all) -> [SessionSnapshot] {
         let sessions = sortSessionsForDisplay(availableSessions)
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalized.isEmpty else { return sessions }
-        return sessions.filter { session in
+
+        let projectFiltered: [SessionSnapshot]
+        switch projectFilter {
+        case .all:
+            projectFiltered = sessions
+        case .none:
+            projectFiltered = sessions.filter { ($0.projectTagId ?? "").isEmpty }
+        case .project(let id):
+            // Stale-id fallback (parity with desktop/Android): a project deleted
+            // from the tree behaves as All, not a silent zero-result filter.
+            if !projectTreeNodes.isEmpty && findProjectNode(id: id, pathKey: nil, nodes: projectTreeNodes) == nil {
+                projectFiltered = sessions
+            } else {
+                let allowedIds = collectProjectAndDescendantIds(id, in: projectTreeNodes)
+                projectFiltered = sessions.filter { session in
+                    guard let tagId = session.projectTagId, !tagId.isEmpty else { return false }
+                    return allowedIds.contains(tagId)
+                }
+            }
+        }
+
+        guard !normalized.isEmpty else { return projectFiltered }
+        return projectFiltered.filter { session in
             let sessionId = session.sessionId.map(String.init)?.lowercased() ?? ""
             let name = displaySessionName(session).lowercased()
             return sessionId.contains(normalized) || name.contains(normalized)
         }
+    }
+
+    enum ProjectFilter: Hashable {
+        case all
+        case none
+        case project(String)
     }
 
     static let defaultSessionNamePattern = try! NSRegularExpression(pattern: #"^\d{2}:\d{2}\s\d{2}\.\d{2}$"#)
@@ -2056,6 +2083,32 @@ final class MobileAppState: ObservableObject {
             }
         }
         return nil
+    }
+
+    // Faithful port of dream-tracker queries/tagGraph.ts collectDescendantTagIds — see
+    // docs/PROJECT_SESSION_FILTER.md "Kernel port". Builds a parentId -> [childId] adjacency
+    // by walking the whole forest once, then does an iterative stack walk from rootId with a
+    // global-dedup Set (cycle-safe), instead of recursing only from the found node's own subtree.
+    func collectProjectAndDescendantIds(_ projectId: String, in nodes: [ProjectTreeNode]) -> Set<String> {
+        var childrenByParent: [String: [String]] = [:]
+        func indexChildren(_ list: [ProjectTreeNode]) {
+            for node in list {
+                childrenByParent[node.id, default: []].append(contentsOf: node.children.map(\.id))
+                indexChildren(node.children)
+            }
+        }
+        indexChildren(nodes)
+
+        var ids: Set<String> = [projectId]
+        var stack: [String] = [projectId]
+        while let cur = stack.popLast() {
+            for child in childrenByParent[cur] ?? [] {
+                guard !ids.contains(child) else { continue }
+                ids.insert(child)
+                stack.append(child)
+            }
+        }
+        return ids
     }
 
     private func normalizePromptForComparison(_ value: String) -> String {
