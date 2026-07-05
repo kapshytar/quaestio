@@ -9,6 +9,7 @@
 
 ## Stable
 
+- WebView renderer-crash recovery (`ChatFragment`) always loads a page after `onRenderProcessGone`: restores saved state if possible, else falls back to last known URL / slot default, fixing the black-screen-after-background bug; `MainActivity` resumes/pauses WebView JS timers on whole-app foreground/background (not per-tab) and flushes cookies on `onTrimMemory`.
 - Cross-cutting ecosystem rules are now split into root handoff docs:
   - `SYSTEM_CAPABILITIES.md`
   - `SESSION_AND_INGEST_RULES.md`

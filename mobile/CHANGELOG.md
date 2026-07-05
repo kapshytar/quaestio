@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased] 2026-07-06
+
+- **Perf (Android): 3 targeted WebView/scrape fixes, no tabs unloaded** — all
+  slots still stay live for send-to-all; `offscreenPageLimit` unchanged.
+  1. Hardware layer (`LAYER_TYPE_HARDWARE`) is now applied only to the
+     currently visible tab's WebView (`ChatFragment.onResume`/`onPause`, which
+     ViewPager2's default `BEHAVIOR_RESUME_ONLY_CURRENT_FRAGMENT` fires per-tab
+     on swipe); background tabs sit at `LAYER_TYPE_NONE` instead of every
+     WebView holding a GPU-composited layer at once.
+  2. `MainActivity.scheduleSlotLoading` now loads the active slot immediately
+     and staggers the remaining enabled slots' initial SPA load ~2.5s apart
+     (`SLOT_LOAD_STAGGER_MS`, up from a ~250-400ms cascade) so multiple chat
+     SPAs don't all boot/parse/XHR at once.
+  3. `shared/js/scrapeReply.js` `findPromptAnchor()` now short-circuits: it
+     first scans all candidate elements for an exact/`includes` prompt match
+     (cheap) and only falls back to the `boundedLevenshtein` fuzzy pass over
+     the remaining elements if no exact match was found anywhere.
+     `shared/js/extractLatestAssistantRaw.js` now throttles: since the script
+     is fully re-injected on every native `evaluateJavascript()` call (no
+     module state survives between calls), the result is cached on
+     `window.__verityExtractCache` and re-used if called again within 700ms.
+
 ## 2.8.9
 
 - **Sessions: filter by project (Android + iOS + desktop parity)** — compact

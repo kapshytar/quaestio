@@ -3,6 +3,7 @@ package com.chataggregator.app
 import android.Manifest
 import android.animation.ValueAnimator
 import android.app.Activity
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -78,6 +79,9 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         private const val TAG = "MainActivity"
         private const val MERGE_TAB_INDEX = SlotManager.NUM_SLOTS
         private const val STARTUP_SLOT_LOADING_DELAY_MS = 180L
+        // Perf: stagger background slot loads so SPA boot-up (JS/CSS parse, initial
+        // XHRs) doesn't all happen at once; active slot still loads immediately.
+        private const val SLOT_LOAD_STAGGER_MS = 2500L
         private const val SEND_STAGGER_MS = 150L
         private const val SEND_DEBOUNCE_MS = 500L
         private const val WEBVIEW_CACHE_MAX_BYTES = 100L * 1024L * 1024L // 100 MB
@@ -241,6 +245,32 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         super.onResume()
         billingManager.start()
         updateSessionIndicator()
+        // Fix: resume JS timers on the whole WebView process — app came back to foreground.
+        anyLiveWebView()?.resumeTimers()
+    }
+
+    override fun onStop() {
+        // Fix: pause JS timers on the whole WebView process only when the entire app
+        // goes to background (not on fragment swipe inside ViewPager2, which triggers
+        // fragment onPause/onStop per-tab and would otherwise freeze background tabs).
+        anyLiveWebView()?.pauseTimers()
+        super.onStop()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            Log.i(TAG, "onTrimMemory level=$level — flushing cookies")
+            CookieManager.getInstance().flush()
+        }
+    }
+
+    /** Any currently retained WebView, used only to call process-global WebView methods. */
+    private fun anyLiveWebView(): android.webkit.WebView? {
+        for (i in 0 until SlotManager.NUM_SLOTS) {
+            getFragment(i)?.webView?.let { return it }
+        }
+        return null
     }
 
     private fun requestMicPermissionIfNeeded() {
@@ -408,7 +438,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                             .forEach { add(it) }
                     }.distinct()
                     orderedSlots.forEachIndexed { index, slot ->
-                        val delay = if (index == 0) 0L else index * 400L
+                        val delay = if (index == 0) 0L else index * SLOT_LOAD_STAGGER_MS
                         handler.postDelayed({
                             loadSlotWithSessionOverride(slot, handler, forceReload = true)
                         }, delay)
@@ -418,16 +448,18 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
 
                 val enabled = enabledSlots.filter { it != currentTab }
 
-                // 1) Highest priority: currently visible tab
+                // 1) Highest priority: currently visible tab — load immediately
                 if (currentTab < SlotManager.NUM_SLOTS) {
                     loadSlotWithSessionOverride(currentTab, handler)
                 }
 
-                // 2) Other enabled slots
+                // 2) Other enabled slots — load sequentially, one every ~2.5s, so their
+                // SPA boot-up doesn't all compete for CPU/GPU at once (still all end up
+                // loaded, nothing is unloaded/skipped — see send-to-all requirement).
                 enabled.forEachIndexed { i, slot ->
                     handler.postDelayed({
                         loadSlotWithSessionOverride(slot, handler)
-                    }, 400L + i * 250L)
+                    }, (i + 1) * SLOT_LOAD_STAGGER_MS)
                 }
             }, 300L)
         }

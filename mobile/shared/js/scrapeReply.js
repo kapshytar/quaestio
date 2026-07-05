@@ -351,13 +351,14 @@
         return extractEmbeddedPromptText(value) || String(value || '');
       }
 
-      function promptScoreForCurrentSource(value) {
+      function promptScoreForCurrentSource(value, allowFuzzy = true) {
         const target = promptText(sourcePrompt);
         const candidate = promptText(promptComparableText(value));
         if (!target || !candidate) return 0;
         if (candidate === target) return 1000 + candidate.length;
         if (candidate.includes(target)) return 800 + target.length;
         if (target.includes(candidate) && candidate.length >= Math.min(80, target.length)) return 600 + candidate.length;
+        if (!allowFuzzy) return 0;
         return fuzzyPromptMatchScore(sourcePrompt, promptComparableText(value));
       }
 
@@ -707,6 +708,10 @@
         ];
         const seen = new Set();
         let best = null;
+        // Perf short-circuit: collect exact/includes matches first (cheap, no
+        // Levenshtein). Only fall back to the O(n*m) fuzzy pass over remaining
+        // elements when no exact match was found at all.
+        const fuzzyCandidates = [];
 
         selectors.forEach((sel) => {
           try {
@@ -716,8 +721,11 @@
               if (!visible(el)) return;
               if (isComposerElement(el)) return;
               const raw = extractStructuredText(el);
-              const score = promptScoreForCurrentSource(raw);
-              if (!score) return;
+              const score = promptScoreForCurrentSource(raw, false);
+              if (!score) {
+                fuzzyCandidates.push(el);
+                return;
+              }
               const rect = el.getBoundingClientRect();
               const metrics = computeStructureMetrics(raw);
               const candidate = { el, raw, flat: flatText(raw), score, top: rect.top, bottom: rect.bottom, metrics, structure: structureScore(metrics) };
@@ -725,6 +733,24 @@
                 best = candidate;
               }
             });
+          } catch (_) { }
+        });
+
+        if (best) return best;
+
+        fuzzyCandidates.forEach((el) => {
+          try {
+            if (!visible(el)) return;
+            if (isComposerElement(el)) return;
+            const raw = extractStructuredText(el);
+            const score = promptScoreForCurrentSource(raw, true);
+            if (!score) return;
+            const rect = el.getBoundingClientRect();
+            const metrics = computeStructureMetrics(raw);
+            const candidate = { el, raw, flat: flatText(raw), score, top: rect.top, bottom: rect.bottom, metrics, structure: structureScore(metrics) };
+            if (!best || candidate.score > best.score || (candidate.score === best.score && candidate.bottom > best.bottom)) {
+              best = candidate;
+            }
           } catch (_) { }
         });
 

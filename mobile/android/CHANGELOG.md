@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 Versioning: Android runtime builds are published as `v1.x.y+<gitCount>.<gitSha>`, with debug builds adding `-debug`.
 
+## [Unreleased] - 2026-07-06
+
+### Fixed
+- Black screen after returning to the app from long background: `ChatFragment.onRenderProcessGone` now saves the crashed WebView's state (`saveState`) before recreating it, and `recreateRetainedWebView` always loads something on the new WebView — restored state, else the fallback URL, else the last known page URL (`savedWebViewUrl`), else the slot's default service URL — instead of silently loading nothing when `url` was null/blank.
+- `MainActivity` now calls `resumeTimers()`/`pauseTimers()` on a live WebView from `onResume`/`onStop` (whole-app foreground/background transitions only, not per-tab `ChatFragment.onPause` during ViewPager2 swipes, which would have frozen background tabs' JS timers).
+- `MainActivity.onTrimMemory(level)` flushes `CookieManager` on `TRIM_MEMORY_UI_HIDDEN`+ without touching WebView lifecycles.
+
 ## [v1.102.0] - 2026-03-28
 
 ### Added

@@ -58,6 +58,7 @@ class ChatFragment : Fragment(), Findable {
     private var pendingAttachTimeoutRunnable: Runnable? = null
     private var retainedWebView: WebView? = null
     private var savedWebViewState: Bundle? = null
+    private var savedWebViewUrl: String? = null
     private val gson = Gson()
 
     val webView: WebView? get() = retainedWebView
@@ -112,8 +113,10 @@ class ChatFragment : Fragment(), Findable {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            // Hardware acceleration for GPU-composited rendering (critical for S10)
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            // Perf: hardware layer only while this tab is actually visible (set in
+            // onResume/onPause below); background WebViews stay LAYER_TYPE_NONE so
+            // GPU-composited layers aren't kept live for tabs the user can't see.
+            setLayerType(View.LAYER_TYPE_NONE, null)
             setBackgroundColor(context.getColor(R.color.bg_surface))
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -147,6 +150,9 @@ class ChatFragment : Fragment(), Findable {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     _binding?.progressBar?.visibility = View.GONE
                     webViewReady = true
+                    if (!url.isNullOrBlank()) {
+                        savedWebViewUrl = url
+                    }
                     if (slotIndex == 0) {
                         Log.i(TAG, "[slot-$slotIndex] onPageFinished url=${url.orEmpty()}")
                     }
@@ -204,7 +210,12 @@ class ChatFragment : Fragment(), Findable {
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                     Log.w(TAG, "[slot-$slotIndex] WebView renderer gone, crashed=${detail.didCrash()}, reloading")
                     val url = view.url
-                    recreateRetainedWebView(url)
+                    val state = try {
+                        Bundle().also { view.saveState(it) }
+                    } catch (_: Exception) {
+                        null
+                    }
+                    recreateRetainedWebView(url, savedState = state)
                     return true
                 }
             }
@@ -248,7 +259,12 @@ class ChatFragment : Fragment(), Findable {
         }
     }
 
-    private fun recreateRetainedWebView(url: String?, clearState: Boolean = false, clearCache: Boolean = false) {
+    private fun recreateRetainedWebView(
+        fallbackUrl: String?,
+        clearState: Boolean = false,
+        clearCache: Boolean = false,
+        savedState: Bundle? = null,
+    ) {
         val old = retainedWebView
         if (old != null) {
             (old.parent as? ViewGroup)?.removeView(old)
@@ -265,8 +281,32 @@ class ChatFragment : Fragment(), Findable {
         val replacement = createConfiguredWebView(requireContext())
         retainedWebView = replacement
         if (_binding != null) attachWebView(replacement)
-        if (!url.isNullOrBlank()) {
-            replacement.post { replacement.loadUrl(url) }
+        // Re-apply the visibility-based layer type (see onResume/onPause) since the
+        // fresh WebView starts at LAYER_TYPE_NONE regardless of current tab visibility.
+        if (isResumed) {
+            replacement.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        }
+
+        val restored = if (savedState != null) {
+            try {
+                replacement.restoreState(savedState) != null
+            } catch (_: Exception) {
+                false
+            }
+        } else {
+            false
+        }
+
+        if (!restored) {
+            val defaultServiceUrl = ServiceConfig.getById(currentServiceId)?.url
+            val loadUrl = fallbackUrl?.takeIf { it.isNotBlank() }
+                ?: savedWebViewUrl?.takeIf { it.isNotBlank() }
+                ?: defaultServiceUrl
+            if (!loadUrl.isNullOrBlank()) {
+                replacement.post { replacement.loadUrl(loadUrl) }
+            } else {
+                Log.e(TAG, "[slot-$slotIndex] recreateRetainedWebView: no URL available to load, WebView will stay blank")
+            }
         }
     }
 
@@ -677,12 +717,17 @@ $shared
     override fun onResume() {
         super.onResume()
         retainedWebView?.onResume()
+        // Hardware acceleration for GPU-composited rendering (critical for S10) —
+        // only while this tab is the visible one (ViewPager2's default
+        // BEHAVIOR_RESUME_ONLY_CURRENT_FRAGMENT calls onResume/onPause per-tab on swipe).
+        retainedWebView?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
     }
 
     override fun onPause() {
         // Fix #3: Flush cookies to disk so login state survives across app sessions
         CookieManager.getInstance().flush()
         retainedWebView?.onPause()
+        retainedWebView?.setLayerType(View.LAYER_TYPE_NONE, null)
         super.onPause()
     }
 

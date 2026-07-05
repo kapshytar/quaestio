@@ -1,5 +1,22 @@
 (function registerExtractLatestAssistantRawScript(global) {
+  // Perf: throttle re-entrant calls. This script is re-injected fresh on every
+  // native evaluateJavascript() call (no module-level state survives between
+  // calls), so the throttle cache must live on `global` (window) instead.
+  const THROTTLE_MS = 700;
+
   function run(payload) {
+    const cache = (global.__verityExtractCache = global.__verityExtractCache || { lastResult: null, lastTs: 0 });
+    const now = Date.now();
+    if (cache.lastResult !== null && (now - cache.lastTs) < THROTTLE_MS) {
+      return cache.lastResult;
+    }
+    const result = runUncached(payload);
+    cache.lastResult = result;
+    cache.lastTs = now;
+    return result;
+  }
+
+  function runUncached(payload) {
     try {
       const serviceId = String(payload?.serviceId || '');
       const sourcePrompt = String(payload?.sourcePrompt || '');
