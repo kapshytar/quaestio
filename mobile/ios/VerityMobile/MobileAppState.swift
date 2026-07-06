@@ -1028,12 +1028,17 @@ final class MobileAppState: ObservableObject {
     private func currentQuestionSessionId() async -> Int? {
         // Shared semantics reference:
         // Verity/docs/domains/SESSION_AND_INGEST_RULES.md
-        let state = sessionManager.getParallelIngestState()
         let activeRootId = await currentQuestionAggregatedNoteId()
-        if !activeRootId.isNilOrBlank, let sessionId = state.sessionId {
+        guard !activeRootId.isNilOrBlank else { return nil }
+        // Re-read state AFTER the await: currentQuestionAggregatedNoteId may have
+        // just restored the session link (and tail-refreshed activeNoteId); a
+        // pre-await snapshot would miss that and trigger a redundant second
+        // restore, which re-links activeNoteId to the snapshot root and can lose
+        // the first call's successful tail refresh.
+        if let sessionId = sessionManager.getParallelIngestState().sessionId {
             return sessionId
         }
-        return !activeRootId.isNilOrBlank ? await restoreStoredQuestionContextForCurrentSlots()?.sessionId : nil
+        return await restoreStoredQuestionContextForCurrentSlots()?.sessionId
     }
 
     private func currentQuestionAggregatedNoteId() async -> String? {
@@ -1519,18 +1524,27 @@ final class MobileAppState: ObservableObject {
         // keying context on the exact real-conversation fingerprint; mirror that.
         if !fingerprintHasRealConversation(slotURLs: currentSlotURLs, slotKeys: enabledSlotKeys) { return nil }
 
-        let matching = sessionManager.getAllSessions().first { snapshot in
+        let currentSourcePrompt = sessionManager.getParallelIngestState().sourcePrompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let sessions = sessionManager.getAllSessions()
+        func fingerprintMatches(_ snapshot: SessionSnapshot) -> Bool {
             guard snapshot.sessionId != nil, !(snapshot.noteId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return false
             }
-            // A full fingerprint match (all enabled slot URLs identical) already
-            // identifies this as the same browser conversation; a new prompt there
-            // is just the next turn, not a new question, so no prompt check needed.
-            // Note: this is unrelated to the S180 in-page reply-selection guard in
-            // scrapeReply.js (promptMatchesCurrentSource) — that guard picks the
-            // right DOM reply block for a given prompt and is untouched here.
             return buildSessionFingerprint(slotURLs: snapshot.slotURLs, slotKeys: enabledSlotKeys) == currentFingerprint
         }
+        // Prompt match is a PREFERENCE, not a filter: with several question
+        // snapshots sharing one fingerprint, prefer the one whose name matches
+        // the current prompt (old behavior, e.g. replacing an old question).
+        // But a full fingerprint match alone still restores — a NEW prompt in
+        // the same browser conversation is the next turn of the same session,
+        // not a new session (the 288/295 split bug). Unrelated to the S180
+        // in-page reply-selection guard in scrapeReply.js, which is untouched.
+        let matching = sessions.first { snapshot in
+            fingerprintMatches(snapshot)
+                && !currentSourcePrompt.isEmpty
+                && promptsReferToSameQuestion(currentSourcePrompt, snapshot.name)
+        } ?? sessions.first(where: fingerprintMatches)
 
         guard let matching else { return nil }
         sessionManager.updateSessionLink(
@@ -1544,7 +1558,15 @@ final class MobileAppState: ObservableObject {
         // startNewQuestionInCurrentSession relies on) and overwrites activeNoteId
         // set above if a later note exists.
         if let sessionId = matching.sessionId {
+            let noteIdBeforeRefresh = sessionManager.getParallelIngestState().activeNoteId
             await sessionManager.refreshActiveNoteIdForSession(sessionId)
+            let noteIdAfterRefresh = sessionManager.getParallelIngestState().activeNoteId
+            if noteIdAfterRefresh == noteIdBeforeRefresh {
+                // Either the root IS the tail, or the refresh silently failed
+                // (network error / signed out) and we stayed on the snapshot
+                // root — leave a diagnostic trace either way.
+                appendIngestEvent("restore-tail-refresh no-op session=\(sessionId) note=\(noteIdBeforeRefresh.ifEmpty("-"))")
+            }
         }
         updateSessionIndicator()
         return matching

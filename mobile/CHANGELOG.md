@@ -1,8 +1,13 @@
 # Changelog
 
-## [Unreleased] 2026-07-06
+## 2.8.10
 
-- iOS: merge aggregation now counts a slot as ready only when its text is stable across two polls (streaming-completion guard); added missing awaits for question-context lookups (MobileAppState.swift).
+- **Fix (iOS + Android): Collect no longer freezes a still-streaming reply into the note** — a slot counts as ready only when its text is non-empty AND unchanged across two consecutive polls (iOS `collectLatestRepliesForMerge` stability guard; Android `MergeFragment` text-stability gate on top of the existing stop-button READY check). Previously a slow-streaming ChatGPT answer could be captured as a mid-sentence stub.
+- **Fix (iOS): late Collect lands on the tail of the note chain, not the root** — session restore resolves the latest note of the chain before linking, so a re-collect of turn N no longer overwrites turn 1's answers.
+- **Fix (iOS): continuing a conversation no longer splits it into a new session** — a full slot-URL fingerprint match restores the existing session even when the new prompt differs from the session name (prompt match kept as a preference when several snapshots share a fingerprint).
+
+
+## [Unreleased] 2026-07-06
 
 - **Perf (Android): 3 targeted WebView/scrape fixes, no tabs unloaded** — all
   slots still stay live for send-to-all; `offscreenPageLimit` unchanged.

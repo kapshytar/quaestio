@@ -60,6 +60,13 @@ class MergeFragment : Fragment(), Findable {
     // Saved original scraped responses — passed to clarification for context
     private var lastOriginalResponses: Map<String, String> = emptyMap()
 
+    // Streaming-completion guard (mirrors iOS MobileAppState.stabilizeResponses,
+    // mobile/ios/VerityMobile/MobileAppState.swift ~L686-701): a slot can report
+    // status READY (stop-button gone) while its scraped text is still mid-edit
+    // from a race in the DOM. A slot only counts as settled once its per-title
+    // text is unchanged from the previous poll of this same wait loop.
+    private var previousStabilitySlotTexts: Map<String, String> = emptyMap()
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -618,6 +625,7 @@ class MergeFragment : Fragment(), Findable {
         pendingAggregation = true
         aggregationPaused = false
         aggregationWaitAttempt = 0
+        previousStabilitySlotTexts = emptyMap()
         appendVisibleDebug("Aggregation wait started")
         updateAggregationControls()
         waitForAggregationReadyOrPause()
@@ -667,38 +675,75 @@ class MergeFragment : Fragment(), Findable {
 
         refreshAggregationStatuses(silent = true) { items ->
             if (!pendingAggregation) return@refreshAggregationStatuses
-            val readyCount = items.count { it.status == AggregationSlotStatus.READY }
+            val statusReadyCount = items.count { it.status == AggregationSlotStatus.READY }
             val policy = aggregationPolicy()
-            appendVisibleDebug("Aggregation check ${aggregationWaitAttempt + 1}: $readyCount/${items.size} ready")
-            if (readyCount >= items.size && items.isNotEmpty()) {
-                appendVisibleDebug("All slots ready, collecting after settle delay")
-                setMergeStatusText("All ${items.size} slot(s) ready. Collecting now...")
-                aggregationHandler.postDelayed({ collectNowForPendingMerge(manual = false) }, policy.settleDelayMs)
-                return@refreshAggregationStatuses
-            }
-
-            aggregationWaitAttempt += 1
-            if (aggregationWaitAttempt >= policy.maxChecks) {
-                if (policy.allowPartialResults && readyCount >= policy.minimumRepliesRequired) {
-                    appendVisibleDebug("Aggregation timeout reached with partial data; collecting now")
-                    setMergeStatusText("Collected $readyCount/${items.size} source reply(s). Running merge...")
-                    collectNowForPendingMerge(manual = false)
-                    return@refreshAggregationStatuses
+            appendVisibleDebug("Aggregation check ${aggregationWaitAttempt + 1}: $statusReadyCount/${items.size} ready")
+            if (statusReadyCount >= items.size && items.isNotEmpty()) {
+                val activity = requireActivity() as? MainActivity
+                if (activity == null) return@refreshAggregationStatuses
+                // Status gate alone (stop-button gone) can fire while a slot's DOM
+                // text is still finishing a race — confirm with the text-stability
+                // guard before treating this as settled.
+                activity.collectLatestRepliesFromEnabledSlots { responses ->
+                    val stableCount = stableSlotCount(responses)
+                    if (!pendingAggregation) return@collectLatestRepliesFromEnabledSlots
+                    if (stableCount >= items.size) {
+                        appendVisibleDebug("All slots ready and text-stable, collecting after settle delay")
+                        setMergeStatusText("All ${items.size} slot(s) ready. Collecting now...")
+                        aggregationHandler.postDelayed({ collectNowForPendingMerge(manual = false) }, policy.settleDelayMs)
+                        return@collectLatestRepliesFromEnabledSlots
+                    }
+                    appendVisibleDebug("Aggregation check ${aggregationWaitAttempt + 1}: $stableCount/${items.size} text-stable, still streaming")
+                    scheduleNextAggregationWait(items.size, stableCount, policy)
                 }
-                appendVisibleDebug("Aggregation still waiting after $aggregationWaitAttempt checks")
-                setMergeStatusText("Aggregation still waiting. Use Collect now or Pause aggregation.")
                 return@refreshAggregationStatuses
             }
 
-            setMergeStatusText("Waiting for replies: $readyCount/${items.size} ready")
-            aggregationHandler.postDelayed({ waitForAggregationReadyOrPause() }, policy.waitIntervalMs)
+            scheduleNextAggregationWait(items.size, statusReadyCount, policy)
         }
+    }
+
+    /**
+     * Shared "not settled yet" tail for waitForAggregationReadyOrPause: bumps the
+     * attempt counter, and either times out with a partial-results collect, gives
+     * up, or reschedules the next poll. `readyCount` here is whichever gate
+     * (status-only, or status+text-stability) the caller is measuring.
+     */
+    private fun scheduleNextAggregationWait(totalSlots: Int, readyCount: Int, policy: MergeAggregationPolicy) {
+        aggregationWaitAttempt += 1
+        if (aggregationWaitAttempt >= policy.maxChecks) {
+            if (policy.allowPartialResults && readyCount >= policy.minimumRepliesRequired) {
+                appendVisibleDebug("Aggregation timeout reached with partial data; collecting now")
+                setMergeStatusText("Collected $readyCount/$totalSlots source reply(s). Running merge...")
+                collectNowForPendingMerge(manual = false)
+                return
+            }
+            appendVisibleDebug("Aggregation still waiting after $aggregationWaitAttempt checks")
+            setMergeStatusText("Aggregation still waiting. Use Collect now or Pause aggregation.")
+            return
+        }
+
+        setMergeStatusText("Waiting for replies: $readyCount/$totalSlots ready")
+        aggregationHandler.postDelayed({ waitForAggregationReadyOrPause() }, policy.waitIntervalMs)
+    }
+
+    /**
+     * Streaming-completion guard (mirrors iOS stabilizeResponses). A slot's text
+     * only counts toward readiness if it is non-empty AND byte-for-byte unchanged
+     * from the previous poll of this same wait loop.
+     */
+    private fun stableSlotCount(responses: Map<String, String>): Int {
+        val previous = previousStabilitySlotTexts
+        val stableCount = responses.count { (title, text) -> text.isNotEmpty() && previous[title] == text }
+        previousStabilitySlotTexts = responses
+        return stableCount
     }
 
     private fun finishAggregationState() {
         pendingAggregation = false
         aggregationPaused = false
         aggregationWaitAttempt = 0
+        previousStabilitySlotTexts = emptyMap()
         aggregationHandler.removeCallbacksAndMessages(null)
         appendVisibleDebug("Aggregation state cleared")
         updateAggregationControls()

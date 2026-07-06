@@ -12,6 +12,7 @@
 - Migration notes under `docs/` explain the move into this repo and should reflect actual migration status.
 - 2026-07-03: this monorepo (`desktop/` + `mobile/`) is now under push-ritual doc-coverage enforcement — see `../.docs-coverage-map.txt` at the repo root and `rituals/push-ritual.sh` step `[4/6]`; pushing mobile code (`shared/`, `ios/`, `android/`) without a matching doc/CURRENT_STATE.md touch is blocked in strict mode.
 - 2026-07-06: 3 Android/shared-js perf fixes (`android/.../ChatFragment.kt`, `MainActivity.kt`, `shared/js/scrapeReply.js`, `shared/js/extractLatestAssistantRaw.js`) touched `CHANGELOG.md` + this file to satisfy the doc-coverage gate above.
+- 2026-07-06 (2.8.10): Collect streaming-completion guard on both clients — a slot is ready only when its scraped text is non-empty AND unchanged across two consecutive polls (iOS `MobileAppState.collectLatestRepliesForMerge`, Android `MergeFragment` text-stability gate over the stop-button READY check). iOS session restore now links a late Collect to the tail of the note chain (not the root) and accepts a full slot-URL fingerprint match without a prompt-name match (prompt match kept as a preference) — fixes mid-stream reply stubs, turn-1 answers overwritten by a late re-collect, and duplicate-session splits when continuing a conversation.
 
 ## Stable
 
