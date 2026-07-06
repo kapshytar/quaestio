@@ -729,7 +729,12 @@
               const rect = el.getBoundingClientRect();
               const metrics = computeStructureMetrics(raw);
               const candidate = { el, raw, flat: flatText(raw), score, top: rect.top, bottom: rect.bottom, metrics, structure: structureScore(metrics) };
-              if (!best || candidate.score > best.score || (candidate.score === best.score && candidate.bottom > best.bottom)) {
+              if (
+                !best ||
+                candidate.score > best.score ||
+                (candidate.score === best.score && candidate.flat.length < best.flat.length) ||
+                (candidate.score === best.score && candidate.flat.length === best.flat.length && candidate.bottom > best.bottom)
+              ) {
                 best = candidate;
               }
             });
@@ -748,7 +753,12 @@
             const rect = el.getBoundingClientRect();
             const metrics = computeStructureMetrics(raw);
             const candidate = { el, raw, flat: flatText(raw), score, top: rect.top, bottom: rect.bottom, metrics, structure: structureScore(metrics) };
-            if (!best || candidate.score > best.score || (candidate.score === best.score && candidate.bottom > best.bottom)) {
+            if (
+              !best ||
+              candidate.score > best.score ||
+              (candidate.score === best.score && candidate.flat.length < best.flat.length) ||
+              (candidate.score === best.score && candidate.flat.length === best.flat.length && candidate.bottom > best.bottom)
+            ) {
               best = candidate;
             }
           } catch (_) { }

@@ -5,14 +5,20 @@
   const THROTTLE_MS = 700;
 
   function run(payload) {
-    const cache = (global.__verityExtractCache = global.__verityExtractCache || { lastResult: null, lastTs: 0 });
+    const cache = (global.__verityExtractCache = global.__verityExtractCache || { lastResult: null, lastTs: 0, lastKey: '' });
+    const key = JSON.stringify({
+      serviceId: String(payload?.serviceId || ''),
+      sourcePrompt: String(payload?.sourcePrompt || ''),
+      compactDiagnostics: payload?.compactDiagnostics === true
+    });
     const now = Date.now();
-    if (cache.lastResult !== null && (now - cache.lastTs) < THROTTLE_MS) {
+    if (cache.lastResult !== null && cache.lastKey === key && (now - cache.lastTs) < THROTTLE_MS) {
       return cache.lastResult;
     }
     const result = runUncached(payload);
     cache.lastResult = result;
     cache.lastTs = now;
+    cache.lastKey = key;
     return result;
   }
 

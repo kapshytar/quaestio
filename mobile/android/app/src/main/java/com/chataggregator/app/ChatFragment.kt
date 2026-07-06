@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -34,6 +35,8 @@ class ChatFragment : Fragment(), Findable {
     companion object {
         private const val TAG = "ChatFragment"
         private const val ARG_SLOT_INDEX = "slot_index"
+        private const val MAX_AUTO_RECOVERIES = 3
+        private const val AUTO_RECOVERY_WINDOW_MS = 60_000L
 
         fun newInstance(slotIndex: Int): ChatFragment {
             return ChatFragment().apply {
@@ -59,6 +62,11 @@ class ChatFragment : Fragment(), Findable {
     private var retainedWebView: WebView? = null
     private var savedWebViewState: Bundle? = null
     private var savedWebViewUrl: String? = null
+    private var needsRecovery = false
+    private var pendingRecoveryUrl: String? = null
+    private var pendingRecoveryState: Bundle? = null
+    private var pendingRecoveryRestoreRunnable: Runnable? = null
+    private val autoRecoveryTimestamps = ArrayDeque<Long>()
     private val gson = Gson()
 
     val webView: WebView? get() = retainedWebView
@@ -166,6 +174,11 @@ class ChatFragment : Fragment(), Findable {
                     }
                 }
 
+                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                    super.doUpdateVisitedHistory(view, url, isReload)
+                    url?.let { rememberLoadUrl(it) }
+                }
+
                 override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                     val failingUrl = request?.url?.toString().orEmpty()
                     val shouldLog = slotIndex == 0 || SettingsManager.isDetailedLoggingEnabled(requireContext())
@@ -208,14 +221,17 @@ class ChatFragment : Fragment(), Findable {
 
                 // Fix #1: Recover from renderer crash (black screen after long background)
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-                    Log.w(TAG, "[slot-$slotIndex] WebView renderer gone, crashed=${detail.didCrash()}, reloading")
+                    Log.w(TAG, "[slot-$slotIndex] WebView renderer gone, crashed=${detail.didCrash()}, resumed=$isResumed")
                     val url = view.url
                     val state = try {
                         Bundle().also { view.saveState(it) }
                     } catch (_: Exception) {
                         null
                     }
-                    recreateRetainedWebView(url, savedState = state)
+                    queueRendererRecovery(view, url, state)
+                    if (isResumed) {
+                        recoverRetainedWebViewIfAllowed("renderer-gone")
+                    }
                     return true
                 }
             }
@@ -259,21 +275,83 @@ class ChatFragment : Fragment(), Findable {
         }
     }
 
+    private fun queueRendererRecovery(crashedWebView: WebView, fallbackUrl: String?, savedState: Bundle?) {
+        fallbackUrl?.let { rememberLoadUrl(it) }
+        pendingRecoveryUrl = fallbackUrl?.takeIf { it.isNotBlank() && it != "about:blank" }
+        pendingRecoveryState = savedState
+        needsRecovery = true
+        detachAndDestroyRetainedWebView(crashedWebView)
+    }
+
+    private fun detachAndDestroyRetainedWebView(target: WebView? = retainedWebView, clearCache: Boolean = false) {
+        if (target == null) return
+        if (retainedWebView === target) {
+            retainedWebView = null
+        }
+        (target.parent as? ViewGroup)?.removeView(target)
+        try {
+            if (clearCache) target.clearCache(true)
+            target.stopLoading()
+            target.destroy()
+        } catch (_: Exception) {}
+        webViewReady = false
+    }
+
+    private fun canAutoRecover(nowMs: Long = SystemClock.elapsedRealtime()): Boolean {
+        while (autoRecoveryTimestamps.isNotEmpty() && nowMs - autoRecoveryTimestamps.first() > AUTO_RECOVERY_WINDOW_MS) {
+            autoRecoveryTimestamps.removeFirst()
+        }
+        if (autoRecoveryTimestamps.size >= MAX_AUTO_RECOVERIES) {
+            return false
+        }
+        autoRecoveryTimestamps.addLast(nowMs)
+        return true
+    }
+
+    private fun recoverRetainedWebViewIfAllowed(reason: String) {
+        if (!needsRecovery) return
+        if (!canAutoRecover()) {
+            Log.w(TAG, "[slot-$slotIndex] WebView auto-recovery suppressed after $MAX_AUTO_RECOVERIES attempts in ${AUTO_RECOVERY_WINDOW_MS / 1000}s; reason=$reason, will retry later")
+            return
+        }
+        val fallbackUrl = pendingRecoveryUrl
+        val savedState = pendingRecoveryState
+        pendingRecoveryUrl = null
+        pendingRecoveryState = null
+        needsRecovery = false
+        recreateRetainedWebView(fallbackUrl, savedState = savedState)
+    }
+
+    private fun rememberLoadUrl(url: String) {
+        if (url.isNotBlank() && url != "about:blank") {
+            savedWebViewUrl = url
+        }
+    }
+
+    private fun loadTrackedUrl(webView: WebView, url: String) {
+        rememberLoadUrl(url)
+        webView.loadUrl(url)
+    }
+
+    private fun postLoadUrl(webView: WebView, url: String) {
+        rememberLoadUrl(url)
+        webView.post { webView.loadUrl(url) }
+    }
+
+    private fun recoveryLoadUrl(fallbackUrl: String?): String? {
+        val defaultServiceUrl = ServiceConfig.getById(currentServiceId)?.url
+        return fallbackUrl?.takeIf { it.isNotBlank() && it != "about:blank" }
+            ?: savedWebViewUrl?.takeIf { it.isNotBlank() && it != "about:blank" }
+            ?: defaultServiceUrl
+    }
+
     private fun recreateRetainedWebView(
         fallbackUrl: String?,
         clearState: Boolean = false,
         clearCache: Boolean = false,
         savedState: Bundle? = null,
     ) {
-        val old = retainedWebView
-        if (old != null) {
-            (old.parent as? ViewGroup)?.removeView(old)
-            try {
-                if (clearCache) old.clearCache(true)
-                old.stopLoading()
-                old.destroy()
-            } catch (_: Exception) {}
-        }
+        detachAndDestroyRetainedWebView(clearCache = clearCache)
         webViewReady = false
         if (clearState) {
             savedWebViewState = null
@@ -297,23 +375,42 @@ class ChatFragment : Fragment(), Findable {
             false
         }
 
+        val fallbackLoadUrl = recoveryLoadUrl(fallbackUrl)
         if (!restored) {
-            val defaultServiceUrl = ServiceConfig.getById(currentServiceId)?.url
-            val loadUrl = fallbackUrl?.takeIf { it.isNotBlank() }
-                ?: savedWebViewUrl?.takeIf { it.isNotBlank() }
-                ?: defaultServiceUrl
-            if (!loadUrl.isNullOrBlank()) {
-                replacement.post { replacement.loadUrl(loadUrl) }
+            if (!fallbackLoadUrl.isNullOrBlank()) {
+                postLoadUrl(replacement, fallbackLoadUrl)
             } else {
                 Log.e(TAG, "[slot-$slotIndex] recreateRetainedWebView: no URL available to load, WebView will stay blank")
             }
+            return
         }
+
+        pendingRecoveryRestoreRunnable?.let { replacement.removeCallbacks(it) }
+        val restoreRunnable = Runnable restoreCheck@{
+            if (!isAdded || retainedWebView !== replacement) return@restoreCheck
+            try {
+                val currentUrl = replacement.url?.takeIf { it.isNotBlank() && it != "about:blank" }
+                if (currentUrl == null && !fallbackLoadUrl.isNullOrBlank()) {
+                    Log.w(TAG, "[slot-$slotIndex] restoreState produced no URL after renderer recovery; loading fallback")
+                    loadTrackedUrl(replacement, fallbackLoadUrl)
+                } else if (currentUrl != null) {
+                    webViewReady = true
+                }
+            } catch (_: Exception) {
+            } finally {
+                pendingRecoveryRestoreRunnable = null
+            }
+        }
+        pendingRecoveryRestoreRunnable = restoreRunnable
+        replacement.postDelayed(restoreRunnable, 500L)
+        fallbackLoadUrl?.let { rememberLoadUrl(it) }
     }
 
     private fun freshLoadUrl(url: String, clearCache: Boolean = false) {
         val webView = ensureWebView(restoreSavedState = false)
         webViewReady = false
         savedWebViewState = null
+        rememberLoadUrl(url)
         try {
             webView.stopLoading()
             if (clearCache) webView.clearCache(true)
@@ -338,7 +435,7 @@ class ChatFragment : Fragment(), Findable {
 
             val currentUrl = webView.url?.trim().orEmpty()
             if (webViewReady && currentUrl == url) return
-            webView.loadUrl(url)
+            loadTrackedUrl(webView, url)
             Log.d(TAG, "[slot-$slotIndex] Loading ${service.name} (Incognito=$isIncognito): $url")
         }
     }
@@ -355,7 +452,7 @@ class ChatFragment : Fragment(), Findable {
         )
         val currentUrl = webView.url?.trim().orEmpty()
         if (webViewReady && currentUrl == finalUrl) return
-        webView.loadUrl(finalUrl)
+        loadTrackedUrl(webView, finalUrl)
     }
 
     fun loadSessionUrl(url: String, forceReload: Boolean = false) {
@@ -375,7 +472,7 @@ class ChatFragment : Fragment(), Findable {
             return
         }
         if (webViewReady && currentUrl == finalUrl) return
-        webView.loadUrl(finalUrl)
+        loadTrackedUrl(webView, finalUrl)
     }
 
     fun reload() {
@@ -716,6 +813,7 @@ $shared
 
     override fun onResume() {
         super.onResume()
+        recoverRetainedWebViewIfAllowed("onResume")
         retainedWebView?.onResume()
         // Hardware acceleration for GPU-composited rendering (critical for S10) —
         // only while this tab is the visible one (ViewPager2's default
@@ -743,7 +841,9 @@ $shared
     override fun onDestroyView() {
         retainedWebView?.let { webView ->
             (webView.parent as? ViewGroup)?.removeView(webView)
+            pendingRecoveryRestoreRunnable?.let { webView.removeCallbacks(it) }
         }
+        pendingRecoveryRestoreRunnable = null
         _binding = null
         super.onDestroyView()
     }
@@ -751,11 +851,13 @@ $shared
     override fun onDestroy() {
         retainedWebView?.let { webView ->
             try {
+                pendingRecoveryRestoreRunnable?.let { webView.removeCallbacks(it) }
                 (webView.parent as? ViewGroup)?.removeView(webView)
                 webView.stopLoading()
                 webView.destroy()
             } catch (_: Exception) {}
         }
+        pendingRecoveryRestoreRunnable = null
         retainedWebView = null
         super.onDestroy()
     }

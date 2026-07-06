@@ -245,16 +245,6 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         super.onResume()
         billingManager.start()
         updateSessionIndicator()
-        // Fix: resume JS timers on the whole WebView process — app came back to foreground.
-        anyLiveWebView()?.resumeTimers()
-    }
-
-    override fun onStop() {
-        // Fix: pause JS timers on the whole WebView process only when the entire app
-        // goes to background (not on fragment swipe inside ViewPager2, which triggers
-        // fragment onPause/onStop per-tab and would otherwise freeze background tabs).
-        anyLiveWebView()?.pauseTimers()
-        super.onStop()
     }
 
     override fun onTrimMemory(level: Int) {
@@ -263,14 +253,6 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             Log.i(TAG, "onTrimMemory level=$level — flushing cookies")
             CookieManager.getInstance().flush()
         }
-    }
-
-    /** Any currently retained WebView, used only to call process-global WebView methods. */
-    private fun anyLiveWebView(): android.webkit.WebView? {
-        for (i in 0 until SlotManager.NUM_SLOTS) {
-            getFragment(i)?.webView?.let { return it }
-        }
-        return null
     }
 
     private fun requestMicPermissionIfNeeded() {

@@ -21,6 +21,7 @@
      is fully re-injected on every native `evaluateJavascript()` call (no
      module state survives between calls), the result is cached on
      `window.__verityExtractCache` and re-used if called again within 700ms.
+- **Fix (Android): WebView auto-recovery guard no longer strands a dead tab, and recovery restore no longer races destroy** — `ChatFragment.recoverRetainedWebViewIfAllowed` keeps `needsRecovery`/pending fallback URL+state when the 3/60s guard denies a retry (instead of clearing them), so the next `onResume` retries once the window elapses; `recreateRetainedWebView`'s delayed restore-check is now stored in `pendingRecoveryRestoreRunnable`, cancelled in `onDestroyView`/`onDestroy`, and guards on `isAdded`/identity before touching the WebView.
 
 ## 2.8.9
 
