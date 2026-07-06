@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.0
+
+- pending summary
+
+
 ## 2.8.10
 
 - **Fix (iOS + Android): Collect no longer freezes a still-streaming reply into the note** — a slot counts as ready only when its text is non-empty AND unchanged across two consecutive polls (iOS `collectLatestRepliesForMerge` stability guard; Android `MergeFragment` text-stability gate on top of the existing stop-button READY check). Previously a slow-streaming ChatGPT answer could be captured as a mid-sentence stub.
