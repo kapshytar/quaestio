@@ -9,6 +9,7 @@
 
 ## [Unreleased] 2026-07-06
 
+- **Fix (Android): auto-ingest no longer freezes a still-streaming reply into the note** — `MainActivity.startParallelAggregatedIngest` poll loop now applies the same text-stability guard as iOS `MobileAppState.stabilizeResponses` and `MergeFragment.stableSlotCount` (a slot's reply only counts once its text is unchanged from the previous poll), closing the last parity gap for the auto-collect path.
 - **Perf (Android): 3 targeted WebView/scrape fixes, no tabs unloaded** — all
   slots still stay live for send-to-all; `offscreenPageLimit` unchanged.
   1. Hardware layer (`LAYER_TYPE_HARDWARE`) is now applied only to the

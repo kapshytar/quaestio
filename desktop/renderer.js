@@ -278,6 +278,8 @@ const INGEST_INITIAL_DELAY_MS = 5000;
 const INGEST_GENERATION_WAIT_ATTEMPTS = 15;
 const INGEST_GENERATION_CHECK_MS = 2000;
 const INGEST_MIN_REPLY_CHARS = 20;
+const INGEST_STABILITY_MAX_CHECKS = 10;
+const INGEST_STABILITY_INTERVAL_MS = 1000;
 let activeIngestTraceId = '';
 let ingestSequenceCounter = 0;
 let ingestSequenceBySourceMessageId = new Map();
@@ -4884,7 +4886,7 @@ async function getLatestAssistantReply(slot) {
     function shouldSkipElement(el) {
       if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
       const tag = (el.tagName || '').toUpperCase();
-      if (['BUTTON', 'SVG', 'PATH', 'STYLE', 'SCRIPT', 'NOSCRIPT', 'MAT-ICON'].includes(tag)) return true;
+      if (['BUTTON', 'SVG', 'PATH', 'STYLE', 'SCRIPT', 'NOSCRIPT', 'MAT-ICON', 'USER-QUERY'].includes(tag)) return true;
       if (el.getAttribute('aria-hidden') === 'true') return true;
       const className = String(el.className || '');
       return /table-footer|action-button|copy-button|buttons-container|response-container-header|response-container-footer/i.test(className)
@@ -5717,6 +5719,32 @@ async function getScrapeDiagnostics(slot, serviceIdHint = '') {
   }
 }
 
+async function waitForSlotTextStability(enabledSlots, runId) {
+  const previousText = {};
+  const lastNonEmptyText = {};
+  for (let attempt = 1; attempt <= INGEST_STABILITY_MAX_CHECKS; attempt += 1) {
+    if (!isSamePendingAggregation(runId)) return;
+    let stableCount = 0;
+    for (const slot of enabledSlots) {
+      let text = '';
+      try {
+        const reply = await getLatestAssistantReply(slot);
+        text = String(reply?.raw || '').trim();
+      } catch (_) { }
+      if (text) lastNonEmptyText[slot] = text;
+      if (text && previousText[slot] === text) stableCount += 1;
+      previousText[slot] = text;
+    }
+    if (stableCount === enabledSlots.length) {
+      mergeLog(`Slot text stable after ${attempt} check(s)`, 'info');
+      return;
+    }
+    mergeLog(`Text stability check ${attempt}/${INGEST_STABILITY_MAX_CHECKS}: ${stableCount}/${enabledSlots.length} stable`, 'info');
+    if (attempt < INGEST_STABILITY_MAX_CHECKS) await sleep(INGEST_STABILITY_INTERVAL_MS);
+  }
+  mergeLog('Text stability timeout reached, proceeding with last observed text (collect-timeout-fallback)', 'warn');
+}
+
 async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestContext = {}, runId = '') {
   mergeLog(`Ingest polling started (expected slots: ${expectedSlotCount})`, 'info');
 
@@ -5772,6 +5800,11 @@ async function ingestAfterSlotsPolling(sourcePrompt, expectedSlotCount, ingestCo
     mergeLog('Auto aggregation paused during settle delay', 'warn');
     return;
   }
+
+  // Text-stability gate: keep re-reading slot text until it stops changing
+  // (or we hit the retry cap), so we don't scrape a mid-stream partial reply.
+  await waitForSlotTextStability(enabledSlots, runId);
+  if (!isSamePendingAggregation(runId)) return;
 
   await collectNowAggregation(false);
 }

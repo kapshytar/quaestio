@@ -118,6 +118,13 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     @Volatile private var autoAggregationPaused: Boolean = false
     @Volatile private var pendingAggregationPrompt: String? = null
     @Volatile private var pendingAggregationExpectedSlots: Int = 0
+    // Streaming-completion guard (mirrors iOS MobileAppState.stabilizeResponses,
+    // mobile/ios/VerityMobile/MobileAppState.swift ~L686-701, and
+    // MergeFragment.stableSlotCount ~L730-740): a slot can look "collected" while
+    // its scraped text is still mid-stream from a race in the DOM. A slot only
+    // counts as settled once its per-title text is unchanged from the previous
+    // poll of startParallelAggregatedIngest.
+    private var previousAutoAggregationSlotTexts: Map<String, String> = emptyMap()
     private val sessionManager by lazy { SessionManager(this, slotManager) }
     private val pendingSessionUrls = mutableMapOf<Int, String>()
     // Slots whose scheduled load either hasn't resolved a fragment yet (retry
@@ -2336,8 +2343,18 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 if (generation != ingestPollGeneration) return@collectLatestRepliesFromEnabledSlots
                 if (autoAggregationPaused) return@collectLatestRepliesFromEnabledSlots
 
+                // Streaming-completion guard (mirrors iOS MobileAppState.stabilizeResponses
+                // and MergeFragment.stableSlotCount, see previousAutoAggregationSlotTexts
+                // doc above): only count a slot's reply once its text is unchanged from
+                // the previous poll, so we don't ingest a still-streaming partial answer.
+                val previous = previousAutoAggregationSlotTexts
+                val stableResponses = responses.filter { (title, text) ->
+                    text.isNotEmpty() && previous[title] == text
+                }
+                previousAutoAggregationSlotTexts = responses
+
                 val currentBest =
-                    if (responses.size >= bestResponses.size) responses else bestResponses
+                    if (stableResponses.size >= bestResponses.size) stableResponses else bestResponses
                 val completed = currentBest.size >= expectedSlots || attempt >= maxAttempts
 
                 if (detailed) {
@@ -2416,6 +2433,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             }
         }
 
+        previousAutoAggregationSlotTexts = emptyMap()
         waitForGeneration(0) { poll(1, emptyMap()) }
     }
 
@@ -2910,6 +2928,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         pendingAggregationPrompt = null
         pendingAggregationExpectedSlots = 0
         autoAggregationPaused = false
+        previousAutoAggregationSlotTexts = emptyMap()
     }
 
     fun hasPendingAutoAggregation(): Boolean =
