@@ -120,6 +120,13 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     @Volatile private var pendingAggregationExpectedSlots: Int = 0
     private val sessionManager by lazy { SessionManager(this, slotManager) }
     private val pendingSessionUrls = mutableMapOf<Int, String>()
+    // Slots whose scheduled load either hasn't resolved a fragment yet (retry
+    // loop still running) or exhausted its retries without finding one after
+    // process death. ChatFragment.onViewCreated calls onChatFragmentViewReady
+    // once its view (and slotIndex) exist, which — if the slot is still
+    // pending — loads it immediately instead of waiting for the next retry
+    // tick or a background ViewPager2 bind that may come much later.
+    private val pendingSlotLoads = mutableSetOf<Int>()
     @Volatile private var lastScrapeMeta: List<Map<String, Any?>> = emptyList()
     private var activeProjectId: String? = null
     private var activeProjectPathKey: String? = null
@@ -448,15 +455,28 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     }
 
     private fun loadSlotWithSessionOverride(slotIndex: Int, handler: Handler, attempt: Int = 0, forceReload: Boolean = false) {
-        val fragment = pagerAdapter.getFragment(slotIndex)
+        pendingSlotLoads.add(slotIndex)
+        val fragment = getFragment(slotIndex)
         if (fragment == null) {
             if (attempt < 8) {
                 handler.postDelayed({ loadSlotWithSessionOverride(slotIndex, handler, attempt + 1, forceReload) }, 250L)
-            } else if (SettingsManager.isDetailedLoggingEnabled(this)) {
-                Log.w(TAG, "loadSlotWithSessionOverride slot=$slotIndex fragment unavailable")
+            } else {
+                // Retries exhausted: leave slotIndex in pendingSlotLoads so that
+                // whenever ChatFragment.onViewCreated eventually fires for this
+                // slot (FragmentStateAdapter binds it lazily after process death),
+                // onChatFragmentViewReady can load it immediately instead of
+                // waiting on a ViewPager2 bind that may never come if the page
+                // stays offscreen.
+                if (SettingsManager.isDetailedLoggingEnabled(this)) {
+                    Log.w(TAG, "loadSlotWithSessionOverride slot=$slotIndex fragment unavailable")
+                }
             }
             return
         }
+        if (pagerAdapter.getFragment(slotIndex) == null) {
+            Log.i(TAG, "restore after process death: reloading slot $slotIndex via findFragmentByTag")
+        }
+        pendingSlotLoads.remove(slotIndex)
 
         val sessionUrl = synchronized(pendingSessionUrls) { pendingSessionUrls.remove(slotIndex) }
         if (!sessionUrl.isNullOrBlank()) {
@@ -2081,6 +2101,36 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             updateTabLabel(slotIndex, service.name)
             updateCheckboxLabel(slotIndex, service.name)
         }
+    }
+
+    /**
+     * Pull-side counterpart to the push-based scheduleSlotLoading retry loop.
+     * FragmentStateAdapter only re-adds a restored Fragment to the
+     * FragmentManager (and thus makes it visible to findFragmentByTag/
+     * getFragment) when ViewPager2 actually binds its page
+     * (placeFragmentInViewHolder) — which can happen after our retries give up,
+     * or arbitrarily later for offscreen/background slots. ChatFragment calls
+     * this from onViewCreated once its own view (and slotIndex) exist, so we
+     * can finish a load that was left pending instead of depending on the
+     * bind timing.
+     *
+     * Double-load guard: if the slot's retry loop is still in flight it will
+     * find the fragment via getFragment() on its own next tick (fragment is
+     * now resolvable), so we only force an immediate load here when the slot
+     * is marked pending — loadSlotWithSessionOverride always adds the slot to
+     * pendingSlotLoads before it starts and only removes it once a fragment
+     * was actually found, so "pending" reliably means "no in-flight attempt
+     * has succeeded yet" whether or not a retry is still scheduled. Calling it
+     * again here is harmless even if a retry fires moments later: the second
+     * call finds the (now up to date) fragment immediately, and
+     * loadSlotWithSessionOverride's own pendingSlotLoads.remove(slotIndex)
+     * happens before it touches the fragment, so at worst the same slot is
+     * loaded/reloaded twice in a row — not corrupted.
+     */
+    fun onChatFragmentViewReady(slotIndex: Int, fragment: ChatFragment) {
+        if (slotIndex !in pendingSlotLoads) return
+        Log.i(TAG, "slot $slotIndex fragment view ready, pending load -> loading now")
+        loadSlotWithSessionOverride(slotIndex, Handler(Looper.getMainLooper()))
     }
 
     private fun updateTabLabel(slotIndex: Int, name: String) {

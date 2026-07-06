@@ -80,7 +80,7 @@
       function shouldSkipElement(el) {
         if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
         const tag = (el.tagName || '').toUpperCase();
-        if (['BUTTON', 'SVG', 'PATH', 'STYLE', 'SCRIPT', 'NOSCRIPT', 'MAT-ICON'].includes(tag)) return true;
+        if (['BUTTON', 'SVG', 'PATH', 'STYLE', 'SCRIPT', 'NOSCRIPT', 'MAT-ICON', 'USER-QUERY'].includes(tag)) return true;
         if (el.getAttribute('aria-hidden') === 'true') return true;
         const className = String(el.className || '');
         return /table-footer|action-button|copy-button|buttons-container|response-container-header|response-container-footer/i.test(className)

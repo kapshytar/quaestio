@@ -689,14 +689,30 @@ final class MobileAppState: ObservableObject {
         // (see stabilizeResponses below). previousSlotTexts carries the last-seen
         // text per slot title across poll iterations so we can detect that.
         var previousSlotTexts: [String: String] = [:]
+        // Last raw non-empty text per slot, stable or not — the timeout path
+        // falls back to it so an oscillating slot degrades to a possibly-partial
+        // reply (old behavior) instead of dropping the provider entirely.
+        var latestSlotTexts: [String: String] = [:]
         func stabilizeResponses(_ raw: [String: String]) -> [String: String] {
             var stable: [String: String] = [:]
+            var unstable: [String] = []
             for (title, text) in raw {
-                if previousSlotTexts[title] == text {
+                // Compare trimmed so trailing-whitespace jitter between scrapes
+                // does not keep a finished reply permanently "unstable".
+                let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if previousSlotTexts[title] == normalized {
                     stable[title] = text
+                } else {
+                    unstable.append("\(title):\(normalized.count)")
+                }
+                previousSlotTexts[title] = normalized
+                if !normalized.isEmpty {
+                    latestSlotTexts[title] = text
                 }
             }
-            previousSlotTexts = raw
+            if !unstable.isEmpty {
+                appendIngestEvent("collect-unstable \(unstable.joined(separator: ", "))")
+            }
             return stable
         }
 
@@ -743,18 +759,29 @@ final class MobileAppState: ObservableObject {
             }
         }
 
-        if mergeAggregationPolicy.allowPartialResults && lastResult.responses.count >= minimumRepliesRequired {
-            let collectedSnapshots = makeCollectedSnapshots(enabledSlots: enabledSlots, responses: lastResult.responses)
-            mergeAggregationSnapshots = collectedSnapshots
-            mergeAggregationSummary = "Collected \(lastResult.responses.count)/\(enabledSlots.count) source reply(s)"
-            appendIngestEvent("collect-partial responses=\(lastResult.responses.count)/\(enabledSlots.count)")
-        } else {
-            mergeAggregationSummary = "Aggregation still waiting. Use Collect now or refresh statuses."
-            appendIngestEvent("collect-incomplete responses=\(lastResult.responses.count)/\(enabledSlots.count)")
+        // Timeout: keep every provider we ever saw text from. A slot that never
+        // stabilized (its text still changed on the last polls) falls back to its
+        // latest non-empty scrape — possibly partial, but not silently dropped.
+        var finalResponses = lastResult.responses
+        for slot in enabledSlots where finalResponses[slot.title] == nil {
+            if let last = latestSlotTexts[slot.title] {
+                finalResponses[slot.title] = last
+                appendIngestEvent("collect-timeout-fallback slot=\(slot.title) len=\(last.count)")
+            }
         }
 
-        return mergeAggregationPolicy.allowPartialResults && lastResult.responses.count >= minimumRepliesRequired
-            ? lastResult.responses
+        if mergeAggregationPolicy.allowPartialResults && finalResponses.count >= minimumRepliesRequired {
+            let collectedSnapshots = makeCollectedSnapshots(enabledSlots: enabledSlots, responses: finalResponses)
+            mergeAggregationSnapshots = collectedSnapshots
+            mergeAggregationSummary = "Collected \(finalResponses.count)/\(enabledSlots.count) source reply(s)"
+            appendIngestEvent("collect-partial responses=\(finalResponses.count)/\(enabledSlots.count)")
+        } else {
+            mergeAggregationSummary = "Aggregation still waiting. Use Collect now or refresh statuses."
+            appendIngestEvent("collect-incomplete responses=\(finalResponses.count)/\(enabledSlots.count)")
+        }
+
+        return mergeAggregationPolicy.allowPartialResults && finalResponses.count >= minimumRepliesRequired
+            ? finalResponses
             : [:]
     }
 

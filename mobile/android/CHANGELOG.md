@@ -7,6 +7,7 @@ Versioning: Android runtime builds are published as `v1.x.y+<gitCount>.<gitSha>`
 ## [Unreleased] - 2026-07-06
 
 ### Fixed
+- WebView missing in every tab after the app process is killed in the background and the Activity is recreated from `savedInstanceState`: `MainActivity.loadSlotWithSessionOverride` now looks up the restored `ChatFragment` via `findFragmentByTag("f$slotIndex")` (falling back to the pager adapter's map) instead of relying solely on `ChatPagerAdapter`'s in-memory map, which `FragmentStateAdapter` never repopulates when it restores fragments directly from the `FragmentManager`.
 - Black screen after returning to the app from long background: `ChatFragment.onRenderProcessGone` now saves the crashed WebView's state (`saveState`) before recreating it, and `recreateRetainedWebView` always loads something on the new WebView — restored state, else the fallback URL, else the last known page URL (`savedWebViewUrl`), else the slot's default service URL — instead of silently loading nothing when `url` was null/blank.
 - `MainActivity` now calls `resumeTimers()`/`pauseTimers()` on a live WebView from `onResume`/`onStop` (whole-app foreground/background transitions only, not per-tab `ChatFragment.onPause` during ViewPager2 swipes, which would have frozen background tabs' JS timers).
 - `MainActivity.onTrimMemory(level)` flushes `CookieManager` on `TRIM_MEMORY_UI_HIDDEN`+ without touching WebView lifecycles.

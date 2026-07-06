@@ -92,6 +92,13 @@ class ChatFragment : Fragment(), Findable {
         binding.progressBar.visibility = View.GONE
         // URL loading is deferred â€” MainActivity triggers it via loadService()
         // to prioritize enabled slots first
+
+        // Pull-side fix for black-screen-after-process-death: this fragment is
+        // only guaranteed findable (findFragmentByTag/getFragment) once its
+        // view exists, which for FragmentStateAdapter-restored fragments can
+        // happen well after MainActivity's own load retries gave up. Tell
+        // MainActivity we're ready so it can finish a still-pending load now.
+        (requireActivity() as? MainActivity)?.onChatFragmentViewReady(slotIndex, this)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
