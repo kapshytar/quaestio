@@ -66,6 +66,11 @@ final class MobileAppState: ObservableObject {
     // of silently degrading to stale local sessions while in account mode.
     @Published var sessionExpiredPrompt: Bool = false
 
+    // Prompt actually typed and sent from the composer during THIS app run.
+    // In-memory on purpose (not persisted): the scrape seed must never fall
+    // back to a stale prior-run prompt or a loaded session's name.
+    private var freshlySentPromptThisRun: String = ""
+
     private static let slotsDefaultsKey = "verity.mobile.slots"
     private static let selectedSlotDefaultsKey = "verity.mobile.selectedSlotId"
     private static let slotUserAgentPresetsDefaultsKey = "verity.mobile.slotUserAgentPresets"
@@ -190,6 +195,7 @@ final class MobileAppState: ObservableObject {
         if successCount > 0 {
             lastUserPrompt = message
             persistLastUserPrompt(message)
+            freshlySentPromptThisRun = message
             let expectedSlots = activeSlots.count
             let signedIn = await AuthStore.shared.accessToken() != nil
             // The question-context reset (clearing the parallel-ingest session id
@@ -555,9 +561,10 @@ final class MobileAppState: ObservableObject {
             sourcePrompt: session.name
         )
 
-        // For note-backed sessions, always target the latest note in the chain
-        // as the active aggregated note, so new questions attach as children
-        // of the current tip instead of creating parallel roots.
+        // For note-backed sessions, point the active aggregated note at the
+        // chain TAIL (last root by created_at), so Collect updates the tail and
+        // new questions attach as children of the current tip instead of
+        // creating parallel roots.
         if let sessionId = session.sessionId, !session.noteId.isNilOrBlank {
             Task {
                 await sessionManager.refreshActiveNoteIdForSession(sessionId)
@@ -575,12 +582,24 @@ final class MobileAppState: ObservableObject {
         statusMessage = ""
     }
 
+    /// Scrape-seed prompt (mirrors Android scrapeSeedPrompt): (1) freshly typed
+    /// composer text, else (2) prompt actually sent from the composer THIS run,
+    /// else (3) the chain-tail note's title resolved by
+    /// refreshActiveNoteIdForSession, else empty — an empty seed lets the
+    /// scraper take the latest DOM reply and prompt recovery re-scope it.
+    /// Never a loaded session's name / persisted prior-run prompt: after Load
+    /// that is q1's text while Collect targets the chain tail (root-overwrite bug).
     func resolvedMergeSourcePrompt() -> String {
         let composer = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !composer.isEmpty {
             return composer
         }
-        return lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fresh = freshlySentPromptThisRun.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fresh.isEmpty {
+            return fresh
+        }
+        return (sessionManager.getParallelIngestState().activeNoteTitle ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func reloadSelectedSlot() {
@@ -606,41 +625,43 @@ final class MobileAppState: ObservableObject {
             return nil
         }
 
-        let prompt = resolvedMergeSourcePrompt()
-        guard !prompt.isEmpty else {
-            statusMessage = "Type a prompt or send one first"
-            return nil
-        }
-
         isManualCollecting = true
         defer { isManualCollecting = false }
 
         if hasActiveSessionLink() && !hasCurrentQuestionContextForCurrentSlots() {
             sessionManager.clearParallelIngestState()
-            sessionManager.rememberSourcePrompt(prompt)
             updateSessionIndicator()
         }
+        // Resolve context BEFORE the scrape seed: currentQuestionAggregatedNoteId
+        // re-resolves the chain tail (id + title), and the tail title is the
+        // scrape-seed fallback when nothing fresh was typed this run.
         let existingAggregatedNoteId = await currentQuestionAggregatedNoteId()
         let existingSessionId = await currentQuestionSessionId()
-        let hasLoadedQuestionContext = existingAggregatedNoteId != nil && existingSessionId != nil
-        let loadedQuestionPrompt = if hasLoadedQuestionContext {
-            sessionManager.getParallelIngestState().sourcePrompt
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .ifEmpty(lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines))
-        } else {
-            ""
-        }
-        let sameQuestionAsCurrentRoot = hasLoadedQuestionContext && promptsReferToSameQuestion(prompt, loadedQuestionPrompt)
-        if hasLoadedQuestionContext && !sameQuestionAsCurrentRoot {
-            sessionManager.startNewQuestionInCurrentSession(sourcePrompt: prompt)
-            updateSessionIndicator()
-        }
-        let replaceExisting = existingAggregatedNoteId != nil && sameQuestionAsCurrentRoot
+
+        // Canonical Collect model: always update the chain TAIL with the latest
+        // replies; never create a note inside an existing session — new notes
+        // come only from the send-new-question path. Question matching happens
+        // at scrape level (prompt-scoped freshness), not in note targeting.
+        let replaceExisting = existingAggregatedNoteId != nil && existingSessionId != nil
         let targetAggregatedNoteId = replaceExisting ? existingAggregatedNoteId : nil
 
-        appendIngestEvent("Collect start • \(String(prompt.prefix(60)))")
+        // Scrape seed: fresh composer/sent prompt this run, else the tail note's
+        // title just resolved above, else empty (unscoped scrape + DOM prompt
+        // recovery). NEVER a loaded session's name — after Load that is q1's
+        // text while the tail is qN (the session-295 root-overwrite bug).
+        let prompt = resolvedMergeSourcePrompt()
+        guard !prompt.isEmpty || replaceExisting else {
+            // No fresh prompt and no tail to update — nothing Collect can target.
+            statusMessage = "Type a prompt or send one first"
+            return nil
+        }
+        if !prompt.isEmpty {
+            sessionManager.rememberSourcePrompt(prompt)
+        }
 
-        let responses = await collectLatestRepliesForMerge(sourcePrompt: prompt)
+        appendIngestEvent("Collect start • \(String(prompt.ifEmpty("<recover-from-dom>").prefix(60)))")
+
+        let responses = await collectLatestRepliesForMerge(sourcePrompt: prompt, manual: true)
         guard !responses.isEmpty else {
             statusMessage = "No source replies to collect"
             appendIngestEvent("Collect empty • no replies")
@@ -649,9 +670,21 @@ final class MobileAppState: ObservableObject {
 
         appendIngestEvent("Collected \(responses.count) reply(s) • \(responses.keys.sorted().joined(separator: ", "))")
 
+        // With an empty seed the scrape recovery above may have found the real
+        // prompt in the DOM (it lands in sourcePrompt/lastUserPrompt); use it as
+        // the ingest title rather than sending an empty one.
+        let ingestPrompt = prompt
+            .ifEmpty(sessionManager.getParallelIngestState().sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines))
+            .ifEmpty(lastUserPrompt.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !ingestPrompt.isEmpty else {
+            statusMessage = "Could not identify the current question"
+            appendIngestEvent("Collect abort • no prompt recovered for ingest")
+            return nil
+        }
+
         do {
             let result = try await ingestCollectedResponses(
-                prompt: prompt,
+                prompt: ingestPrompt,
                 responses: responses,
                 replaceExisting: replaceExisting,
                 aggregatedNoteId: targetAggregatedNoteId
@@ -668,7 +701,15 @@ final class MobileAppState: ObservableObject {
         }
     }
 
-    func collectLatestRepliesForMerge(sourcePrompt: String) async -> [String: String] {
+    /// - Parameter manual: mirrors Android's manual Collect (MainActivity.collectNowAggregation,
+    ///   called from MergeFragment.collectNowAggregationManually) which does a single immediate
+    ///   scrape with no text-stability gate. Android's stability gate (stableSlotCount) only
+    ///   lives in the auto-wait path (MergeFragment.waitForAggregationReadyOrPause). When
+    ///   manual=true here, stabilizeResponses is skipped so any slot with non-empty text counts
+    ///   as ready immediately — the per-slot scrape guards (S180, echo-reject, etc.) still apply
+    ///   since they run inside scrapeRepliesRecoveringPromptIfNeeded. Still-generating slots
+    ///   (empty text) are still polled in the existing loop so they get a chance to arrive.
+    func collectLatestRepliesForMerge(sourcePrompt: String, manual: Bool = false) async -> [String: String] {
         let enabledSlots = slots.filter(\.isEnabled)
         guard !enabledSlots.isEmpty else {
             mergeAggregationSnapshots = []
@@ -700,7 +741,11 @@ final class MobileAppState: ObservableObject {
                 // Compare trimmed so trailing-whitespace jitter between scrapes
                 // does not keep a finished reply permanently "unstable".
                 let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if previousSlotTexts[title] == normalized {
+                // Manual Collect (Android parity: collectNowAggregation has no
+                // stability gate, only the auto-wait path does) takes any
+                // non-empty text as ready immediately instead of requiring it
+                // unchanged across two polls.
+                if manual ? !normalized.isEmpty : previousSlotTexts[title] == normalized {
                     stable[title] = text
                 } else {
                     unstable.append("\(title):\(normalized.count)")
@@ -1069,8 +1114,24 @@ final class MobileAppState: ObservableObject {
     }
 
     private func currentQuestionAggregatedNoteId() async -> String? {
-        let direct = sessionManager.getParallelIngestState().activeNoteId.nilIfBlank
-        if !direct.isNilOrBlank { return direct }
+        let state = sessionManager.getParallelIngestState()
+        let direct = state.activeNoteId.nilIfBlank
+        if !direct.isNilOrBlank {
+            // Already-linked in-memory/persisted state bypasses
+            // restoreStoredQuestionContextForCurrentSlots entirely (that path
+            // only runs when activeNoteId is still empty), so it never got the
+            // chain re-resolve restore does. A stale link left over from an
+            // earlier ingest in this run (or a prior app launch) can still point
+            // at the chain root while the chain has grown (the session-295
+            // root-overwrite bug) — re-resolve to the chain TAIL (last root by
+            // created_at) before trusting it: Collect always updates the tail
+            // and never creates a note.
+            if let sessionId = state.sessionId {
+                await sessionManager.refreshActiveNoteIdForSession(sessionId)
+                return sessionManager.getParallelIngestState().activeNoteId.nilIfBlank ?? direct
+            }
+            return direct
+        }
         return await restoreStoredQuestionContextForCurrentSlots()?.noteId.nilIfBlank
     }
 
@@ -1579,11 +1640,10 @@ final class MobileAppState: ObservableObject {
             noteId: matching.noteId,
             sourcePrompt: matching.name
         )
-        // Late Collect must land on the current TAIL of the chain, not the root
-        // note the session snapshot was created from — refreshActiveNoteIdForSession
-        // already resolves that tip (latest note by note_session_id, same helper
-        // startNewQuestionInCurrentSession relies on) and overwrites activeNoteId
-        // set above if a later note exists.
+        // Late Collect must land on the current TAIL of the chain (last root by
+        // created_at), not the root the session snapshot was created from —
+        // refreshActiveNoteIdForSession overwrites activeNoteId set above when
+        // a later note exists. Collect updates the tail, never creates a note.
         if let sessionId = matching.sessionId {
             let noteIdBeforeRefresh = sessionManager.getParallelIngestState().activeNoteId
             await sessionManager.refreshActiveNoteIdForSession(sessionId)
@@ -2229,12 +2289,18 @@ final class MobileAppState: ObservableObject {
     }
 
     private func shouldRetryScrapeWithRecoveredPrompt(_ attempts: [SlotScrapeAttempt], currentPrompt: String) -> Bool {
+        let recoveredPrompt = resolveSourcePromptFromScrapeAttempts(attempts)
+        guard !recoveredPrompt.isEmpty else { return false }
+        // Empty seed = the first pass ran UNSCOPED (no prompt gating in
+        // scrapeReply.js); retry scoped to the DOM-recovered prompt so
+        // prompt-scoped reply freshness still applies to the final result.
+        if currentPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
         let promptMismatchAttempts = attempts.filter {
             $0.status == .error && $0.result?.error == "Selected reply belongs to a previous prompt"
         }
         guard promptMismatchAttempts.count >= max(2, attempts.count / 2) else { return false }
-        let recoveredPrompt = resolveSourcePromptFromScrapeAttempts(attempts)
-        guard !recoveredPrompt.isEmpty else { return false }
         return !promptsReferToSameQuestion(recoveredPrompt, currentPrompt)
     }
 

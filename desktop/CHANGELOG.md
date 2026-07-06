@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.115.0
+
+- **Collect targets the server-resolved chain tail and always replaces** — `collectNowAggregation` resolves the last note of the session chain via the new `dream-get-chain-tail-note-id` IPC (PostgREST, created_at order) before ingest, so a late Collect updates the current question instead of an older root; new-note creation stays exclusive to sending a new question (canonical simple Collect model).
+- **Scraper no longer captures the user's own message as the reply** — user-message containers are skipped (`isUserMessageElement`, `USER-QUERY`) in both candidate loops and the copy path, fixing Grok/Claude returning the prompt echo as garbage answers.
+- **Slot text stability wait** (`waitForSlotTextStability`, 10×1s cap) before collecting, with a no-drop fallback: on timeout the last non-empty text per provider is kept.
+- **Dead code removed:** `findExistingAggregatedRootForQuestion`, `sessionSnapshotSortTimestamp` (superseded by the simple Collect model).
+- Server-side (dream-tracker migration `20260706190000`): the ingest replace branch no longer renames the note — titles are set once at question creation; Collect updates answers only.
+
 ## 1.114.0
 
 - **Sessions: filter by project.** Compact funnel icon button in the Sessions

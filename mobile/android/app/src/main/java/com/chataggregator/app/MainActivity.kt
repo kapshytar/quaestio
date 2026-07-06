@@ -2978,11 +2978,15 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         } else {
             ""
         }
-        // Prompt recovery follows the same priority order as desktop:
-        // freshly sent text -> recovered DOM prompt -> loaded/root prompt -> last user prompt.
+        // Collect always targets the chain tail (last question in the session),
+        // never the loaded root's own name/title: after loading a session and
+        // hitting Collect with no new question typed, the DOM's latest exchange
+        // is the tail turn, not q1's title. Using loadedQuestionPrompt (=q1) as
+        // the scrape seed biased the scrape toward matching q1 instead of the
+        // actually-rendered last answer. Only a freshly typed+sent prompt
+        // (pendingPrompt) should seed the scrape; otherwise let the scrape find
+        // whatever is actually on screen.
         val scrapeSeedPrompt = pendingPrompt
-            .ifBlank { loadedQuestionPrompt }
-            .ifBlank { SettingsManager.getLastUserPrompt(this).trim() }
         val expectedServices = enabledSlots.map { slotManager.getService(it).name }.toSet()
 
         collectLatestRepliesFromEnabledSlots(scrapeSeedPrompt) { responses ->
@@ -3011,13 +3015,12 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             if (sourcePrompt.isNotBlank()) {
                 rememberResolvedSourcePrompt(sourcePrompt)
             }
-            // Android must mirror desktop semantics here: a session can contain several
-            // sequential questions, so we only overwrite when the recovered prompt still
-            // matches the currently loaded root note.
-            val sameQuestionAsCurrentRoot = hasLoadedQuestionContext &&
-                promptsReferToSameQuestion(sourcePrompt, loadedQuestionPrompt)
-            val replaceExisting = existingAggregatedNoteId != null && sameQuestionAsCurrentRoot
-            val targetAggregatedNoteId = if (replaceExisting) existingAggregatedNoteId else null
+            // Collect never creates a new root — it always replaces the chain
+            // tail (the last question in the session). A new root is only ever
+            // created via the send-new-question path (user typed + sent a new
+            // prompt), not here. See SESSION_AND_INGEST_RULES.md.
+            val replaceExisting = existingAggregatedNoteId != null
+            val targetAggregatedNoteId = existingAggregatedNoteId
             if (replaceExisting && responses.size < expectedServices.size) {
                 val missing = expectedServices.filterNot { responses.containsKey(it) }
                 if (SettingsManager.isDetailedLoggingEnabled(this)) {
@@ -3032,25 +3035,23 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 return@collectLatestRepliesFromEnabledSlots
             }
 
-            if (
-                SettingsManager.isDetailedLoggingEnabled(this) &&
-                existingAggregatedNoteId != null &&
-                loadedQuestionPrompt.isNotBlank() &&
-                sourcePrompt.isNotBlank() &&
-                !sameQuestionAsCurrentRoot
-            ) {
-                Log.i(
-                    TAG,
-                    "collectNowAggregation detected a new question; creating a new root instead of overwriting current noteId=$existingAggregatedNoteId currentPrompt=${loadedQuestionPrompt.take(120)} collectedPrompt=${sourcePrompt.take(120)}"
-                )
-            }
-
             thread {
+                // Resolve the true chain tail from the server before replacing:
+                // the locally-cached existingAggregatedNoteId can be stale (e.g.
+                // it pointed at the loaded root, not a later question appended
+                // since). Falls back to the local id if the fetch fails.
+                val resolvedTargetNoteId = existingSessionId?.let { sid ->
+                    sessionManager.getChainTailNoteId(
+                        sessionId = sid,
+                        rpcBaseUrl = SettingsManager.getDreamTrackerRpcUrl(this),
+                        apiKey = SettingsManager.getDreamTrackerApiKey(this)
+                    )
+                } ?: targetAggregatedNoteId
                 val result = ingestCollectedResponses(
                     prompt = sourcePrompt,
                     responses = responses,
                     replaceExisting = replaceExisting,
-                    aggregatedNoteId = targetAggregatedNoteId
+                    aggregatedNoteId = resolvedTargetNoteId ?: targetAggregatedNoteId
                 )
                 if (result != null) {
                     clearPendingAutoAggregation()

@@ -634,6 +634,18 @@
         return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"]');
       }
 
+      // Structural exclusion: never treat a user-message container as a reply
+      // candidate. claude.ai/grok.com mark user turns with
+      // data-message-author-role="user" / data-testid*="user" (same selectors
+      // already used by findPromptAnchor to locate the prompt). Without this,
+      // a truncated voice-transcription prompt block can out-score the real
+      // reply on a flat-length tie and get returned as the "reply" (observed:
+      // grok/claude Collect grabbing the user's own prompt text).
+      function isUserMessageElement(el) {
+        if (!el) return false;
+        return !!el.closest('[data-message-author-role="user"], [data-testid*="user"]');
+      }
+
       function isMetadataLikeText(text) {
         const t = (text || '').toLowerCase();
         if (!t) return true;
@@ -1124,6 +1136,7 @@
           document.querySelectorAll(sel).forEach((el) => {
             if (!visible(el)) return;
             if (isComposerElement(el)) return;
+            if (isUserMessageElement(el)) return;
             const raw = extractStructuredText(el);
             const flat = flatText(raw);
             if (flat.length < 20 || isMetadataLikeText(flat)) return;
@@ -1137,6 +1150,7 @@
       if (candidates.length === 0) {
         Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
           if (isComposerElement(el)) return;
+          if (isUserMessageElement(el)) return;
           const raw = extractStructuredText(el);
           const flat = flatText(raw);
           if (flat.length < 20 || isMetadataLikeText(flat)) return;
@@ -1178,7 +1192,17 @@
           }
         }
         const anchorEmbeddedPrompt = extractEmbeddedPromptText(promptAnchor.raw || '');
-        if (anchorEmbeddedPrompt && promptMatchesCurrentSource(anchorEmbeddedPrompt)) {
+        // Only trust the anchor element itself as a reply source when it is a
+        // combined "quoted prompt + reply" block (embedded prompt text is a
+        // strict prefix of the anchor's raw text, with real content after it).
+        // A plain user-message container (isUserMessageElement) has no reply
+        // appended and must never be returned as the reply.
+        if (
+          anchorEmbeddedPrompt &&
+          promptMatchesCurrentSource(anchorEmbeddedPrompt) &&
+          !isUserMessageElement(promptAnchor.el) &&
+          flatText(promptAnchor.raw || '').length > flatText(anchorEmbeddedPrompt).length + 20
+        ) {
           const anchorResult = chooseSuccessfulCandidate([promptAnchor], true);
           if (anchorResult?.success) {
             return JSON.stringify(anchorResult);

@@ -159,7 +159,7 @@ enum UserAgentPreset: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .systemDefault: return "Default WKWebView"
         case .iphoneSafariFull: return "iPhone Safari Full"
-        case .desktopChrome: return "Desktop Chrome"
+        case .desktopChrome: return "Desktop Safari"
         }
     }
 
@@ -170,7 +170,9 @@ enum UserAgentPreset: String, CaseIterable, Identifiable, Codable {
         case .iphoneSafariFull:
             return "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
         case .desktopChrome:
-            return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+            // Claiming Chrome from a WebKit engine trips Cloudflare's
+            // UA-vs-engine fingerprint check; desktop Safari matches WKWebView.
+            return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
         }
     }
 }

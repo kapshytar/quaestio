@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   migrateSession: (params) => ipcRenderer.invoke('dream-migrate-session', params),
   loadSessions: (sessionId) => ipcRenderer.invoke('dream-load-sessions', sessionId),
   deleteSession: (sessionId) => ipcRenderer.invoke('dream-delete-session', sessionId),
+  getChainTailNoteId: (sessionId) => ipcRenderer.invoke('dream-get-chain-tail-note-id', sessionId),
   openSessionWindow: (session) => ipcRenderer.invoke('dream-open-session-window', session),
   listProjectTreeData: () => ipcRenderer.invoke('dream-list-project-tree-data'),
   getProjectSlotUrls: (projectId) => ipcRenderer.invoke('dream-get-project-slot-urls', projectId),

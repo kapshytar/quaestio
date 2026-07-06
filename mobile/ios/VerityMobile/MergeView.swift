@@ -511,7 +511,7 @@ struct MergeView: View {
 
         isRunning = true
         appState.statusMessage = "Collecting source replies..."
-        let responses = await appState.collectLatestRepliesForMerge(sourcePrompt: sourcePrompt)
+        let responses = await appState.collectLatestRepliesForMerge(sourcePrompt: sourcePrompt, manual: true)
         guard !responses.isEmpty else {
             isRunning = false
             appState.statusMessage = "No source replies available"

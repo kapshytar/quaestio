@@ -2,7 +2,14 @@
 
 ## 2.9.0
 
-- pending summary
+- **Fix (iOS): opening a session now reliably loads each tab's saved conversation.** A stale SwiftUI refresh could re-issue the previous page's URL and cancel the just-started navigation — sticky on Claude: once the tab fell to the provider home page, every later session load was stomped back to home. Declarative reloads can no longer cancel an explicit in-flight navigation (`skip-load pending-target`).
+- **Fix (iOS): session cards merge slot URLs per slot across snapshot sources** (exact note → session snapshot → RPC fallback) instead of taking one whole dictionary — a partial snapshot no longer drops a slot's saved conversation (295's Claude tab opened home/the previous session's chat).
+- **Fix (iOS): manual Collect is instant** — one immediate scrape per slot (parity with Android); the two-poll stability wait now applies only to auto-collect after send.
+- **Fix (iOS): ChatGPT Collect no longer times out for 30s every run** — copy/DOM capture alternated texts (clipboard race + "ChatGPT said:" header diff) so stability never converged; ChatGPT is now DOM-first like Gemini/Grok.
+- **Fix (Android): Gemini tab no longer loses its conversation to a silent redirect** — Gemini's SPA could client-side redirect to its home page and quietly overwrite the saved conversation URL; `rememberLoadUrl` now refuses to replace a saved conversation URL with the provider home URL, and `doUpdateVisitedHistory` is logged.
+- **Fix (server): Collect no longer renames the note.** The ingest replace branch used to overwrite the note title (and first paragraph) with the client-sent prompt — a DOM-recovered garbage prompt ("Gemini Flash") clobbered a real question title. A note is named once, when the question is sent; Collect updates answers only. Applies to all clients at once.
+- **Fix (iOS + Android + desktop): Grok/Claude no longer capture the user's own message as the reply** — shared scraper skips user-message containers (`isUserMessageElement`, USER-QUERY) in candidate and anchor paths; iOS copy-fallback rejects prompt echoes.
+- **Change (iOS): "Desktop Chrome" UA preset is now "Desktop Safari"** — claiming Chrome from a WebKit engine tripped Cloudflare's fingerprint check into an unpassable loop.
 
 
 ## 2.8.10

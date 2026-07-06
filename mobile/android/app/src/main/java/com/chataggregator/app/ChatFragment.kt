@@ -183,6 +183,7 @@ class ChatFragment : Fragment(), Findable {
 
                 override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                     super.doUpdateVisitedHistory(view, url, isReload)
+                    Log.d(TAG, "[slot-$slotIndex] doUpdateVisitedHistory url=${url.orEmpty()} isReload=$isReload")
                     url?.let { rememberLoadUrl(it) }
                 }
 
@@ -331,6 +332,12 @@ class ChatFragment : Fragment(), Findable {
 
     private fun rememberLoadUrl(url: String) {
         if (url.isNotBlank() && url != "about:blank") {
+            val homeUrl = ServiceConfig.getById(currentServiceId)?.url
+            val savedIsDeeper = savedWebViewUrl?.let { it.isNotBlank() && it != "about:blank" && it != homeUrl } == true
+            if (homeUrl != null && url == homeUrl && savedIsDeeper) {
+                Log.d(TAG, "[slot-$slotIndex] rememberLoadUrl: ignore home overwrite url=$url saved=$savedWebViewUrl")
+                return
+            }
             savedWebViewUrl = url
         }
     }

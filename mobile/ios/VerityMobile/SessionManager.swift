@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct SessionSnapshot: Codable, Identifiable, Hashable {
     let id: String
@@ -65,6 +66,10 @@ struct ParallelIngestState: Codable, Equatable {
     var traceId: String
     var sequence: Int
     var activeProjectId: String?
+    // Title (= prompt) of the chain-tail note `activeNoteId` points at, filled
+    // by refreshActiveNoteIdForSession; scrape-seed fallback when no freshly
+    // typed prompt exists this run. Optional so old persisted blobs still decode.
+    var activeNoteTitle: String? = nil
 
     static let empty = ParallelIngestState(
         sessionId: nil,
@@ -78,6 +83,8 @@ struct ParallelIngestState: Codable, Equatable {
 }
 
 final class SessionManager {
+    private static let logger = Logger(subsystem: "com.verity.mobile", category: "SessionManager")
+
     private enum Keys {
         static let sessions = "verity.mobile.sessions.list"
         static let parallelState = "verity.mobile.parallelIngest.state"
@@ -166,20 +173,27 @@ final class SessionManager {
     func startNewQuestionInCurrentSession(sourcePrompt: String) {
         var state = getParallelIngestState()
         state.activeNoteId = ""
+        state.activeNoteTitle = nil
         state.sourcePrompt = sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         replaceParallelIngestState(state)
     }
 
-    /// Query the notes table for the latest note in this session and update activeNoteId.
-    /// This ensures that when loading a note-backed session, new questions are attached
-    /// to the current tip of the chain instead of creating parallel root notes.
+    /// Point `activeNoteId` at the TAIL of this session's question chain: the
+    /// last `note_type=1` root by CHAIN ORDER (`created_at desc` — never
+    /// `updated_at`: any manual/background touch of an old root reorders
+    /// `updated_at` and re-aims replace-ingest at the wrong question; the
+    /// session-295 root-overwrite bug). Canonical model: Collect always updates
+    /// the chain tail with the latest replies and never creates a note; new
+    /// notes come only from the send-new-question path. Question matching lives
+    /// at scrape level (prompt-scoped reply freshness), not in note targeting.
+    /// Fetch failed / signed out / empty chain → state left untouched.
     @MainActor
     func refreshActiveNoteIdForSession(_ sessionId: Int) async {
         let rpcBaseURL = KeyObfuscation.getSupabaseRPCURL(nil)
         let apiKey = KeyObfuscation.getSupabaseAPIKey(nil)
         guard !rpcBaseURL.isEmpty, !apiKey.isEmpty else { return }
 
-        let query = "select=id,updated_at&note_type=eq.1&note_session_id=eq.\(sessionId)&order=updated_at.desc&limit=1"
+        let query = "select=id,title,created_at&note_type=eq.1&note_session_id=eq.\(sessionId)&order=created_at.desc&limit=1"
         let endpoint = normalizeRestEndpoint(rpcBaseURL) + "/notes?\(query)"
         guard let url = URL(string: endpoint) else { return }
 
@@ -196,12 +210,17 @@ final class SessionManager {
               let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
               let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-              let latestNote = rows.first,
-              let noteId = latestNote["id"] as? String
+              !rows.isEmpty
+        else { return }
+
+        guard let noteId = rows.first?["id"] as? String,
+              !noteId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return }
 
         var state = getParallelIngestState()
         state.activeNoteId = noteId
+        state.activeNoteTitle = (rows.first?["title"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         replaceParallelIngestState(state)
     }
 
@@ -247,6 +266,9 @@ final class SessionManager {
         state.sessionId = sessionId
         if let noteId {
             state.activeNoteId = noteId.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Title of this note is unknown here; refreshActiveNoteIdForSession
+            // repopulates it when it re-resolves the chain tail.
+            state.activeNoteTitle = nil
         }
         if let sourcePrompt {
             state.sourcePrompt = sourcePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -585,11 +607,45 @@ final class SessionManager {
         // session_id collapsed a multi-question chain to a single card — that was
         // the "iPhone shows only one #277" bug. See
         // docs/domains/SESSION_AND_INGEST_RULES.md "Session = Full Question Chain".
+        // Slot data merges PER KEY (not whole-dict): exact note snapshot →
+        // matching session snapshot → original RPC response. A whole-dict
+        // fallback drops a populated key (e.g. slot-4) whenever the winning
+        // dict is non-empty but incomplete — that was the iOS 294→295
+        // slot-4-not-reloading bug (slot-4 present only in rpcFallback).
+        func mergeStringDicts(
+            _ a: [String: String]?,
+            _ b: [String: String]?,
+            _ c: [String: String]?
+        ) -> [String: String] {
+            var merged: [String: String] = [:]
+            for dict in [a, b, c] {
+                guard let dict else { continue }
+                for (key, value) in dict where merged[key] == nil {
+                    merged[key] = value
+                }
+            }
+            return merged
+        }
+        func mergeBoolDicts(
+            _ a: [String: Bool]?,
+            _ b: [String: Bool]?,
+            _ c: [String: Bool]?
+        ) -> [String: Bool] {
+            var merged: [String: Bool] = [:]
+            for dict in [a, b, c] {
+                guard let dict else { continue }
+                for (key, value) in dict where merged[key] == nil {
+                    merged[key] = value
+                }
+            }
+            return merged
+        }
+
         var byNote: [String: SessionSnapshot] = [:]
-        print("[loadNoteBacked] notes rows=\(rows.count), rpc snapshots=\(snapshots.count)")
-        print("[loadNoteBacked] snapshotByNote keys=\(snapshotByNote.keys.sorted())")
-        print("[loadNoteBacked] latestBySession keys=\(latestSnapshotBySession.keys.sorted())")
-        print("[loadNoteBacked] rpcBySession keys=\(rpcBySession.keys.sorted())")
+        Self.logger.info("[loadNoteBacked] notes rows=\(rows.count, privacy: .public), rpc snapshots=\(snapshots.count, privacy: .public)")
+        Self.logger.info("[loadNoteBacked] snapshotByNote keys=\(snapshotByNote.keys.sorted(), privacy: .public)")
+        Self.logger.info("[loadNoteBacked] latestBySession keys=\(latestSnapshotBySession.keys.sorted(), privacy: .public)")
+        Self.logger.info("[loadNoteBacked] rpcBySession keys=\(rpcBySession.keys.sorted(), privacy: .public)")
         for row in rows {
             guard let rawId = row["id"] as? String else { continue }
             let noteId = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -608,34 +664,28 @@ final class SessionManager {
             let rpcFallback = rpcBySession[rowSessionId]
             let title = ((row["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
-            print("[loadNoteBacked] note=\(noteId.prefix(8)) session=\(rowSessionId) exactMatch=\(exactNoteSnapshot != nil) match=\(matchingSnapshot != nil) rpcFallback=\(rpcFallback != nil)")
+            Self.logger.info("[loadNoteBacked] note=\(noteId.prefix(8), privacy: .public) session=\(rowSessionId, privacy: .public) exactMatch=\(exactNoteSnapshot != nil, privacy: .public) match=\(matchingSnapshot != nil, privacy: .public) rpcFallback=\(rpcFallback != nil, privacy: .public)")
             if let rpc = rpcFallback {
-                print("[loadNoteBacked]   rpcFallback slot_urls=\(rpc.slotURLs)")
-                print("[loadNoteBacked]   rpcFallback slot_config=\(rpc.slotConfig)")
+                Self.logger.info("[loadNoteBacked]   rpcFallback slot_urls=\(rpc.slotURLs, privacy: .public)")
+                Self.logger.info("[loadNoteBacked]   rpcFallback slot_config=\(rpc.slotConfig, privacy: .public)")
             }
             if let match = matchingSnapshot {
-                print("[loadNoteBacked]   matching slot_urls=\(match.slotURLs)")
-                print("[loadNoteBacked]   matching slot_config=\(match.slotConfig)")
+                Self.logger.info("[loadNoteBacked]   matching slot_urls=\(match.slotURLs, privacy: .public)")
+                Self.logger.info("[loadNoteBacked]   matching slot_config=\(match.slotConfig, privacy: .public)")
             }
 
-            // All slot data falls back through: exact note snapshot →
-            // matching session snapshot → original RPC response.
-            let exactURLs = exactNoteSnapshot?.slotURLs
-            let exactLive = exactNoteSnapshot?.slotLiveURLs
-            let resolvedSlotURLs = (exactURLs?.isEmpty == false ? exactURLs : nil)
-                ?? matchingSnapshot?.slotURLs
-                ?? rpcFallback?.slotURLs
-                ?? [:]
-            let resolvedLiveURLs = (exactLive?.isEmpty == false ? exactLive : nil)
-                ?? matchingSnapshot?.slotLiveURLs
-                ?? rpcFallback?.slotLiveURLs
-                ?? [:]
-            let resolvedSlotConfig = matchingSnapshot?.slotConfig
-                ?? rpcFallback?.slotConfig
-                ?? [:]
-            let resolvedSlotEnabled = matchingSnapshot?.slotEnabled
-                ?? rpcFallback?.slotEnabled
-                ?? [:]
+            let resolvedSlotURLs = mergeStringDicts(
+                exactNoteSnapshot?.slotURLs, matchingSnapshot?.slotURLs, rpcFallback?.slotURLs
+            )
+            let resolvedLiveURLs = mergeStringDicts(
+                exactNoteSnapshot?.slotLiveURLs, matchingSnapshot?.slotLiveURLs, rpcFallback?.slotLiveURLs
+            )
+            let resolvedSlotConfig = mergeStringDicts(
+                exactNoteSnapshot?.slotConfig, matchingSnapshot?.slotConfig, rpcFallback?.slotConfig
+            )
+            let resolvedSlotEnabled = mergeBoolDicts(
+                exactNoteSnapshot?.slotEnabled, matchingSnapshot?.slotEnabled, rpcFallback?.slotEnabled
+            )
 
             let snapshot = SessionSnapshot(
                 id: matchingSnapshot?.id ?? "note:\(noteId)",

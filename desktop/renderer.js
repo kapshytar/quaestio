@@ -741,8 +741,10 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
     }
     function inExcludedArea(el) {
       if (!el) return true;
-      // Only exclude buttons literally inside text input elements
-      return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"], [class*="composer"]');
+      // Exclude buttons inside text input elements or inside a user-message
+      // container (mirrors DOM-scrape isUserMessageElement guard: never copy
+      // from the user's own turn).
+      return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"], [class*="composer"], [data-message-author-role="user"], [data-testid*="user"]');
     }
     function messageContainer(el) {
       // Try specific message selectors first
@@ -1128,37 +1130,6 @@ function promptsReferToSameQuestion(currentPrompt, storedPrompt) {
   const stored = normalizePromptForComparison(storedPrompt);
   if (!current || !stored) return false;
   return current === stored;
-}
-
-function sessionSnapshotSortTimestamp(session) {
-  const updated = Date.parse(session?.updatedAt || session?.updated_at || '');
-  if (Number.isFinite(updated)) return updated;
-  const created = Date.parse(session?.createdAt || session?.created_at || '');
-  if (Number.isFinite(created)) return created;
-  const timestamp = Number(session?.timestamp || 0);
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-async function findExistingAggregatedRootForQuestion(sessionId, prompt) {
-  const numericSessionId = Number(sessionId);
-  const normalizedPrompt = String(prompt || '').trim();
-  if (!Number.isInteger(numericSessionId) || numericSessionId <= 0 || !normalizedPrompt) {
-    return null;
-  }
-
-  const sessions = await loadSessionsList();
-  const matches = (Array.isArray(sessions) ? sessions : []).filter((session) => {
-    const rowSessionId = Number(session?.sessionId ?? session?.session_id ?? null);
-    if (!Number.isInteger(rowSessionId) || rowSessionId !== numericSessionId) return false;
-    const noteId = String(session?.noteId ?? session?.note_id ?? '').trim();
-    if (!noteId) return false;
-    const rowPrompt = String(session?.name || session?.title || '').trim();
-    return promptsReferToSameQuestion(normalizedPrompt, rowPrompt);
-  });
-
-  if (matches.length === 0) return null;
-  matches.sort((a, b) => sessionSnapshotSortTimestamp(b) - sessionSnapshotSortTimestamp(a));
-  return matches[0];
 }
 
 function extractConversationKey(serviceId, rawUrl) {
@@ -5075,6 +5046,15 @@ async function getLatestAssistantReply(slot) {
       return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"]');
     }
 
+    // Structural exclusion: never treat a user-message container as a reply
+    // candidate. claude.ai/grok.com mark user turns with
+    // data-message-author-role="user" / data-testid*="user" (mirrors
+    // mobile/shared/js/scrapeReply.js isUserMessageElement).
+    function isUserMessageElement(el) {
+      if (!el) return false;
+      return !!el.closest('[data-message-author-role="user"], [data-testid*="user"]');
+    }
+
     function isMetadataLikeText(text) {
       const t = (text || '').toLowerCase();
       if (!t) return true;
@@ -5230,6 +5210,7 @@ async function getLatestAssistantReply(slot) {
         document.querySelectorAll(sel).forEach((el) => {
           if (!visible(el)) return;
           if (isComposerElement(el)) return;
+          if (isUserMessageElement(el)) return;
           if (isRejectedServiceCandidate(el)) return;
           const raw = extractStructuredText(el);
           const flat = flatText(raw);
@@ -5253,6 +5234,7 @@ async function getLatestAssistantReply(slot) {
     if (candidates.length === 0) {
       Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
         if (isComposerElement(el)) return;
+        if (isUserMessageElement(el)) return;
         if (isRejectedServiceCandidate(el)) return;
         const raw = extractStructuredText(el);
         const flat = flatText(raw);
@@ -5915,24 +5897,16 @@ async function collectNowAggregation(manual = true) {
     allowDirectFallback: false,
     persist: false
   });
-  let sourcePrompt = pendingPrompt;
-  // If the loaded root already represents the current question, prefer that branch
-  // over any stale pending prompt when deciding what to re-ingest.
-  if (manual && hasLoadedQuestionContext) {
-    const pendingMatchesLoaded = promptsReferToSameQuestion(pendingPrompt, loadedQuestionPrompt);
-    if (!pendingMatchesLoaded) {
-      sourcePrompt = scrapedPrompt || loadedQuestionPrompt || pendingPrompt;
-    } else {
-      sourcePrompt = pendingPrompt || scrapedPrompt || loadedQuestionPrompt;
-    }
-  } else {
-    sourcePrompt = pendingPrompt || scrapedPrompt || loadedQuestionPrompt;
-  }
+  // Collect scrape-prompt canon: a freshly typed+sent prompt (pendingPrompt)
+  // seeds the scrape; otherwise use whatever the scrape found on screen.
+  // loadedQuestionPrompt (the loaded root's own title) must never win here —
+  // Collect targets the chain tail, not q1's title (mirrors Android
+  // MainActivity.kt scrapeSeedPrompt / collectNowAggregation comment).
+  const sourcePrompt = pendingPrompt || scrapedPrompt || loadedQuestionPrompt;
   if (sourcePrompt) {
     rememberResolvedSourcePrompt(sourcePrompt);
   }
   let resolvedExistingAggregatedNoteId = existingAggregatedNoteId;
-  let storedPrompt = loadedQuestionPrompt;
   const forceNewRoot = !!pending?.forceNewRoot;
   const allowPendingOverwrite = !!pending?.allowOverwriteExisting;
 
@@ -5949,65 +5923,42 @@ async function collectNowAggregation(manual = true) {
     return null;
   }
 
-  // A numeric session can accumulate multiple user questions inside the same chat tabs.
-  // We only overwrite the current aggregated root when the recovered prompt still points
-  // to that exact question; matching session_id alone is not safe enough.
-  let sameQuestionAsCurrentRoot = hasLoadedQuestionContext
-    ? promptsReferToSameQuestion(sourcePrompt, storedPrompt)
-    : false;
+  // Collect targeting canon: Collect NEVER creates a note — it always replaces
+  // the chain tail (the last root-turn note in the session), regardless of
+  // whether the collected prompt matches the loaded root's own title. A new
+  // note is only ever created via the send-new-question path (forceNewRoot,
+  // set above in the send handler). So here we just need the true tail note
+  // id, resolved from the server (the local cache can be stale — it may still
+  // point at an earlier root even though a later question was appended to the
+  // same session). Mirrors Android SessionManager.getChainTailNoteId /
+  // MainActivity.kt collectNowAggregation.
   if (
-    (manual || allowPendingOverwrite)
-    && !forceNewRoot
-    && sourcePrompt
+    !forceNewRoot
     && Number.isInteger(ingestContext.sessionIdHint)
     && ingestContext.sessionIdHint > 0
-    && (!resolvedExistingAggregatedNoteId || !sameQuestionAsCurrentRoot)
+    && window.electronAPI?.getChainTailNoteId
   ) {
-    const existingRoot = await findExistingAggregatedRootForQuestion(ingestContext.sessionIdHint, sourcePrompt);
-    const recoveredNoteId = String(existingRoot?.noteId ?? existingRoot?.note_id ?? '').trim() || null;
-    const recoveredPrompt = String(existingRoot?.name || existingRoot?.title || '').trim();
-    if (recoveredNoteId) {
-      resolvedExistingAggregatedNoteId = recoveredNoteId;
-      if (recoveredPrompt) storedPrompt = recoveredPrompt;
-      sameQuestionAsCurrentRoot = promptsReferToSameQuestion(sourcePrompt, storedPrompt);
-      activeAggregatedNoteId = recoveredNoteId;
-      if (sameQuestionAsCurrentRoot) {
-        mergeLog('Recovered existing aggregated root for current question before Collect now overwrite', 'info', {
-          sessionIdHint: ingestContext.sessionIdHint,
-          recoveredAggregatedNoteId: recoveredNoteId,
-          sourcePrompt,
-          storedPrompt
-        });
+    try {
+      const tailNoteId = await window.electronAPI.getChainTailNoteId(ingestContext.sessionIdHint);
+      if (tailNoteId) {
+        resolvedExistingAggregatedNoteId = tailNoteId;
+        activeAggregatedNoteId = tailNoteId;
       }
+    } catch (e) {
+      mergeLog(`getChainTailNoteId failed, falling back to cached noteId: ${e?.message || e}`, 'warn');
     }
   }
   const replaceExisting = !forceNewRoot
-    && (manual || allowPendingOverwrite)
+    && (manual || allowPendingOverwrite || !!resolvedExistingAggregatedNoteId)
     && Number.isInteger(ingestContext.sessionIdHint)
     && ingestContext.sessionIdHint > 0
-    && !!resolvedExistingAggregatedNoteId
-    && sameQuestionAsCurrentRoot;
+    && !!resolvedExistingAggregatedNoteId;
   const targetAggregatedNoteId = replaceExisting ? resolvedExistingAggregatedNoteId : null;
   if (forceNewRoot && resolvedExistingAggregatedNoteId) {
     mergeLog('Collect now is running for a freshly sent prompt; forcing creation of a new aggregated root instead of overwriting the previous one', 'info', {
       sessionIdHint: ingestContext.sessionIdHint || null,
       previousAggregatedNoteId: resolvedExistingAggregatedNoteId,
       sourcePrompt
-    });
-  }
-  if (
-    manual
-    && hasLoadedQuestionContext
-    && resolvedExistingAggregatedNoteId
-    && sourcePrompt
-    && storedPrompt
-    && !sameQuestionAsCurrentRoot
-  ) {
-    mergeLog('Collect now detected a new question in the same chats; creating a new note instead of overwriting the current root', 'info', {
-      current_root_prompt: storedPrompt,
-      collected_prompt: sourcePrompt,
-      sessionIdHint: ingestContext.sessionIdHint || null,
-      previousAggregatedNoteId: resolvedExistingAggregatedNoteId
     });
   }
   const payloadBuild = buildAggregatedPayload({

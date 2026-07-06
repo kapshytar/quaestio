@@ -269,6 +269,13 @@
         return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"]');
       }
 
+      // See scrapeReply.js isUserMessageElement: never treat a user-message
+      // container as a reply candidate (grok/claude truncated-prompt bug).
+      function isUserMessageElement(el) {
+        if (!el) return false;
+        return !!el.closest('[data-message-author-role="user"], [data-testid*="user"]');
+      }
+
       function isMetadataLikeText(text) {
         const t = (text || '').toLowerCase();
         if (!t) return true;
@@ -446,6 +453,7 @@
           document.querySelectorAll(sel).forEach((el) => {
             if (!visible(el)) return;
             if (isComposerElement(el)) return;
+            if (isUserMessageElement(el)) return;
             const raw = extractStructuredText(el);
             const flat = flatText(raw);
             if (flat.length < 20 || isMetadataLikeText(flat)) return;
@@ -468,6 +476,7 @@
       if (candidates.length === 0) {
         Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
           if (isComposerElement(el)) return;
+          if (isUserMessageElement(el)) return;
           const raw = extractStructuredText(el);
           const flat = flatText(raw);
           if (flat.length < 20 || isMetadataLikeText(flat)) return;

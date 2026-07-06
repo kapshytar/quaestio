@@ -9,6 +9,7 @@
 
 ## Stable
 
+- Saved conversation URLs survive provider SPA redirects (2.9.0): `ChatFragment.rememberLoadUrl` refuses to overwrite a saved conversation URL with the provider's home URL (Gemini could client-side redirect to home and silently clobber `savedWebViewUrl`); `doUpdateVisitedHistory` now logs slot+url. Collect targets the server-resolved chain tail (`SessionManager.getChainTailNoteId`, created_at order) with local fallback.
 - Merge aggregation readiness (2.8.10): `MergeFragment.waitForAggregationReadyOrPause` adds a text-stability gate on top of the slot READY status — after all slots report READY (stop-button check), it re-scrapes via `collectLatestRepliesFromEnabledSlots` and only collects once every slot's text is non-empty AND unchanged from the previous poll, so a still-streaming reply that slipped past the stop-button selectors is no longer frozen into the note.
 - WebView renderer-crash recovery (`ChatFragment`) always loads a page after `onRenderProcessGone`: restores saved state if possible, else falls back to last known URL / slot default, fixing the black-screen-after-background bug; `MainActivity` resumes/pauses WebView JS timers on whole-app foreground/background (not per-tab) and flushes cookies on `onTrimMemory`.
 - Cross-cutting ecosystem rules are now split into root handoff docs:

@@ -157,6 +157,19 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         let targetHost = normalizedHost(for: targetURL)
         let targetNavigationTarget = normalizedNavigationTarget(for: targetURL)
 
+        // Declarative load (SwiftUI updateUIView re-sync) must not cancel an
+        // explicit in-flight navigation: the OLD page's didCommit/didFinish can
+        // write its URL back into slots[].url after loadSession already
+        // forceLoad-ed the new target, and the resulting stale render would
+        // stomp the pending navigation with the previous page (claude home).
+        if hasPendingNavigation,
+           let pendingNavigationTarget = loadedNavigationTarget,
+           pendingNavigationTarget != targetNavigationTarget {
+            recordEvent("skip-load pending-target \(targetURL.absoluteString)")
+            Self.logger.debug("skip-load pending-target target=\(targetURL.absoluteString, privacy: .public) pending=\(pendingNavigationTarget, privacy: .public)")
+            return
+        }
+
         if let currentURL = webView.url {
             let currentNavigationTarget = normalizedNavigationTarget(for: currentURL)
             if currentNavigationTarget == targetNavigationTarget {
@@ -399,7 +412,12 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
 
     func collectLatestReply(serviceId: String, sourcePrompt: String) async -> SlotScrapeReply? {
         let sid = serviceId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let preferDesktopDOMFirst = sid == "gemini" || sid == "grok"
+        // chatgpt included: its copy path succeeds only every other poll (clipboard
+        // race), so scrapes alternate copy/dom texts that differ by the "ChatGPT
+        // said:" header — the collect stability guard then never converges and every
+        // Collect waits out the 30s timeout. DOM is deterministic per poll;
+        // header-in-text matches Claude's long-standing captured format.
+        let preferDesktopDOMFirst = sid == "gemini" || sid == "grok" || sid == "chatgpt"
         recordEvent("collect-start \(sid) domFirst=\(preferDesktopDOMFirst) promptLen=\(sourcePrompt.count)")
 
         if preferDesktopDOMFirst {
@@ -561,10 +579,40 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         )
     }
 
+    private func normalizedForPromptCompare(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+
+    /// True when the copied text is (almost certainly) an echo of the user's own
+    /// prompt rather than the assistant's reply — i.e. the copy-button target
+    /// selection grabbed the wrong (user) message. See collect-copy alternating
+    /// 756/2547-char bug on ChatGPT iOS (2026-07-06).
+    private func looksLikePromptEcho(capturedText: String, sourcePrompt: String) -> Bool {
+        let a = normalizedForPromptCompare(capturedText)
+        let b = normalizedForPromptCompare(sourcePrompt)
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        if a == b { return true }
+        // Near-exact: one contains the other and their lengths are close
+        // (guards against a short reply that happens to quote the prompt).
+        let lenDiff = abs(a.count - b.count)
+        if lenDiff <= max(20, Int(Double(min(a.count, b.count)) * 0.05)) {
+            if a.contains(b) || b.contains(a) { return true }
+        }
+        return false
+    }
+
     private func scrapeLatestReplyFromCopy(serviceId: String, sourcePrompt: String) async -> SlotScrapeReply? {
         guard let captured = await captureLatestReplyViaCopy(serviceId: serviceId),
               !captured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
+            return nil
+        }
+
+        if looksLikePromptEcho(capturedText: captured, sourcePrompt: sourcePrompt) {
+            recordEvent("copy-fail \(serviceId) prompt-echo chars=\(captured.count)")
             return nil
         }
 
@@ -722,6 +770,9 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             function inExcludedArea(el) {
               return !!el?.closest?.('textarea, [contenteditable=\"true\"], [role=\"textbox\"], [data-testid*=\"composer\"], [class*=\"composer\"]');
             }
+            function inUserMessage(el) {
+              return !!el?.closest?.('[data-message-author-role=\"user\"]');
+            }
             function messageContainer(el) {
               const specific = el?.closest?.('[data-message-author-role=\"assistant\"], [data-testid*=\"assistant\"], [class*=\"assistant\"][class*=\"message\"], article, [class*=\"response\"], [class*=\"answer\"], [id^=\"response-\"], model-response, response-container, [class*=\"message-bubble\"], [class*=\"prose\"]');
               if (specific) return specific;
@@ -819,6 +870,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
                   seen.add(el);
                   const isExactChatGPT = sel === '[data-testid=\"copy-turn-action-button\"]';
                   if (!isExactChatGPT && inExcludedArea(el)) return;
+                  if (inUserMessage(el)) return;
                   if (!hasLayout(el)) return;
                   const label = labelOf(el);
                   if (!isCopyLike(label, el)) return;

@@ -157,6 +157,34 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
         return dedupeLatestSnapshots(getStoredSessions())
     }
 
+    /**
+     * Resolve the chain-tail note (last `note_type=1` root by `created_at`) for
+     * this session. Collect always replaces this note — it never creates a new
+     * one; only the send-new-question path appends a new root. Runs blocking
+     * network I/O; call from a background thread.
+     */
+    fun getChainTailNoteId(
+        sessionId: Int,
+        rpcBaseUrl: String,
+        apiKey: String
+    ): String? {
+        val query = "select=id,title,created_at&note_type=eq.1&note_session_id=eq.$sessionId&order=created_at.asc"
+        val raw = try {
+            getJson(normalizeRestEndpoint(rpcBaseUrl, "notes?$query"), apiKey)
+        } catch (e: Exception) {
+            Log.w(TAG, "getChainTailNoteId fetch failed: ${e.message}")
+            return null
+        }
+        val rows = try {
+            gson.fromJson(raw, JsonArray::class.java) ?: JsonArray()
+        } catch (_: Exception) {
+            JsonArray()
+        }
+        if (rows.size() == 0) return null
+        return rows.last().asJsonObject
+            .get("id")?.takeIf { !it.isJsonNull }?.asString?.trim()?.takeIf { it.isNotBlank() }
+    }
+
     fun deleteSession(sessionId: String) {
         saveSessions(getAllSessions().filter { it.id != sessionId })
     }

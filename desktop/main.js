@@ -1157,6 +1157,26 @@ ipcMain.handle('dream-send-clarification', async (_event, params) => {
   return ingestDreamRpc('clarification', params);
 });
 
+// Collect targeting: the chain tail is the last root-turn note (note_type=1)
+// in the session, ordered by created_at — mirrors Android
+// SessionManager.getChainTailNoteId / iOS SessionManager.refreshActiveNoteIdForSession.
+// Collect must always replace this note, never the loaded session's own root.
+ipcMain.handle('dream-get-chain-tail-note-id', async (_event, sessionId) => {
+  const numericSessionId = Number(sessionId);
+  if (!Number.isInteger(numericSessionId) || numericSessionId <= 0) return null;
+  try {
+    const rows = await callSupabaseRestGet(
+      `notes?select=id,title,created_at&note_type=eq.1&note_session_id=eq.${numericSessionId}&order=created_at.asc`
+    );
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const tail = rows[rows.length - 1];
+    return typeof tail?.id === 'string' && tail.id.trim() ? tail.id.trim() : null;
+  } catch (e) {
+    console.error('dream-get-chain-tail-note-id failed:', e);
+    return null;
+  }
+});
+
 // --- Supabase Auth (multi-user) ---
 // Signed-in ingest/session writes carry the user JWT, so backend owner_id
 // triggers attribute rows to this account. Signed out = legacy anon behaviour.
