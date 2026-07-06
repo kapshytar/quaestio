@@ -160,7 +160,9 @@ final class MobileAppState: ObservableObject {
         // Question identity semantics are documented centrally in
         // Verity/docs/domains/SESSION_AND_INGEST_RULES.md.
         // Keep iOS behavior aligned with Android there; do not invent local rules here.
-        let hadCurrentQuestionContext = currentQuestionSessionId() != nil && currentQuestionAggregatedNoteId() != nil
+        let contextSessionId = await currentQuestionSessionId()
+        let contextNoteId = await currentQuestionAggregatedNoteId()
+        let hadCurrentQuestionContext = contextSessionId != nil && contextNoteId != nil
         let contextMatchesCurrentSlots = hasCurrentQuestionContextForCurrentSlots()
         let loadedQuestionPrompt = sessionManager.getParallelIngestState().sourcePrompt
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -618,8 +620,8 @@ final class MobileAppState: ObservableObject {
             sessionManager.rememberSourcePrompt(prompt)
             updateSessionIndicator()
         }
-        let existingAggregatedNoteId = currentQuestionAggregatedNoteId()
-        let existingSessionId = currentQuestionSessionId()
+        let existingAggregatedNoteId = await currentQuestionAggregatedNoteId()
+        let existingSessionId = await currentQuestionSessionId()
         let hasLoadedQuestionContext = existingAggregatedNoteId != nil && existingSessionId != nil
         let loadedQuestionPrompt = if hasLoadedQuestionContext {
             sessionManager.getParallelIngestState().sourcePrompt
@@ -681,7 +683,25 @@ final class MobileAppState: ObservableObject {
         let waitIntervalNs = UInt64(max(0, mergeAggregationPolicy.waitIntervalMs)) * 1_000_000
         let settleDelayNs = UInt64(max(0, mergeAggregationPolicy.settleDelayMs)) * 1_000_000
         let minimumRepliesRequired = max(1, mergeAggregationPolicy.minimumRepliesRequired)
+        // Streaming-completion guard: a slot's text can be non-empty while ChatGPT
+        // (or any provider) is still streaming it. A slot only counts as "ready"
+        // once its text is unchanged from the previous poll of that same slot
+        // (see stabilizeResponses below). previousSlotTexts carries the last-seen
+        // text per slot title across poll iterations so we can detect that.
+        var previousSlotTexts: [String: String] = [:]
+        func stabilizeResponses(_ raw: [String: String]) -> [String: String] {
+            var stable: [String: String] = [:]
+            for (title, text) in raw {
+                if previousSlotTexts[title] == text {
+                    stable[title] = text
+                }
+            }
+            previousSlotTexts = raw
+            return stable
+        }
+
         var lastResult = await scrapeRepliesRecoveringPromptIfNeeded(sourcePrompt: sourcePrompt)
+        lastResult.responses = stabilizeResponses(lastResult.responses)
         mergeAggregationSnapshots = lastResult.snapshots
         mergeAggregationSummary = formatAggregationSummary(lastResult.snapshots)
         appendIngestEvent("collect-after-scrape responses=\(lastResult.responses.count) snapshots=\(lastResult.snapshots.map { "\($0.id):\($0.status.rawValue)" }.joined(separator: ", "))")
@@ -691,6 +711,7 @@ final class MobileAppState: ObservableObject {
                 if settleDelayNs > 0 {
                     try? await Task.sleep(nanoseconds: settleDelayNs)
                     lastResult = await scrapeRepliesRecoveringPromptIfNeeded(sourcePrompt: sourcePrompt)
+                    lastResult.responses = stabilizeResponses(lastResult.responses)
                     mergeAggregationSnapshots = lastResult.snapshots
                 }
                 if lastResult.responses.count >= enabledSlots.count {
@@ -713,6 +734,7 @@ final class MobileAppState: ObservableObject {
             try? await Task.sleep(nanoseconds: waitIntervalNs)
 
             lastResult = await scrapeRepliesRecoveringPromptIfNeeded(sourcePrompt: sourcePrompt)
+            lastResult.responses = stabilizeResponses(lastResult.responses)
             mergeAggregationSnapshots = lastResult.snapshots
             mergeAggregationSummary = formatAggregationSummary(lastResult.snapshots)
 
@@ -809,8 +831,8 @@ final class MobileAppState: ObservableObject {
         // not silently attach to a stale root from a previous question in the same
         // logical session. If either is missing, run Collect Now first so the
         // merge lands on the correct aggregated root.
-        var sessionId = currentQuestionSessionId()
-        var aggregatedNoteId = currentQuestionAggregatedNoteId()
+        var sessionId = await currentQuestionSessionId()
+        var aggregatedNoteId = await currentQuestionAggregatedNoteId()
         let storedPrompt = sessionManager.getParallelIngestState().sourcePrompt
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let promptMatchesLoadedRoot = !storedPrompt.isEmpty
@@ -1003,21 +1025,21 @@ final class MobileAppState: ObservableObject {
         return state.sessionId != nil && !state.activeNoteId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func currentQuestionSessionId() -> Int? {
+    private func currentQuestionSessionId() async -> Int? {
         // Shared semantics reference:
         // Verity/docs/domains/SESSION_AND_INGEST_RULES.md
         let state = sessionManager.getParallelIngestState()
-        let activeRootId = currentQuestionAggregatedNoteId()
+        let activeRootId = await currentQuestionAggregatedNoteId()
         if !activeRootId.isNilOrBlank, let sessionId = state.sessionId {
             return sessionId
         }
-        return !activeRootId.isNilOrBlank ? restoreStoredQuestionContextForCurrentSlots()?.sessionId : nil
+        return !activeRootId.isNilOrBlank ? await restoreStoredQuestionContextForCurrentSlots()?.sessionId : nil
     }
 
-    private func currentQuestionAggregatedNoteId() -> String? {
+    private func currentQuestionAggregatedNoteId() async -> String? {
         let direct = sessionManager.getParallelIngestState().activeNoteId.nilIfBlank
         if !direct.isNilOrBlank { return direct }
-        return restoreStoredQuestionContextForCurrentSlots()?.noteId.nilIfBlank
+        return await restoreStoredQuestionContextForCurrentSlots()?.noteId.nilIfBlank
     }
 
     private func updateSessionIndicator() {
@@ -1044,7 +1066,10 @@ final class MobileAppState: ObservableObject {
             throw NSError(domain: "MobileAppState", code: 2001, userInfo: [NSLocalizedDescriptionKey: "Supabase integration is not configured"])
         }
 
-        let existingSessionId = sessionManager.getParallelIngestState().sessionId ?? currentQuestionSessionId()
+        var existingSessionId = sessionManager.getParallelIngestState().sessionId
+        if existingSessionId == nil {
+            existingSessionId = await currentQuestionSessionId()
+        }
         let traceId = sessionManager.ensureTraceId()
         let sequence = sessionManager.nextSequence()
         let sessionOrTmp = existingSessionId.map(String.init) ?? sessionManager.ensureExternalChatId()
@@ -1475,7 +1500,7 @@ final class MobileAppState: ObservableObject {
         return result
     }
 
-    private func restoreStoredQuestionContextForCurrentSlots() -> SessionSnapshot? {
+    private func restoreStoredQuestionContextForCurrentSlots() async -> SessionSnapshot? {
         // After sign-in / migration, do not resurrect a pre-login session by slot
         // layout alone — the next question must start fresh.
         if sessionManager.suppressSlotRestore { return nil }
@@ -1494,17 +1519,17 @@ final class MobileAppState: ObservableObject {
         // keying context on the exact real-conversation fingerprint; mirror that.
         if !fingerprintHasRealConversation(slotURLs: currentSlotURLs, slotKeys: enabledSlotKeys) { return nil }
 
-        let currentSourcePrompt = sessionManager.getParallelIngestState().sourcePrompt
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
         let matching = sessionManager.getAllSessions().first { snapshot in
             guard snapshot.sessionId != nil, !(snapshot.noteId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return false
             }
-            guard buildSessionFingerprint(slotURLs: snapshot.slotURLs, slotKeys: enabledSlotKeys) == currentFingerprint else {
-                return false
-            }
-            return currentSourcePrompt.isEmpty || promptsReferToSameQuestion(currentSourcePrompt, snapshot.name)
+            // A full fingerprint match (all enabled slot URLs identical) already
+            // identifies this as the same browser conversation; a new prompt there
+            // is just the next turn, not a new question, so no prompt check needed.
+            // Note: this is unrelated to the S180 in-page reply-selection guard in
+            // scrapeReply.js (promptMatchesCurrentSource) — that guard picks the
+            // right DOM reply block for a given prompt and is untouched here.
+            return buildSessionFingerprint(slotURLs: snapshot.slotURLs, slotKeys: enabledSlotKeys) == currentFingerprint
         }
 
         guard let matching else { return nil }
@@ -1513,6 +1538,14 @@ final class MobileAppState: ObservableObject {
             noteId: matching.noteId,
             sourcePrompt: matching.name
         )
+        // Late Collect must land on the current TAIL of the chain, not the root
+        // note the session snapshot was created from — refreshActiveNoteIdForSession
+        // already resolves that tip (latest note by note_session_id, same helper
+        // startNewQuestionInCurrentSession relies on) and overwrites activeNoteId
+        // set above if a later note exists.
+        if let sessionId = matching.sessionId {
+            await sessionManager.refreshActiveNoteIdForSession(sessionId)
+        }
         updateSessionIndicator()
         return matching
     }
