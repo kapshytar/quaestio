@@ -330,20 +330,24 @@ class ChatFragment : Fragment(), Findable {
         recreateRetainedWebView(fallbackUrl, savedState = savedState)
     }
 
-    private fun rememberLoadUrl(url: String) {
+    // Returns false when the url was rejected as a default-home overwrite of a
+    // live conversation URL — callers must skip the actual navigation too, not
+    // just the bookkeeping, or the WebView still gets yanked off the live chat.
+    private fun rememberLoadUrl(url: String): Boolean {
         if (url.isNotBlank() && url != "about:blank") {
             val homeUrl = ServiceConfig.getById(currentServiceId)?.url
             val savedIsDeeper = savedWebViewUrl?.let { it.isNotBlank() && it != "about:blank" && it != homeUrl } == true
             if (homeUrl != null && url == homeUrl && savedIsDeeper) {
                 Log.d(TAG, "[slot-$slotIndex] rememberLoadUrl: ignore home overwrite url=$url saved=$savedWebViewUrl")
-                return
+                return false
             }
             savedWebViewUrl = url
         }
+        return true
     }
 
     private fun loadTrackedUrl(webView: WebView, url: String) {
-        rememberLoadUrl(url)
+        if (!rememberLoadUrl(url)) return
         webView.loadUrl(url)
     }
 
