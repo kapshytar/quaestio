@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.117.0
+
+- **Fix: Collect/Merge self-heal a stale session context instead of failing with P0001** (после серверного мерджа сессий 303/304 → 298 клиент слал протухшую пару session/note). The pre-collect chain-tail check no longer silently ignores an EMPTY tail: it now asks the server where the cached note lives NOW (`dream-get-note-session-id`), re-points the context to that session's tail, and (only if the note is gone) clears + force-refreshes the sessions list + re-resolves by open tabs. Network failures are fail-closed (context kept, operation aborts — never a duplicate session from a rejected context). One-shot P0001 retry around the ingest call as a race backstop. Merge persist tail-validates the restored context and REFUSES to bootstrap a new root from an unrepaired stale context (previously the merge result silently failed to save; now it either saves to the right session or says why not).
+- **Fix: session list cache no longer freezes undecorated rows for 24h** — the partial one-row merge in `saveSessionSnapshot` (and the local-delete path) stamped the whole cached list as fresh, so rows without `project_tag_id` survived and loading a session silently skipped `setActiveProject` (проект сессии не подтягивался). Partial writes now invalidate the list cache; the freshness stamp is written only by a real full list fetch.
+- **Fix: Collect is single-flight** (double click / auto+manual overlap no longer race the shared context; parity with iOS `isManualCollecting`).
+- `sendToAll` snapshot-resolver fallback is now gated on "no live in-memory session" — a mid-session fingerprint change can no longer rebind to a different freshest-matching snapshot.
+
 ## 1.116.0
 
 - **Fix: send/collect/merge no longer mint a duplicate session when the enabled-slot set changed or the app relaunched (S304-while-S298 bug).** The legacy path kept ONE global question context keyed by an exact whole-layout fingerprint hash — toggling Grok on changed the hash, the exact-match restore missed, and the send ingested with `session_id = null` (backend minted 304 while every tab still sat on 298's conversations). New `restoreStoredQuestionContextForCurrentSlots` is the iOS-parity resolver: it scans saved session snapshots and matches per-slot conversation keys (`conversationKeyTailIsReal`, same semantics as iOS/Android) — real-key mismatch rejects the snapshot, at least one real agreement is required, prompt match is a preference. Wired as the fallback in `sendToAll`, `collectNowAggregation`, and the merge bootstrap path.

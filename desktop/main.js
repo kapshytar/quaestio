@@ -1164,17 +1164,31 @@ ipcMain.handle('dream-send-clarification', async (_event, params) => {
 ipcMain.handle('dream-get-chain-tail-note-id', async (_event, sessionId) => {
   const numericSessionId = Number(sessionId);
   if (!Number.isInteger(numericSessionId) || numericSessionId <= 0) return null;
-  try {
-    const rows = await callSupabaseRestGet(
-      `notes?select=id,title,created_at&note_type=eq.1&note_session_id=eq.${numericSessionId}&order=created_at.asc`
-    );
-    if (!Array.isArray(rows) || rows.length === 0) return null;
-    const tail = rows[rows.length - 1];
-    return typeof tail?.id === 'string' && tail.id.trim() ? tail.id.trim() : null;
-  } catch (e) {
-    console.error('dream-get-chain-tail-note-id failed:', e);
-    return null;
-  }
+  // NOTE: errors are rethrown (not swallowed into null) so the renderer can
+  // distinguish "session genuinely has no chain notes" (null -> stale context,
+  // repair) from "network/auth failure" (throw -> fail-closed, keep context).
+  const rows = await callSupabaseRestGet(
+    `notes?select=id,title,created_at&note_type=eq.1&note_session_id=eq.${numericSessionId}&order=created_at.asc`
+  );
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const tail = rows[rows.length - 1];
+  return typeof tail?.id === 'string' && tail.id.trim() ? tail.id.trim() : null;
+});
+
+// Where does a note live NOW? Used by the stale-context repair path: after a
+// server-side session merge (e.g. S303/S304 folded into S298 in the DB) the
+// client's cached (session_id, note_id) pair goes stale and ingest rejects it
+// with P0001. Resolving the note's current session lets the client re-point
+// itself instead of failing. null = note deleted; throws on network failure.
+ipcMain.handle('dream-get-note-session-id', async (_event, noteId) => {
+  const normalized = String(noteId || '').trim();
+  if (!/^[0-9a-f-]{36}$/i.test(normalized)) return null;
+  const rows = await callSupabaseRestGet(
+    `notes?select=note_session_id&id=eq.${normalized}&limit=1`
+  );
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const sessionId = Number(rows[0]?.note_session_id);
+  return Number.isInteger(sessionId) && sessionId > 0 ? sessionId : null;
 });
 
 // --- Supabase Auth (multi-user) ---

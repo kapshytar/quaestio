@@ -1230,6 +1230,67 @@ async function restoreStoredQuestionContextForCurrentSlots(enabledSlots, current
   };
 }
 
+// Stale-context repair (Collect/Merge only — Send never pays this RTT).
+// A cached (session_id, note_id) pair can go stale when sessions are merged or
+// notes moved server-side: the tail lookup for the cached session returns null
+// and ingest would reject with P0001 "aggregated note not found for session_id".
+// Repair order:
+//   1) ask the server where the cached note lives NOW -> re-point the context
+//      to that session and its chain tail (heals a server-side session merge);
+//   2) note deleted -> clear context, force-refresh the sessions list from the
+//      DB, re-run the per-slot snapshot resolver;
+//   3) network/auth failure anywhere -> fail-closed: return null WITHOUT
+//      clearing anything (caller aborts the operation instead of bootstrapping
+//      a duplicate session from a rejected context).
+// Returns { sessionId, noteId } on success, null when unrepaired.
+async function repairStaleQuestionContext(staleNoteId, enabledSlots) {
+  const noteId = String(staleNoteId || '').trim();
+  if (noteId && window.electronAPI?.getNoteSessionId) {
+    let currentSessionId = null;
+    try {
+      currentSessionId = await window.electronAPI.getNoteSessionId(noteId);
+    } catch (e) {
+      mergeLog(`Stale-context repair aborted (note lookup failed, keeping context): ${e?.message || e}`, 'warn');
+      return null;
+    }
+    if (Number.isInteger(currentSessionId) && currentSessionId > 0) {
+      let tailNoteId = null;
+      try {
+        tailNoteId = await window.electronAPI.getChainTailNoteId(currentSessionId);
+      } catch (e) {
+        mergeLog(`Stale-context repair aborted (tail lookup failed, keeping context): ${e?.message || e}`, 'warn');
+        return null;
+      }
+      if (tailNoteId) {
+        activeSessionId = currentSessionId;
+        activeAggregatedNoteId = tailNoteId;
+        const fingerprint = buildSessionFingerprint(Array.isArray(enabledSlots) ? enabledSlots : []);
+        if (fingerprint) {
+          persistSessionContext(currentSessionId, fingerprint, tailNoteId, activeSessionPrompt || null);
+        }
+        setIngestSessionIndicator(currentSessionId);
+        mergeLog(`Stale session context repaired: note moved to S${currentSessionId}, targeting its chain tail`, 'info');
+        loadSessionsList({ forceRefresh: true }).catch(() => {});
+        return { sessionId: currentSessionId, noteId: tailNoteId };
+      }
+    }
+  }
+
+  // Note is gone entirely: drop the dead context and re-resolve from fresh data.
+  clearStoredSessionContext();
+  clearIngestSessionIndicator();
+  try {
+    await loadSessionsList({ forceRefresh: true });
+  } catch (_) {
+    return null;
+  }
+  const restored = await restoreStoredQuestionContextForCurrentSlots(enabledSlots, '');
+  if (restored?.session_id && restored?.aggregated_note_id) {
+    return { sessionId: restored.session_id, noteId: restored.aggregated_note_id };
+  }
+  return null;
+}
+
 function normalizePromptForComparison(value) {
   return String(value || '')
     .toLowerCase()
@@ -4303,11 +4364,13 @@ async function sendToAll() {
   const sessionFingerprint = buildSessionFingerprint(enabledSlots);
   activeSessionFingerprint = sessionFingerprint;
   let storedContext = restoreStoredQuestionContextForFingerprint(sessionFingerprint);
-  if (!storedContext) {
-    // Exact-hash context miss (slot set changed, relaunch, cleared context):
-    // fall back to the iOS-parity per-slot snapshot resolver before minting a
-    // new session (the S304 duplicate: Grok toggled on changed the hash while
-    // the tabs still sat on S298's conversations).
+  if (!storedContext && !(Number.isInteger(activeSessionId) && activeSessionId > 0)) {
+    // Exact-hash context miss AND no live in-memory session (slot set changed,
+    // relaunch, cleared context): fall back to the iOS-parity per-slot snapshot
+    // resolver before minting a new session (the S304 duplicate: Grok toggled
+    // on changed the hash while the tabs still sat on S298's conversations).
+    // The activeSessionId gate keeps a mid-session hash change from rebinding
+    // to a different (freshest-matching) snapshot.
     storedContext = await restoreStoredQuestionContextForCurrentSlots(enabledSlots, text);
   }
   const sessionIdHint = Number.isInteger(activeSessionId) && activeSessionId > 0
@@ -5968,7 +6031,25 @@ async function finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContex
   return { sessionId, noteId };
 }
 
+let collectNowInFlight = false;
+
 async function collectNowAggregation(manual = true) {
+  // Single-flight: a second Collect while one is running (double click, auto +
+  // manual overlap) must not race the shared context/ingest state (parity with
+  // iOS isManualCollecting).
+  if (collectNowInFlight) {
+    mergeLog('Collect ignored: previous collect still running', 'warn');
+    return null;
+  }
+  collectNowInFlight = true;
+  try {
+    return await collectNowAggregationInner(manual);
+  } finally {
+    collectNowInFlight = false;
+  }
+}
+
+async function collectNowAggregationInner(manual = true) {
   if (manual) {
     const traceId = startIngestTrace();
     mergeLog(`Ingest trace restarted for manual collect: ${traceId}`, 'info');
@@ -6067,6 +6148,22 @@ async function collectNowAggregation(manual = true) {
       if (tailNoteId) {
         resolvedExistingAggregatedNoteId = tailNoteId;
         activeAggregatedNoteId = tailNoteId;
+      } else {
+        // null = the cached session genuinely has no chain notes (it was merged
+        // away or deleted server-side). Previously this silently kept the stale
+        // cached noteId and ingest failed with P0001. Repair or abort — never
+        // fall through to creating a duplicate session from a rejected context.
+        mergeLog(`Chain tail empty for cached S${ingestContext.sessionIdHint} — repairing stale session context`, 'warn');
+        const repaired = await repairStaleQuestionContext(resolvedExistingAggregatedNoteId, enabledSlots);
+        if (repaired) {
+          ingestContext.sessionIdHint = repaired.sessionId;
+          resolvedExistingAggregatedNoteId = repaired.noteId;
+          activeAggregatedNoteId = repaired.noteId;
+        } else {
+          setMergeStatus('Session context is stale and could not be repaired — reload the session from the Sessions tab.', 'error');
+          mergeLog('Collect aborted: stale session context unrepaired (no duplicate session will be created)', 'error');
+          return null;
+        }
       }
     } catch (e) {
       mergeLog(`getChainTailNoteId failed, falling back to cached noteId: ${e?.message || e}`, 'warn');
@@ -6099,7 +6196,7 @@ async function collectNowAggregation(manual = true) {
     scrape_meta: lastScrapeMeta
   });
 
-  const ingestResult = await sendAggregated(
+  let ingestResult = await sendAggregated(
     payloadBuild.sessionId,
     payloadBuild.payload.title,
     payloadBuild.payload.responses,
@@ -6108,6 +6205,41 @@ async function collectNowAggregation(manual = true) {
     payloadBuild.payload.replace_existing,
     payloadBuild.payload.aggregated_note_id
   );
+
+  // One-shot self-heal on P0001 "aggregated note ... not found for session_id":
+  // the pre-collect tail check should prevent this, but a race (server-side
+  // merge between check and ingest) can still land here. Repair the context
+  // and retry ONCE with the corrected pair; a new payload hash gets a fresh
+  // sequence/idempotency key, and P0001 fires before any mutation, so the
+  // retry cannot double-write.
+  if (
+    !ingestResult?.ok
+    && /not found for session_id/i.test(String(ingestResult?.responseText || ''))
+    && payloadBuild.payload.replace_existing
+  ) {
+    mergeLog('Ingest rejected stale context (P0001) — repairing and retrying once', 'warn');
+    const repaired = await repairStaleQuestionContext(payloadBuild.payload.aggregated_note_id, enabledSlots);
+    if (repaired) {
+      ingestContext.sessionIdHint = repaired.sessionId;
+      const retryBuild = buildAggregatedPayload({
+        sourcePrompt,
+        responses: aggregatedResponses,
+        sessionId: repaired.sessionId,
+        projectTagId: activeProjectId,
+        aggregatedNoteId: repaired.noteId,
+        replaceExisting: true
+      });
+      ingestResult = await sendAggregated(
+        retryBuild.sessionId,
+        retryBuild.payload.title,
+        retryBuild.payload.responses,
+        lastScrapeMeta,
+        retryBuild.payload.project_tag_id,
+        retryBuild.payload.replace_existing,
+        retryBuild.payload.aggregated_note_id
+      );
+    }
+  }
 
   const finalized = await finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContext);
   if (pending && finalized?.noteId) {
@@ -6276,6 +6408,35 @@ async function executeMergeRequest(isClarification, clarificationText, previousS
       await restoreStoredQuestionContextForCurrentSlots(enabledSlots, '');
     }
     let sessionId = getCurrentQuestionSessionId();
+    // Tail-validate a restored context before persisting the merge under it
+    // (same stale-context class as Collect: session merged away server-side).
+    // An unrepaired stale context BLOCKS the bootstrap below — bootstrapping
+    // from a rejected context is exactly how duplicate sessions are minted.
+    let staleContextUnrepaired = false;
+    if (Number.isInteger(sessionId) && sessionId > 0 && window.electronAPI?.getChainTailNoteId) {
+      try {
+        const tailNoteId = await window.electronAPI.getChainTailNoteId(sessionId);
+        if (tailNoteId) {
+          activeAggregatedNoteId = tailNoteId;
+        } else {
+          mergeLog(`Chain tail empty for cached S${sessionId} — repairing stale session context before merge persist`, 'warn');
+          const repaired = await repairStaleQuestionContext(activeAggregatedNoteId, enabledSlots);
+          if (repaired) {
+            activeAggregatedNoteId = repaired.noteId;
+          } else {
+            staleContextUnrepaired = true;
+          }
+        }
+      } catch (_) {
+        // Network/auth failure: fail-closed, keep the cached context as-is.
+      }
+      sessionId = getCurrentQuestionSessionId();
+    }
+    if (staleContextUnrepaired) {
+      setMergeStatus('Merge shown above was NOT saved: session context is stale — reload the session from the Sessions tab.', 'error');
+      mergeLog('Merge persist aborted: stale session context unrepaired (bootstrap suppressed)', 'error');
+      return;
+    }
     if ((!Number.isInteger(sessionId) || sessionId <= 0) && !isClarification && Array.isArray(aggregatedResponses) && aggregatedResponses.length > 0) {
       const bootstrapPrompt = String(client.lastSourcePrompt || activeSessionPrompt || '').trim();
       // Merge notes are children of an aggregated root. If a loaded question has no
@@ -6576,8 +6737,12 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
         };
         const sessions = mergeSessionSnapshots([resultWithProjectTag], cachedSessions);
         localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-        writeJsonCache(SESSIONS_META_KEY, { fetchedAt: Date.now() });
-        sessionsListMemoryCache = sessions;
+        // Partial one-row merge must NOT stamp the whole list as fresh — that
+        // froze undecorated rows (no project_tag_id from the list RPC) for 24h
+        // and session load silently skipped setActiveProject. Invalidate the
+        // meta + memory cache so the next list read does a real DB fetch.
+        localStorage.removeItem(SESSIONS_META_KEY);
+        sessionsListMemoryCache = null;
       await updateSessionsUI();
       return result;
     } catch (error) {
@@ -6598,8 +6763,9 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
   const sessions = mergeSessionSnapshots([snapshot], cachedSessions);
 
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-  writeJsonCache(SESSIONS_META_KEY, { fetchedAt: Date.now() });
-  sessionsListMemoryCache = sessions;
+  // Same invalidation rule as the DB branch: partial merge never stamps freshness.
+  localStorage.removeItem(SESSIONS_META_KEY);
+  sessionsListMemoryCache = null;
   setSessionsNotice('Saved to local cache only.', 'warn');
   await updateSessionsUI();
   return snapshot;
@@ -6923,8 +7089,9 @@ async function loadSession(sessionId) {
     // Update local cache
     const filtered = sessions.filter((s) => s.id !== sessionId);
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(filtered));
-    writeJsonCache(SESSIONS_META_KEY, { fetchedAt: Date.now() });
-    sessionsListMemoryCache = filtered;
+    // Partial local delete: invalidate instead of stamping fresh (see saveSessionSnapshot).
+    localStorage.removeItem(SESSIONS_META_KEY);
+    sessionsListMemoryCache = null;
     await updateSessionsUI();
   }
 
