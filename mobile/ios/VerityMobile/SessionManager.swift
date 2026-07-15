@@ -109,8 +109,8 @@ final class SessionManager {
         self.defaults = defaults
     }
 
-    static func loadSessionsFromDatabase(defaults: UserDefaults = .standard) async -> [SessionSnapshot] {
-        await SessionManager(defaults: defaults).loadSessionsFromDatabase()
+    static func loadSessionsFromDatabase(defaults: UserDefaults = .standard) async throws -> [SessionSnapshot] {
+        try await SessionManager(defaults: defaults).loadSessionsFromDatabase()
     }
 
     /// Concurrency-safe wrapper: runs the gated bridge `save` on a fresh,
@@ -417,7 +417,7 @@ final class SessionManager {
         }
     }
 
-    func loadSessionsFromDatabase() async -> [SessionSnapshot] {
+    func loadSessionsFromDatabase() async throws -> [SessionSnapshot] {
         let rpcBaseURL = KeyObfuscation.getSupabaseRPCURL(nil)
         let apiKey = KeyObfuscation.getSupabaseAPIKey(nil)
         guard !rpcBaseURL.isEmpty, !apiKey.isEmpty else { return [] }
@@ -466,7 +466,7 @@ final class SessionManager {
             replaceSessions(resolvedSessions)
             return resolvedSessions
         } catch {
-            return []
+            throw error
         }
     }
 

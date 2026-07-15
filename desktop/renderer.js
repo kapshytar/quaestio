@@ -260,6 +260,7 @@ const PROJECT_TREE_EXPANDED_KEY = 'verity-project-tree-expanded';
 const expandedProjectNodeIds = new Set(readJsonCache(PROJECT_TREE_EXPANDED_KEY, []));
 let projectSlotUrlLoadGeneration = 0;
 const REMOTE_LIST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const STARTUP_SESSIONS_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 const PROJECT_TREE_CACHE_KEY = 'chat-aggregator-project-tree-v2';
 const PROJECT_TREE_CACHE_META_KEY = 'chat-aggregator-project-tree-meta';
 const REFRESH_COOLDOWN_MS = 3000;
@@ -6692,6 +6693,18 @@ function setSessionsNotice(text, kind = 'info') {
   sessionsNotice = { text: String(text || '').trim(), kind };
 }
 
+function formatSessionTimestamp(value) {
+  return new Date(value).toLocaleString('ru-RU', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+}
+
+function sessionsWebSyncLabel() {
+  const fetchedAt = Number(readJsonCache(SESSIONS_META_KEY, {})?.fetchedAt);
+  if (!Number.isFinite(fetchedAt) || fetchedAt <= 0) return 'Web sync: not yet synced';
+  return `Web sync: ${formatSessionTimestamp(fetchedAt)}`;
+}
+
 function errorToText(error) {
   if (!error) return 'Unknown error';
   if (typeof error === 'string') return error;
@@ -7123,6 +7136,8 @@ function renderSessionsIntoContainer(container, sessions) {
   if (!container) return;
   container.innerHTML = '';
 
+  container.innerHTML += `<div style="padding:2px 8px 6px;color:#777;font-size:10px;line-height:1.3;">${sessionsWebSyncLabel()}</div>`;
+
   if (sessionsNotice.text) {
     const color = sessionsNotice.kind === 'warn' ? '#ffb366' : sessionsNotice.kind === 'ok' ? '#9ad89a' : '#9aa0aa';
     container.innerHTML += `<div style="padding:6px 8px;color:${color};font-size:10px;line-height:1.3;border:1px solid #333;border-radius:4px;margin-bottom:6px;">${sessionsNotice.text}</div>`;
@@ -7142,9 +7157,7 @@ function renderSessionsIntoContainer(container, sessions) {
     const displaySessionId = session.sessionId ?? session.session_id ?? session.id;
 
     const displayTime = session.displayAt || session.display_at || session.createdAt || session.created_at || session.updatedAt || session.updated_at || session.timestamp || Date.now();
-    const timeStr = new Date(displayTime).toLocaleString('ru-RU', {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
+    const timeStr = formatSessionTimestamp(displayTime);
 
     const activeSlots = SLOTS.filter(s => slotEnabledMap[s] !== false).map(s => {
       const service = slotConfigMap[s] || 'unknown';
@@ -7347,7 +7360,10 @@ async function updateSessionsUI(options = {}) {
 
 // Initialize sessions UI and save button
 async function initSessionsTab() {
-  await updateSessionsUI();
+  const fetchedAt = Number(readJsonCache(SESSIONS_META_KEY, {})?.fetchedAt);
+  const startupRefreshDue = !Number.isFinite(fetchedAt) || fetchedAt <= 0 ||
+    Date.now() - fetchedAt >= STARTUP_SESSIONS_REFRESH_INTERVAL_MS;
+  await updateSessionsUI({ forceRefresh: startupRefreshDue });
 
   const sessionsPopup = document.getElementById('sessions-popup');
   const sessionsPopupClose = document.getElementById('sessions-popup-close');

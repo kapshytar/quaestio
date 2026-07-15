@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.7
+
+- **Sessions refresh from web once at startup when the last refresh is at least 15 minutes old (iOS + Android).** Reconciliation is background-only, preserves local offline sessions, and never rebinds the active question context. The Sessions list shows the persisted last successful web-sync time; failed loads no longer advance that timestamp. There is no polling.
+
+
 ## 2.9.6
 
 - **Fix (iOS + Android): session cards store the project tag actually applied by backend ingest.** Continuations inherit the chain's existing tags regardless of the current picker; both clients now parse the returned effective `project_tag_id` and persist it in the local snapshot.

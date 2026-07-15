@@ -31,6 +31,7 @@
   - visible question rows come from `notes.note_type = 1`
   - one `session_id` can contain many questions
   - `aggregator_sessions` is used only for slot state recovery/fallback
+- Android performs one background startup session reconcile only when the last successful web refresh is at least 15 minutes old; it preserves local-only rows, leaves the active session context untouched, and shows the persisted web-sync time in the sessions dialog.
 - Android aggregation now tracks:
   - `session_id`
   - `activeAggregatedNoteId`

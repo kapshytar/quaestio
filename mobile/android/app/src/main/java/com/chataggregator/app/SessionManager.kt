@@ -435,7 +435,7 @@ class SessionManager(context: Context, private val slotManager: SlotManager) {
             snapshots
         } catch (e: Exception) {
             Log.w(TAG, "loadSessionsFromDatabase failed: ${e.message}")
-            emptyList()
+            throw e
         }
     }
 

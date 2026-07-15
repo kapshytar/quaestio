@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.118.2
+
+- **Sessions refresh from web once at startup when the last refresh is at least 15 minutes old.** The background reconcile updates only the saved session index, never the active question context, and the Sessions list now shows the persisted last web-sync time. There is no polling.
+
+
 ## 1.118.1
 
 - **Fix: session cards store the project tag actually applied by backend ingest.** On a continuation the UI picker may point at another project, but the backend inherits the chain's existing tags; desktop now persists the returned effective `project_tag_id` instead of the stale picker value.

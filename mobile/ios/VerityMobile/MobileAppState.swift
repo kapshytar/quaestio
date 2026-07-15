@@ -52,6 +52,7 @@ final class MobileAppState: ObservableObject {
     @Published var projectTreeNodes: [ProjectTreeNode] = []
     @Published var availableSessions: [SessionSnapshot] = []
     @Published var isLoadingSessions: Bool = false
+    @Published private(set) var sessionsLastWebSyncAt: Date? = nil
     @Published var sessionIndicatorText: String? = nil
     @Published var isManualCollecting: Bool = false
     @Published var recentIngestEvents: [String] = []
@@ -80,6 +81,7 @@ final class MobileAppState: ObservableObject {
     private static let projectTreeLoadedAtDefaultsKey = "verity.mobile.projectTreeLoadedAt"
     private static let sessionsLoadedAtDefaultsKey = "verity.mobile.sessionsLoadedAt"
     private static let remoteListCacheTTL: TimeInterval = 24 * 60 * 60
+    private static let startupSessionsRefreshInterval: TimeInterval = 15 * 60
     private static let defaultMergeAggregationPolicy = MergeAggregationPolicy(
         maxChecks: 12,
         waitIntervalMs: 2500,
@@ -133,6 +135,7 @@ final class MobileAppState: ObservableObject {
         self.activeProjectId = nil
         self.activeProjectPathKey = nil
         self.projectTreeNodes = Self.loadPersistedProjectTree()
+        self.sessionsLastWebSyncAt = Self.loadPersistedSessionsLoadedAt()
         self.sessionIndicatorText = Self.makeSessionIndicator(from: parallelState)
         if !hasActiveSessionLink() {
             self.slots = Self.slotsResetToPresetURLs(slots: self.slots, presets: presets)
@@ -444,42 +447,54 @@ final class MobileAppState: ObservableObject {
         isLoadingSessions = true
         defer { isLoadingSessions = false }
 
-        let remoteSessions = await SessionManager.loadSessionsFromDatabase()
+        let remoteSessions: [SessionSnapshot]
+        do {
+            remoteSessions = try await SessionManager.loadSessionsFromDatabase()
+        } catch {
+            if AuthStore.consumeSessionExpired() {
+                sessionExpiredPrompt = true
+            } else {
+                statusMessage = "Web session sync failed; using local sessions."
+            }
+            return
+        }
         // If the load found the account session expired (refresh rejected),
         // surface it rather than quietly showing stale local sessions.
         if AuthStore.consumeSessionExpired() {
             sessionExpiredPrompt = true
+            return
         }
-        let sessions: [SessionSnapshot]
-        if !remoteSessions.isEmpty {
-            // Cloud is the source of truth for cloud sessions, but it never
-            // contains local-only sessions (session_id >= 900000, saved while
-            // signed out and not yet migrated). A plain replace wiped those from
-            // the on-device list. Preserve any local-only session the cloud
-            // doesn't already represent so signing in never deletes a pending
-            // local session before the user migrates it.
-            let remoteSessionIds = Set(remoteSessions.compactMap { $0.sessionId })
-            let localOnly = localSessions.filter {
-                ($0.sessionId ?? 0) >= Self.localSessionBase && !remoteSessionIds.contains($0.sessionId ?? 0)
-            }
-            let combined = remoteSessions + localOnly
-            sessionManager.replaceSessions(combined)
-            sessions = combined
-        } else {
-            let merged = mergeSessions(remoteSessions: remoteSessions, localSessions: localSessions)
-            if !merged.isEmpty {
-                sessionManager.replaceSessions(merged)
-            }
-            sessions = merged.isEmpty ? localSessions : merged
+        // Cloud is the source of truth for synchronized sessions, including a
+        // successful empty result. Preserve only local-only rows waiting for
+        // explicit account migration.
+        let remoteSessionIds = Set(remoteSessions.compactMap { $0.sessionId })
+        let localOnly = localSessions.filter {
+            ($0.sessionId ?? 0) >= Self.localSessionBase && !remoteSessionIds.contains($0.sessionId ?? 0)
         }
+        let sessions = remoteSessions + localOnly
+        sessionManager.replaceSessions(sessions)
 
         availableSessions = sortSessionsForDisplay(sessions)
-        Self.persistSessionsLoadedAt(Date())
+        let syncedAt = Date()
+        Self.persistSessionsLoadedAt(syncedAt)
+        sessionsLastWebSyncAt = syncedAt
         statusMessage = sessions.isEmpty ? "No saved sessions" : ""
     }
 
     func loadSessionsIfNeeded() async {
         await loadSessions()
+    }
+
+    func loadSessionsOnStartupIfNeeded() async {
+        guard await AuthStore.shared.accessToken() != nil else {
+            await loadSessions(forceRefresh: false)
+            return
+        }
+        let lastSync = Self.loadPersistedSessionsLoadedAt()
+        let refreshDue = lastSync.map {
+            Date().timeIntervalSince($0) >= Self.startupSessionsRefreshInterval
+        } ?? true
+        await loadSessions(forceRefresh: refreshDue)
     }
 
     /// Delete one saved session (parity with Android/desktop). Removes it from
@@ -2108,53 +2123,6 @@ final class MobileAppState: ObservableObject {
             return "S\(sessionId)"
         }
         return nil
-    }
-
-    private func mergeSessions(
-        remoteSessions: [SessionSnapshot],
-        localSessions: [SessionSnapshot]
-    ) -> [SessionSnapshot] {
-        guard !(remoteSessions.isEmpty && localSessions.isEmpty) else { return [] }
-        var byKey: [String: SessionSnapshot] = [:]
-
-        for session in remoteSessions.sorted(by: { $0.timestamp > $1.timestamp }) {
-            byKey[sessionMergeKey(session)] = session
-        }
-
-        for session in localSessions.sorted(by: { $0.timestamp > $1.timestamp }) {
-            let key = sessionMergeKey(session)
-            let overlapsRemote = remoteSessions.contains { sameSessionEntry($0, session) }
-            if byKey[key] == nil && !overlapsRemote {
-                byKey[key] = session
-            }
-        }
-
-        return byKey.values
-            .sorted(by: { $0.timestamp > $1.timestamp })
-            .prefix(1000)
-            .map { $0 }
-    }
-
-    private func sameSessionEntry(_ left: SessionSnapshot, _ right: SessionSnapshot) -> Bool {
-        let leftNoteId = left.noteId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
-        let rightNoteId = right.noteId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
-        if let leftNoteId, let rightNoteId {
-            return leftNoteId == rightNoteId
-        }
-
-        guard let leftSessionId = left.sessionId, let rightSessionId = right.sessionId, leftSessionId == rightSessionId else {
-            return false
-        }
-
-        let leftName = left.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let rightName = right.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return !leftName.isEmpty && leftName == rightName
-    }
-
-    private func sessionMergeKey(_ session: SessionSnapshot) -> String {
-        let sessionPart = session.sessionId.map(String.init) ?? "id:\(session.id)"
-        let notePart = session.noteId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? "row:\(session.id)"
-        return "\(sessionPart)|\(notePart)"
     }
 
     func displaySessionName(_ session: SessionSnapshot) -> String {

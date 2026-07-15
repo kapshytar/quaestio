@@ -274,7 +274,7 @@ struct SlotGridView: View {
             syncSlotAddressDraft()
             Task {
                 await appState.loadProjectTreeIfNeeded()
-                await appState.loadSessionsIfNeeded()
+                await appState.loadSessionsOnStartupIfNeeded()
             }
         }
         .onChange(of: appState.selectedSlotId) { _, _ in
@@ -735,6 +735,12 @@ struct SlotGridView: View {
                 }
 
                 Section("Saved Sessions") {
+                    Text(appState.sessionsLastWebSyncAt.map {
+                        "Web sync: \(formattedSessionDate($0))"
+                    } ?? "Web sync: not yet synced")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textMuted)
+
                     if appState.isLoadingSessions {
                         HStack(spacing: 12) {
                             ProgressView()
@@ -1047,10 +1053,14 @@ struct SlotGridView: View {
     }
 
     private func formattedSessionTimestamp(_ timestamp: Int64) -> String {
+        formattedSessionDate(Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000))
+    }
+
+    private func formattedSessionDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ru_RU")
         formatter.dateFormat = "d MMM, HH:mm"
-        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000))
+        return formatter.string(from: date)
     }
 
     private var slotToggleRow: some View {
@@ -1391,4 +1401,3 @@ struct SlotGridView: View {
         showsSlotControlStrip = false
     }
 }
-

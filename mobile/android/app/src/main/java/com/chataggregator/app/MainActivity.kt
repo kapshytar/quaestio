@@ -86,6 +86,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         private const val SEND_DEBOUNCE_MS = 500L
         private const val WEBVIEW_CACHE_MAX_BYTES = 100L * 1024L * 1024L // 100 MB
         private const val REMOTE_LIST_CACHE_TTL_MS = 24L * 60L * 60L * 1000L
+        private const val STARTUP_SESSIONS_REFRESH_INTERVAL_MS = 15L * 60L * 1000L
         private const val REMOTE_LIST_PREFS = "remote_list_cache"
         private const val PROJECT_TREE_CACHE_PREF = "project_tree_v2"
         private const val PROJECT_TREE_LOADED_AT_PREF = "project_tree_loaded_at"
@@ -282,10 +283,43 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     private fun scheduleDeferredStartupWork() {
         binding.root.post {
             updateSessionIndicator()
+            refreshSessionsOnStartupIfDue()
             binding.root.postDelayed(
                 { scheduleSlotLoading() },
                 STARTUP_SLOT_LOADING_DELAY_MS
             )
+        }
+    }
+
+    private fun refreshSessionsOnStartupIfDue() {
+        val lastSyncAt = maxOf(sessionsLoadedAtMs, persistedSessionsLoadedAtMs())
+        if (lastSyncAt > 0L && System.currentTimeMillis() - lastSyncAt < STARTUP_SESSIONS_REFRESH_INTERVAL_MS) return
+        if (!AuthStore.status(applicationContext).signedIn || sessionsRefreshInFlight) return
+
+        val rpcUrl = SettingsManager.getDreamTrackerRpcUrl(this)
+        val apiKey = SettingsManager.getDreamTrackerApiKey(this)
+        if (rpcUrl.isBlank() || apiKey.isBlank()) return
+
+        sessionsRefreshInFlight = true
+        thread(name = "sessions-startup-refresh") {
+            try {
+                val localSessions = sessionManager.getAllSessions()
+                val remoteSessions = runBlocking {
+                    sessionManager.loadSessionsFromDatabase(rpcUrl, apiKey)
+                }
+                if (AuthStore.consumeSessionExpired(this)) {
+                    runOnUiThread { promptSessionExpired() }
+                    return@thread
+                }
+                val sessions = reconcileAndStoreSessions(remoteSessions, localSessions)
+                sessionsLoadedAtMs = System.currentTimeMillis()
+                persistSessionsLoadedAt()
+                Log.i(TAG, "[SESSION] startup web sync cached ${sessions.size} sessions")
+            } catch (e: Exception) {
+                Log.w(TAG, "[SESSION] startup web sync failed: ${e.message}")
+            } finally {
+                sessionsRefreshInFlight = false
+            }
         }
     }
 
@@ -3549,6 +3583,11 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         Log.i(TAG, "[SESSION] showSessionsDialog rpcUrl=${rpcUrl.isNotBlank()} apiKey=${apiKey.isNotBlank()}")
         val localSessions = sessionManager.getAllSessions()
         val cachedSessionsLoadedAtMs = maxOf(sessionsLoadedAtMs, persistedSessionsLoadedAtMs())
+        if (!forceRefresh && sessionsRefreshInFlight) {
+            setContextChipLoading(binding.chipSessions, false)
+            showSessionsDialogWithData(localSessions)
+            return
+        }
         if (!forceRefresh && localSessions.isNotEmpty() && isFreshRemoteListCache(cachedSessionsLoadedAtMs)) {
             setContextChipLoading(binding.chipSessions, false)
             showSessionsDialogWithData(localSessions)
@@ -3568,27 +3607,9 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                     // quietly showing stale local sessions as if signed in.
                     if (AuthStore.consumeSessionExpired(this)) {
                         runOnUiThread { promptSessionExpired() }
+                        return@thread
                     }
-                    val sessions = if (remoteSessions.isNotEmpty()) {
-                        // Cloud is the source of truth for cloud sessions, but it
-                        // never contains local-only sessions (session_id >= 900000,
-                        // saved while signed out and not yet migrated). A plain
-                        // replace wiped those from the list. Preserve any local-only
-                        // session the cloud doesn't already represent.
-                        val remoteSessionIds = remoteSessions.mapNotNull { it.sessionId }.toSet()
-                        val localOnly = localSessions.filter {
-                            (it.sessionId ?: 0) >= 900_000 && (it.sessionId ?: 0) !in remoteSessionIds
-                        }
-                        val combined = remoteSessions + localOnly
-                        sessionManager.replaceSessions(combined)
-                        combined
-                    } else {
-                        val mergedSessions = mergeSessions(remoteSessions, localSessions)
-                        if (mergedSessions.isNotEmpty()) {
-                            sessionManager.replaceSessions(mergedSessions)
-                        }
-                        if (mergedSessions.isNotEmpty()) mergedSessions else localSessions
-                    }
+                    val sessions = reconcileAndStoreSessions(remoteSessions, localSessions)
                     runOnUiThread {
                         sessionsLoadedAtMs = System.currentTimeMillis()
                         persistSessionsLoadedAt()
@@ -3775,6 +3796,17 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             clipToOutline = true
             setPadding(dp(14), dp(14), dp(14), dp(10))
         }
+        val lastSyncAt = maxOf(sessionsLoadedAtMs, persistedSessionsLoadedAtMs())
+        surface.addView(TextView(this).apply {
+            text = if (lastSyncAt > 0L) {
+                "Web sync: ${formatter.format(java.util.Date(lastSyncAt))}"
+            } else {
+                "Web sync: not yet synced"
+            }
+            textSize = 12f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+            setPadding(dp(4), 0, dp(4), dp(6))
+        })
         surface.addView(TextView(this).apply {
             text = "↻"
             gravity = android.view.Gravity.CENTER
@@ -4031,47 +4063,18 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         }
     }
 
-    private fun mergeSessions(
+    private fun reconcileAndStoreSessions(
         remoteSessions: List<SessionSnapshot>,
         localSessions: List<SessionSnapshot>
     ): List<SessionSnapshot> {
-        if (remoteSessions.isEmpty() && localSessions.isEmpty()) return emptyList()
-        val byKey = linkedMapOf<String, SessionSnapshot>()
-        remoteSessions.sortedByDescending { it.timestamp }.forEach { session ->
-            byKey[sessionMergeKey(session)] = session
+        // A successful empty cloud result is authoritative too. Preserve only
+        // local-only rows waiting for explicit account migration.
+        val remoteSessionIds = remoteSessions.mapNotNull { it.sessionId }.toSet()
+        val sessions = remoteSessions + localSessions.filter {
+            (it.sessionId ?: 0) >= 900_000 && (it.sessionId ?: 0) !in remoteSessionIds
         }
-        localSessions.sortedByDescending { it.timestamp }.forEach { session ->
-            val key = sessionMergeKey(session)
-            val overlapsRemote = remoteSessions.any { existing -> sameSessionEntry(existing, session) }
-            if (!byKey.containsKey(key) && !overlapsRemote) {
-                byKey[key] = session
-            }
-        }
-        return byKey.values
-            .sortedByDescending { it.timestamp }
-            .take(SessionManager.MAX_SESSIONS)
-    }
-
-    private fun sameSessionEntry(left: SessionSnapshot, right: SessionSnapshot): Boolean {
-        val leftNoteId = left.noteId?.takeIf { it.isNotBlank() }
-        val rightNoteId = right.noteId?.takeIf { it.isNotBlank() }
-        if (leftNoteId != null && rightNoteId != null) return leftNoteId == rightNoteId
-
-        val leftSessionId = left.sessionId
-        val rightSessionId = right.sessionId
-        if (leftSessionId == null || rightSessionId == null || leftSessionId != rightSessionId) {
-            return false
-        }
-
-        val leftName = left.name.trim().lowercase(Locale.ROOT)
-        val rightName = right.name.trim().lowercase(Locale.ROOT)
-        return leftName.isNotBlank() && leftName == rightName
-    }
-
-    private fun sessionMergeKey(session: SessionSnapshot): String {
-        val sessionPart = session.sessionId?.toString() ?: "id:${session.id}"
-        val notePart = session.noteId?.takeIf { it.isNotBlank() } ?: "row:${session.id}"
-        return "$sessionPart|$notePart"
+        sessionManager.replaceSessions(sessions)
+        return sessions
     }
 
     private fun cleanupWebViewCacheIfNeeded() {
