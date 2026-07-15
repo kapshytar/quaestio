@@ -428,14 +428,22 @@ struct MergeView: View {
         ]
         SecItemDelete(query as CFDictionary)
         UserDefaults.standard.removeObject(forKey: udKey)
-        guard let data = key.data(using: .utf8), !key.isEmpty else { return }
+        // Trim before the empty check so a whitespace-only field clears both
+        // stores (resolvedApiKey trims at use time; storage must agree).
+        let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmedKey.data(using: .utf8), !trimmedKey.isEmpty else { return }
         var add = query
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(add as CFDictionary, nil)
+        if SecItemAdd(add as CFDictionary, nil) != errSecSuccess {
+            // Keychain write failed: delete again (best effort) so a stale
+            // Keychain item cannot shadow the fresh UserDefaults mirror on load.
+            SecItemDelete(query as CFDictionary)
+        }
         // Mirror to UserDefaults so the key survives dev-build reinstalls that
-        // wipe the Keychain container (iOS dev-install behaviour; sandbox-scoped).
-        UserDefaults.standard.set(key, forKey: udKey)
+        // wipe the Keychain container (iOS dev-install behaviour). Plaintext by
+        // conscious tradeoff: sandbox-scoped, user's own key on their own device.
+        UserDefaults.standard.set(trimmedKey, forKey: udKey)
     }
 
     private func mergeApiKeyLoad(providerId: String) -> String {
@@ -452,7 +460,7 @@ struct MergeView: View {
         var item: CFTypeRef?
         if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
            let data = item as? Data,
-           let value = String(data: data, encoding: .utf8),
+           let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !value.isEmpty {
             return value
         }

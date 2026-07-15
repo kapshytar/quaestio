@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.9.4
+
+- **Fix (iOS): the 2.9.2 duplicate-session fix actually works now (adversarial review found it incomplete).** 2.9.2 only patched the real-conversation *gate*; the fingerprint itself was still built from the live (home-page) URLs, so it never matched the stored snapshot and a duplicate session was still minted — and `hasCurrentQuestionContextForCurrentSlots` cleared the session link before restore even ran. Now `slotURLsForContextMatching()` substitutes a mid-navigation slot's pending target URL (`SlotWebViewModel.pendingNavigationTargetURL`, raw URL captured at load/forceLoad) for the transient home page in BOTH the fingerprint-restore path and the current-question matcher; real-ness checks go through the shared `extractConversationKey`/`conversationKeyTailIsReal` (the 2.9.2 regex duplicate, which false-positived on bare home targets like `chatgpt`, is removed). A redirect that commits a different target (chat → provider home) clears the pending URL so a session can't bind to a chat the webview never reached.
+- **Fix (iOS): merge API key save hardening** — whitespace-only input clears both stores (trim before the empty check, matching use-time trimming); a failed Keychain write deletes the stale item so it can't shadow the fresh UserDefaults mirror on load.
+
+
 ## 2.9.3
 
 - **Fix (iOS): DeepSeek API key no longer lost on dev-build reinstall.** iOS can wipe the Keychain container when a development build is replaced via `xcrun devicectl device install app`. Key is now mirrored to UserDefaults (sandbox-scoped) on every save; `mergeApiKeyLoad` falls back to UserDefaults when Keychain returns empty. Clearing the key field clears both stores.

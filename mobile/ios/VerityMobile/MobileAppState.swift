@@ -1600,7 +1600,11 @@ final class MobileAppState: ObservableObject {
         let enabledSlotKeys = Set(slots.filter(\.isEnabled).map { "slot-\($0.id)" })
         if enabledSlotKeys.isEmpty { return nil }
 
-        let currentSlotURLs = currentSessionSnapshotSlotURLs()
+        // Pending-navigation substitution (slotURLsForContextMatching): after
+        // loadSession / relaunch the live URLs are briefly the provider home
+        // pages; matching must see where the slots are GOING or the fingerprint
+        // can never equal the stored snapshot (298/303 duplicate-session bug).
+        let currentSlotURLs = slotURLsForContextMatching()
         let currentFingerprint = buildSessionFingerprint(slotURLs: currentSlotURLs, slotKeys: enabledSlotKeys)
         if currentFingerprint.isEmpty { return nil }
         // Only resurrect a prior session when the CURRENT slots point at a real,
@@ -1684,11 +1688,13 @@ final class MobileAppState: ObservableObject {
         // `loadSession` re-navigation, so a Collect can fire before a slot has
         // navigated back to its conversation URL — its live URL is briefly the
         // service home page. Comparing the whole fingerprint then fails and the
-        // session is wrongly cleared (→ a new note_session_id). Instead, ignore
-        // slots that are not yet on a real conversation and require at least one
-        // loaded slot to agree with the stored snapshot; a slot pointing at a
-        // *different* real conversation is treated as a genuine context switch.
-        let currentSlotURLs = currentSessionSnapshotSlotURLs()
+        // session is wrongly cleared (→ a new note_session_id). Two layers:
+        // slotURLsForContextMatching substitutes a mid-navigation slot's pending
+        // target for the transient home page, and any remaining not-yet-real
+        // slots are ignored, requiring at least one loaded slot to agree with
+        // the stored snapshot; a slot pointing at a *different* real
+        // conversation is treated as a genuine context switch.
+        let currentSlotURLs = slotURLsForContextMatching()
 
         return sessionManager.getAllSessions().contains { snapshot in
             guard snapshot.sessionId == activeSessionId,
@@ -1722,17 +1728,31 @@ final class MobileAppState: ObservableObject {
             let slotIndex = Int(slotKey.replacingOccurrences(of: "slot-", with: ""))
             let serviceId = slots.first(where: { $0.id == slotIndex })?.serviceId ?? "unknown"
             let key = extractConversationKey(serviceId: serviceId, rawURL: rawURL)
-            if conversationKeyTailIsReal(key) { return true }
-            // Fallback: slot is still navigating to its conversation target (e.g.
-            // right after loadSession / app relaunch). currentURL is momentarily
-            // on the service home page, but loadedNavigationTarget already points
-            // at the real chat — count the slot as real so fingerprint restore
-            // can still find session 298 instead of minting a new 303.
-            if let idx = slotIndex, let model = webModels[idx] {
-                return model.pendingNavigationIsRealConversation
-            }
-            return false
+            return conversationKeyTailIsReal(key)
         }
+    }
+
+    /// Slot URLs for session-context matching (fingerprint restore and the
+    /// current-question matcher). Starts from the live URLs, but a slot still
+    /// mid-navigation (loadSession / relaunch) whose live URL is not yet a real
+    /// conversation reports its pending navigation target instead of the
+    /// transient home page. Without this, a Collect fired in that window builds
+    /// a home-page fingerprint that can never match the stored snapshot and
+    /// mints a duplicate session (the 298/303 split). Real-ness of the pending
+    /// target uses the same extractConversationKey/conversationKeyTailIsReal
+    /// pair as everything else, so a pending home/landing URL never substitutes.
+    private func slotURLsForContextMatching() -> [String: String] {
+        var urls = currentSessionSnapshotSlotURLs()
+        for slot in slots {
+            let slotKey = "slot-\(slot.id)"
+            let currentKey = extractConversationKey(serviceId: slot.serviceId, rawURL: urls[slotKey])
+            guard !conversationKeyTailIsReal(currentKey),
+                  let pendingURL = webModels[slot.id]?.pendingNavigationTargetURL,
+                  conversationKeyTailIsReal(extractConversationKey(serviceId: slot.serviceId, rawURL: pendingURL))
+            else { continue }
+            urls[slotKey] = pendingURL
+        }
+        return urls
     }
 
     /// True when a conversation key's tail is an actual chat id (a single

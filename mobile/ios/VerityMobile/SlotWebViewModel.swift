@@ -57,6 +57,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
     private let rawExtractorScript = SharedScriptLoader.loadScript(named: "extractLatestAssistantRaw.js")
     private var loadedHost: String?
     private var loadedNavigationTarget: String?
+    private var loadedNavigationTargetURL: String?
     private var lastClaudeVerificationRecoveryAt: Date?
     private var lastClaudeBlankRecoveryAt: Date?
     private var lastAuthReturnRecoveryAt: Date?
@@ -142,15 +143,14 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         }
     }
 
-    /// True when the slot is mid-navigation to a real conversation URL (e.g. after
-    /// loadSession or relaunch) but its currentURL is still the home page.
-    /// `loadedNavigationTarget` uses the same "serviceId:chatId" format as
-    /// extractConversationKey, so the tail regex check is identical.
-    var pendingNavigationIsRealConversation: Bool {
-        guard hasPendingNavigation, let target = loadedNavigationTarget else { return false }
-        let tail = target.contains(":") ? String(target[target.index(after: target.firstIndex(of: ":")!)...]) : target
-        guard !tail.isEmpty, tail != "temporary", tail != "no-url" else { return false }
-        return tail.range(of: #"^[a-z0-9][a-z0-9_-]{5,}$"#, options: [.regularExpression, .caseInsensitive]) != nil
+    /// Raw URL of the navigation currently in flight (set at load/forceLoad
+    /// time), or nil once the navigation finished/failed. Lets session-context
+    /// matching see where a slot is GOING while its live URL is still the
+    /// transient home page (loadSession / relaunch) — the caller decides whether
+    /// the target is a real conversation via extractConversationKey, keeping a
+    /// single source of truth for real-ness.
+    var pendingNavigationTargetURL: String? {
+        hasPendingNavigation ? loadedNavigationTargetURL : nil
     }
 
     private func scheduleDisplayReady(after delayNs: UInt64, reason: String) {
@@ -206,6 +206,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
 
         loadedHost = targetHost
         loadedNavigationTarget = targetNavigationTarget
+        loadedNavigationTargetURL = targetURL.absoluteString
         setDisplayReady(false)
         lastNavigationState = "requested"
         lastNavigationError = ""
@@ -284,6 +285,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         guard let targetURL = URL(string: url) else { return }
         loadedHost = normalizedHost(for: targetURL)
         loadedNavigationTarget = normalizedNavigationTarget(for: targetURL)
+        loadedNavigationTargetURL = targetURL.absoluteString
         setDisplayReady(false)
         lastNavigationState = "forced"
         lastNavigationError = ""
@@ -1283,6 +1285,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         }
         loadedHost = normalizedHost(for: url)
         loadedNavigationTarget = normalizedNavigationTarget(for: url)
+        loadedNavigationTargetURL = url.absoluteString
         lastNavigationState = "finished"
         lastNavigationError = ""
         recordEvent("did-finish \(url.absoluteString)")
@@ -1303,6 +1306,13 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             return
         }
         lastNavigationState = "committed"
+        // Redirected away from the requested target (e.g. chat -> provider home
+        // via auth/SPA redirect): stop advertising the stale pending target to
+        // session-context matching, or a session could be bound to a chat the
+        // webview never actually reached.
+        if normalizedNavigationTarget(for: url) != loadedNavigationTarget {
+            loadedNavigationTargetURL = nil
+        }
         recordEvent("did-commit \(url.absoluteString)")
         Self.logger.debug("did-commit url=\(url.absoluteString, privacy: .public)")
         onURLChange?(url)
