@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.116.0
+
+- **Fix: send/collect/merge no longer mint a duplicate session when the enabled-slot set changed or the app relaunched (S304-while-S298 bug).** The legacy path kept ONE global question context keyed by an exact whole-layout fingerprint hash — toggling Grok on changed the hash, the exact-match restore missed, and the send ingested with `session_id = null` (backend minted 304 while every tab still sat on 298's conversations). New `restoreStoredQuestionContextForCurrentSlots` is the iOS-parity resolver: it scans saved session snapshots and matches per-slot conversation keys (`conversationKeyTailIsReal`, same semantics as iOS/Android) — real-key mismatch rejects the snapshot, at least one real agreement is required, prompt match is a preference. Wired as the fallback in `sendToAll`, `collectNowAggregation`, and the merge bootstrap path.
+
 ## 1.115.0
 
 - **Collect targets the server-resolved chain tail and always replaces** — `collectNowAggregation` resolves the last note of the session chain via the new `dream-get-chain-tail-note-id` IPC (PostgREST, created_at order) before ingest, so a late Collect updates the current question instead of an older root; new-note creation stays exclusive to sending a new question (canonical simple Collect model).

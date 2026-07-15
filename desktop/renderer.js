@@ -1118,6 +1118,118 @@ function restoreStoredQuestionContextForFingerprint(fingerprint) {
   return context;
 }
 
+// Single source of truth for "is this conversation key a real chat id"
+// (mirrors iOS conversationKeyTailIsReal / Android): the tail after ':' must be
+// one [a-z0-9_-] token of length >= 6. A home page (origin/path fallback
+// contains '://' or '/'), a Temporary Chat, or a blank slot is NOT real.
+function conversationKeyTailIsReal(key) {
+  const raw = String(key || '');
+  const idx = raw.indexOf(':');
+  const tail = idx >= 0 ? raw.slice(idx + 1) : '';
+  if (!tail || tail === 'temporary' || tail === 'no-url') return false;
+  return /^[a-z0-9][a-z0-9_-]{5,}$/i.test(tail);
+}
+
+// iOS-parity snapshot resolver (restoreStoredQuestionContextForCurrentSlots +
+// hasCurrentQuestionContextForCurrentSlots in MobileAppState.swift). The
+// legacy desktop path keeps ONE global context keyed by an exact whole-layout
+// fingerprint hash, so merely toggling a slot on/off orphans the context and
+// the next send mints a duplicate session (Grok enabled -> 304 while 298's
+// context was hashed without it). This resolver scans the saved session
+// snapshots and matches per-slot conversation keys instead:
+// - only slots whose CURRENT url is a real conversation participate;
+// - a real current key differing from the snapshot's real key for the same
+//   slot rejects that snapshot (genuine context switch);
+// - at least one real agreement is required;
+// - snapshots must be question-backed (sessionId + noteId);
+// - prompt match is a preference, not a filter; otherwise freshest wins
+//   (loadSessionsList output is freshness-sorted).
+// Canon: Verity/docs/domains/SESSION_AND_INGEST_RULES.md.
+async function restoreStoredQuestionContextForCurrentSlots(enabledSlots, currentPrompt = '') {
+  if (getSuppressSlotRestore()) return null;
+  const slots = Array.isArray(enabledSlots) ? enabledSlots : [];
+  if (slots.length === 0) return null;
+
+  const currentKeys = new Map();
+  for (const slot of slots) {
+    const url = getWebviewCurrentUrl(slot);
+    if (!url) continue;
+    const serviceId = detectServiceByUrl(url) || slotConfig[slot] || 'unknown';
+    const key = extractConversationKey(serviceId, url);
+    currentKeys.set(slot, { key, isReal: conversationKeyTailIsReal(key) });
+  }
+  if (![...currentKeys.values()].some((entry) => entry.isReal)) return null;
+
+  let sessions = [];
+  try {
+    sessions = await loadSessionsList({ preferCache: true });
+  } catch (_) {
+    return null;
+  }
+  const list = Array.isArray(sessions) ? sessions : [];
+
+  const snapshotMatch = (snapshot) => {
+    const sessionId = Number(snapshot?.sessionId ?? snapshot?.session_id);
+    const noteId = String(snapshot?.noteId || snapshot?.note_id || '').trim();
+    if (!Number.isInteger(sessionId) || sessionId <= 0 || !noteId) return null;
+    const snapshotUrls = snapshot?.slotUrls || snapshot?.slot_urls || {};
+    let agreements = 0;
+    for (const [slot, current] of currentKeys) {
+      if (!current.isReal) continue;
+      const storedUrl = String(snapshotUrls[slot] || '').trim();
+      if (!storedUrl) continue;
+      const serviceId = detectServiceByUrl(storedUrl) || slotConfig[slot] || 'unknown';
+      const storedKey = extractConversationKey(serviceId, storedUrl);
+      if (!conversationKeyTailIsReal(storedKey)) continue;
+      if (current.key !== storedKey) return null;
+      agreements += 1;
+    }
+    return agreements >= 1 ? { sessionId, noteId } : null;
+  };
+
+  let matched = null;
+  let matchedSnapshot = null;
+  if (String(currentPrompt || '').trim()) {
+    for (const snapshot of list) {
+      const match = snapshotMatch(snapshot);
+      if (match && promptsReferToSameQuestion(currentPrompt, snapshot?.name)) {
+        matched = match;
+        matchedSnapshot = snapshot;
+        break;
+      }
+    }
+  }
+  if (!matched) {
+    for (const snapshot of list) {
+      const match = snapshotMatch(snapshot);
+      if (match) {
+        matched = match;
+        matchedSnapshot = snapshot;
+        break;
+      }
+    }
+  }
+  if (!matched) return null;
+
+  activeSessionId = matched.sessionId;
+  activeAggregatedNoteId = matched.noteId;
+  const snapshotPrompt = String(matchedSnapshot?.name || '').trim();
+  if (snapshotPrompt) activeSessionPrompt = snapshotPrompt;
+  const fingerprint = buildSessionFingerprint(slots);
+  if (fingerprint) {
+    activeSessionFingerprint = fingerprint;
+    persistSessionContext(matched.sessionId, fingerprint, matched.noteId, snapshotPrompt || null);
+  }
+  setIngestSessionIndicator(matched.sessionId);
+  mergeLog(`Session context restored from snapshot: S${matched.sessionId} (per-slot conversation-key match)`, 'info');
+  return {
+    session_id: matched.sessionId,
+    fingerprint: fingerprint || null,
+    aggregated_note_id: matched.noteId,
+    source_prompt: snapshotPrompt || null
+  };
+}
+
 function normalizePromptForComparison(value) {
   return String(value || '')
     .toLowerCase()
@@ -4190,7 +4302,14 @@ async function sendToAll() {
   const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
   const sessionFingerprint = buildSessionFingerprint(enabledSlots);
   activeSessionFingerprint = sessionFingerprint;
-  const storedContext = restoreStoredQuestionContextForFingerprint(sessionFingerprint);
+  let storedContext = restoreStoredQuestionContextForFingerprint(sessionFingerprint);
+  if (!storedContext) {
+    // Exact-hash context miss (slot set changed, relaunch, cleared context):
+    // fall back to the iOS-parity per-slot snapshot resolver before minting a
+    // new session (the S304 duplicate: Grok toggled on changed the hash while
+    // the tabs still sat on S298's conversations).
+    storedContext = await restoreStoredQuestionContextForCurrentSlots(enabledSlots, text);
+  }
   const sessionIdHint = Number.isInteger(activeSessionId) && activeSessionId > 0
     ? activeSessionId
     : (storedContext?.session_id || null);
@@ -5857,9 +5976,14 @@ async function collectNowAggregation(manual = true) {
   const pending = aggregationControl.pendingAggregation;
   const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
   const runtimeFingerprint = buildSessionFingerprint(enabledSlots);
-  const restoredContext = runtimeFingerprint
+  let restoredContext = runtimeFingerprint
     ? restoreStoredQuestionContextForFingerprint(runtimeFingerprint)
     : null;
+  if (!restoredContext && !getCurrentQuestionSessionId()) {
+    // Same fallback as sendToAll: per-slot snapshot resolver so a late Collect
+    // after a slot-set change / relaunch lands on the existing session.
+    restoredContext = await restoreStoredQuestionContextForCurrentSlots(enabledSlots, '');
+  }
   const existingAggregatedNoteId = String(pending?.aggregatedNoteId || activeAggregatedNoteId || '').trim() || null;
   const ingestContext = pending?.ingestContext || {
     sessionFingerprint: runtimeFingerprint || activeSessionFingerprint,
@@ -6145,6 +6269,11 @@ async function executeMergeRequest(isClarification, clarificationText, previousS
     const runtimeFingerprint = buildSessionFingerprint(enabledSlots);
     if (runtimeFingerprint) {
       restoreStoredQuestionContextForFingerprint(runtimeFingerprint);
+    }
+    if (!getCurrentQuestionSessionId()) {
+      // Per-slot snapshot resolver fallback (see sendToAll) so a merge does not
+      // bootstrap a duplicate session when the exact-hash context missed.
+      await restoreStoredQuestionContextForCurrentSlots(enabledSlots, '');
     }
     let sessionId = getCurrentQuestionSessionId();
     if ((!Number.isInteger(sessionId) || sessionId <= 0) && !isClarification && Array.isArray(aggregatedResponses) && aggregatedResponses.length > 0) {
