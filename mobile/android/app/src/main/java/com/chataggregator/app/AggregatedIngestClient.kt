@@ -38,6 +38,7 @@ data class AggregatedPayload(
 data class AggregatedIngestResult(
     val sessionId: Int?,
     val noteId: String?,
+    val projectTagId: String?,
     val payloadHash: String,
     val idempotencyKey: String,
     val idempotentReplay: Boolean,
@@ -325,6 +326,7 @@ object AggregatedIngestClient {
                 val result = AggregatedIngestResult(
                     sessionId = extractSessionId(raw),
                     noteId = extractNoteId(raw),
+                    projectTagId = extractStringField(raw, "project_tag_id"),
                     payloadHash = payloadHash,
                     idempotencyKey = idempotencyKey,
                     idempotentReplay = extractIdempotentReplay(raw),
@@ -500,14 +502,18 @@ object AggregatedIngestClient {
     }
 
     private fun extractNoteId(raw: String): String? {
+        return extractStringField(raw, "note_id")
+    }
+
+    private fun extractStringField(raw: String, key: String): String? {
         return try {
             val parsed = gson.fromJson(raw, JsonElement::class.java)
             when {
                 parsed == null || parsed.isJsonNull -> null
-                parsed.isJsonObject -> parsed.asJsonObject.get("note_id")?.takeIf { !it.isJsonNull }?.asString
+                parsed.isJsonObject -> parsed.asJsonObject.get(key)?.takeIf { !it.isJsonNull }?.asString
                 parsed.isJsonArray && parsed.asJsonArray.size() > 0 -> {
                     val first = parsed.asJsonArray[0]
-                    if (first.isJsonObject) first.asJsonObject.get("note_id")?.takeIf { !it.isJsonNull }?.asString else null
+                    if (first.isJsonObject) first.asJsonObject.get(key)?.takeIf { !it.isJsonNull }?.asString else null
                 }
                 else -> null
             }

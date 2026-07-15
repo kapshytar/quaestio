@@ -5996,6 +5996,10 @@ function isSamePendingAggregation(runId) {
 async function finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContext = {}) {
   const sessionId = extractSessionId(ingestResult);
   const noteId = String(ingestResult?.data?.note_id || '').trim() || null;
+  const effectiveProjectTagId = ingestResult?.data &&
+    Object.prototype.hasOwnProperty.call(ingestResult.data, 'project_tag_id')
+    ? String(ingestResult.data.project_tag_id || '').trim() || null
+    : undefined;
   if (ingestResult?.ok && sessionId) {
     // A fresh ingest established the active session; normal slot-fingerprint
     // continuation is safe again.
@@ -6014,7 +6018,7 @@ async function finalizeAggregatedIngest(ingestResult, sourcePrompt, ingestContex
     setIngestSessionIndicator(sessionId);
     const autoSaveName = String(sourcePrompt || '').trim().slice(0, 60) ||
       `Session ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
-    saveSessionSnapshot(autoSaveName, sessionId, noteId).catch(e =>
+    saveSessionSnapshot(autoSaveName, sessionId, noteId, effectiveProjectTagId).catch(e =>
       mergeLog(`Auto-save after ingest failed: ${e?.message || e}`, 'warn')
     );
   }
@@ -6694,7 +6698,7 @@ function errorToText(error) {
   return String(error.message || error);
 }
 
-async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
+async function saveSessionSnapshot(customName, ingestSessionId, noteId = null, projectTagIdOverride = undefined) {
   console.log('[saveSessionSnapshot] invoked', {
     customName: customName || null,
     ingestSessionId: ingestSessionId ?? null,
@@ -6708,7 +6712,9 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null) {
     slotConfig: { ...slotConfig },
     slotUrls: {},
     slotEnabled: { ...getCurrentSlotEnabledState() },
-    projectTagId: activeProjectId || null
+    projectTagId: projectTagIdOverride === undefined
+      ? activeProjectId || null
+      : projectTagIdOverride
   };
 
   SLOTS.forEach(slot => {

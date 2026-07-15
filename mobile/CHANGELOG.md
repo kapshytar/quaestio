@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.6
+
+- **Fix (iOS + Android): session cards store the project tag actually applied by backend ingest.** Continuations inherit the chain's existing tags regardless of the current picker; both clients now parse the returned effective `project_tag_id` and persist it in the local snapshot.
+
+
 ## 2.9.5
 
 - **Feature (iOS + Android + desktop): project tree is collapsed by default; expansion persists across restarts.** iOS: main project picker now renders the same expansion-gated rows as the sessions filter (`visibleFilterTreeRows` + shared `filterExpandedIds`, persisted to UserDefaults `verity.mobile.projectTreeExpanded`; closing the sheet resets to the persisted state, not to empty). Android: `ensureExpandedProjectNodes` no longer auto-expands every parent node on first load — it loads the persisted set from SharedPreferences (`project_tree_expanded`); every toggle persists immediately. Desktop counterpart ships in desktop 1.118.0.

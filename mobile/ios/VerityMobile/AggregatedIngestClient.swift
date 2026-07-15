@@ -132,6 +132,7 @@ struct ClarificationIngestPayload: Codable {
 struct AggregatedIngestResult {
     let sessionId: Int?
     let noteId: String?
+    let projectTagId: String?
     let payloadHash: String
     let idempotencyKey: String
     let idempotentReplay: Bool
@@ -366,6 +367,7 @@ enum AggregatedIngestClient {
                 let result = AggregatedIngestResult(
                     sessionId: extractSessionId(raw),
                     noteId: extractNoteId(raw),
+                    projectTagId: extractStringField(raw, key: "project_tag_id"),
                     payloadHash: payloadHash,
                     idempotencyKey: idempotencyKey,
                     idempotentReplay: extractIdempotentReplay(raw),
@@ -522,12 +524,16 @@ enum AggregatedIngestClient {
     }
 
     private static func extractNoteId(_ raw: String) -> String? {
+        extractStringField(raw, key: "note_id")
+    }
+
+    private static func extractStringField(_ raw: String, key: String) -> String? {
         guard let json = parseJSONObject(raw) else { return nil }
         if let object = json as? [String: Any] {
-            return (object["note_id"] as? String)?.trimmedNilIfEmpty
+            return (object[key] as? String)?.trimmedNilIfEmpty
         }
         if let array = json as? [[String: Any]], let first = array.first {
-            return (first["note_id"] as? String)?.trimmedNilIfEmpty
+            return (first[key] as? String)?.trimmedNilIfEmpty
         }
         return nil
     }

@@ -54,10 +54,11 @@ Notes:
 - If `session_id` omitted/null, backend allocates new integer `session_id`.
 - Normal create path inserts a new aggregated note for the current question in that session.
 - Manual overwrite path must pass both `aggregated_note_id` and `replace_existing=true`; backend will then update that exact aggregated root note only.
-- If `project_tag_id` is provided, backend attaches the aggregated note to that Dream Tracker project.
-- If `project_tag_id` is omitted and this aggregated note continues an existing session chain, backend inherits `note_tags` from the previous aggregated note.
+- For the first note in a session, backend attaches `project_tag_id` when provided.
+- For every continuation, backend ignores the current picker value and copies the previous note's `note_tags`; Collect/replace does not change tags.
+- The response `project_tag_id` is the tag actually applied to the note, so clients persist and display the effective project rather than a stale picker value.
 - Backend persists immutable `origin_platform_code` on the created note from `platform_code` (`WIN`, `MAC`, `LNX`, `AND`, `IOS`, `WEB`).
-- Response contains `note_id` and `session_id`.
+- Response contains `note_id`, `session_id`, and the effective `project_tag_id`.
 
 ---
 

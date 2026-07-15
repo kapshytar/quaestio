@@ -1221,6 +1221,7 @@ final class MobileAppState: ObservableObject {
             noteId: result.noteId,
             sourcePrompt: prompt
         )
+        sessionManager.setActiveProjectId(result.projectTagId)
         updateSessionIndicator()
         lastUserPrompt = prompt
         persistLastUserPrompt(prompt)

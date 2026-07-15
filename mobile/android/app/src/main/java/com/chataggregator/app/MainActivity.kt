@@ -2900,7 +2900,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                     dreamSessionId = result.sessionId,
                     slotUrls = slotUrls,
                     noteId = result.noteId,
-                    projectTagId = activeProjectId
+                    projectTagId = result.projectTagId
                 )
                 if (rpcUrl.isNotBlank() && apiKey.isNotBlank()) {
                     thread {

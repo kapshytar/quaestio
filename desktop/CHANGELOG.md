@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.118.1
+
+- **Fix: session cards store the project tag actually applied by backend ingest.** On a continuation the UI picker may point at another project, but the backend inherits the chain's existing tags; desktop now persists the returned effective `project_tag_id` instead of the stale picker value.
+
+
 ## 1.118.0
 
 - **Feature: project tree collapsed by default; expansion persists across restarts** (parity with mobile 2.9.5). Both trees — the main project panel and the Sessions-tab project filter — share `renderProjectTreeNode` with per-tree localStorage keys (`verity-project-tree-expanded`, `verity-project-tree-expanded-sessions-filter`); the old auto-expand-everything default is removed.
