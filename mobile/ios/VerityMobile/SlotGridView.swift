@@ -131,7 +131,7 @@ struct SlotGridView: View {
     @State private var sessionProjectFilter: MobileAppState.ProjectFilter = .all
     @State private var showsSessionProjectFilterPopover = false
     @State private var sessionProjectFilterQuery = ""
-    @State private var filterExpandedIds: Set<String> = []
+    @State private var filterExpandedIds: Set<String> = Self.loadPersistedProjectTreeExpandedIds()
     @State private var composerHeight: CGFloat = 22
     @State private var isComposerFocused = false
     @State private var keepsTrayDuringWebInput = false
@@ -143,6 +143,20 @@ struct SlotGridView: View {
 
     private var selectedSlot: SlotState? {
         appState.slots.first { $0.id == appState.selectedSlotId } ?? appState.slots.first
+    }
+
+    // Persisted expanded-node set for the project filter tree, keyed by pathKey
+    // (unique per DAG placement — see FilterTreeRow above). Nothing stored = all
+    // collapsed, which is also the default first-launch state.
+    private static let projectTreeExpandedDefaultsKey = "verity.mobile.projectTreeExpanded"
+
+    private static func loadPersistedProjectTreeExpandedIds() -> Set<String> {
+        let stored = UserDefaults.standard.array(forKey: projectTreeExpandedDefaultsKey) as? [String] ?? []
+        return Set(stored)
+    }
+
+    private func persistProjectTreeExpandedIds() {
+        UserDefaults.standard.set(Array(filterExpandedIds), forKey: Self.projectTreeExpandedDefaultsKey)
     }
 
     // Tray visibility is a pure function of focus state — no tap heuristics, no timers.
@@ -443,16 +457,40 @@ struct SlotGridView: View {
                         }
                         .disabled(projectRefreshLocked)
                     } else {
-                        ForEach(flattenProjects(appState.projectTreeNodes)) { node in
-                            Button {
-                                appState.setActiveProject(node.project)
-                                showsProjectSheet = false
-                            } label: {
-                                HStack {
-                                    Text(String(repeating: "  ", count: node.depth) + node.name)
-                                    Spacer()
-                                    if appState.activeProjectId == node.project.id && appState.activeProjectPathKey == node.project.pathKey {
-                                        Image(systemName: "checkmark")
+                        // Same expansion-gated rows as the sessions filter tree
+                        // (visibleFilterTreeRows + filterExpandedIds): collapsed by
+                        // default, expansion persisted across launches.
+                        ForEach(visibleFilterTreeRows()) { row in
+                            HStack(spacing: 6) {
+                                if row.hasChildren {
+                                    Button {
+                                        if filterExpandedIds.contains(row.id) {
+                                            filterExpandedIds.remove(row.id)
+                                        } else {
+                                            filterExpandedIds.insert(row.id)
+                                        }
+                                        persistProjectTreeExpandedIds()
+                                    } label: {
+                                        Image(systemName: filterExpandedIds.contains(row.id) ? "chevron.down" : "chevron.right")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(AppTheme.textMuted)
+                                            .frame(width: 16)
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    Spacer().frame(width: 16)
+                                }
+
+                                Button {
+                                    appState.setActiveProject(row.node)
+                                    showsProjectSheet = false
+                                } label: {
+                                    HStack {
+                                        Text(String(repeating: "  ", count: row.depth) + row.name)
+                                        Spacer()
+                                        if appState.activeProjectId == row.projectId && appState.activeProjectPathKey == row.node.pathKey {
+                                            Image(systemName: "checkmark")
+                                        }
                                     }
                                 }
                             }
@@ -596,6 +634,9 @@ struct SlotGridView: View {
         let name: String
         let depth: Int
         let hasChildren: Bool
+        // Full node so the main project picker can reuse these rows for
+        // setActiveProject (single expansion-gated tree walk for both sheets).
+        let node: ProjectTreeNode
     }
 
     private func visibleFilterTreeRows() -> [FilterTreeRow] {
@@ -607,7 +648,8 @@ struct SlotGridView: View {
                     projectId: node.id,
                     name: node.name,
                     depth: depth,
-                    hasChildren: !node.children.isEmpty
+                    hasChildren: !node.children.isEmpty,
+                    node: node
                 ))
                 if !node.children.isEmpty && filterExpandedIds.contains(node.pathKey) {
                     walk(node.children, depth: depth + 1)
@@ -627,6 +669,7 @@ struct SlotGridView: View {
                     } else {
                         filterExpandedIds.insert(row.id)
                     }
+                    persistProjectTreeExpandedIds()
                 } label: {
                     Image(systemName: filterExpandedIds.contains(row.id) ? "chevron.down" : "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
@@ -812,7 +855,9 @@ struct SlotGridView: View {
                 sessionSearchText = ""
                 sessionProjectFilter = .all
                 expandedSessionTitleIds.removeAll()
-                filterExpandedIds.removeAll()
+                // Reset to the PERSISTED expansion, not to empty: reopening the
+                // sheet mid-run must show the same tree state as after a relaunch.
+                filterExpandedIds = Self.loadPersistedProjectTreeExpandedIds()
                 sessionProjectFilterQuery = ""
             }
         }
@@ -999,12 +1044,6 @@ struct SlotGridView: View {
             Spacer()
         }
         .padding(.horizontal, 6)
-    }
-
-    private func flattenProjects(_ roots: [ProjectTreeNode], depth: Int = 0) -> [FlatProjectNode] {
-        roots.flatMap { node in
-            [FlatProjectNode(project: node, name: node.name, depth: depth)] + flattenProjects(node.children, depth: depth + 1)
-        }
     }
 
     private func formattedSessionTimestamp(_ timestamp: Int64) -> String {
@@ -1353,9 +1392,3 @@ struct SlotGridView: View {
     }
 }
 
-private struct FlatProjectNode: Identifiable {
-    var id: String { project.pathKey }
-    let project: ProjectTreeNode
-    let name: String
-    let depth: Int
-}

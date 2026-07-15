@@ -90,6 +90,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         private const val PROJECT_TREE_CACHE_PREF = "project_tree_v2"
         private const val PROJECT_TREE_LOADED_AT_PREF = "project_tree_loaded_at"
         private const val SESSIONS_LOADED_AT_PREF = "sessions_loaded_at"
+        private const val PROJECT_TREE_EXPANDED_PREF = "project_tree_expanded"
         private const val CHEAT_UNLOCK_SHA256 = "1bda832333f390e87d3683d9a73f8613fd92cf062790cfe7349efd41e9b89594"
         private const val CHEAT_DEBUG_SHA256 = "51c55c26253022764f0fb1780249cdd4a4fa809e679c79e6b550af4ee571318f"
         private const val PENDING_APPROVAL_MESSAGE =
@@ -147,6 +148,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
     @Volatile private var projectRefreshInFlight: Boolean = false
     @Volatile private var sessionsRefreshInFlight: Boolean = false
     private val expandedProjectNodeIds = mutableSetOf<String>()
+    private var expandedProjectNodeIdsLoaded = false
     private var blurDialogCount = 0
     private var pendingProjectSelectionArmed: Boolean = false
     private var pendingProjectSelectionNode: ProjectTreeNode? = null
@@ -1201,6 +1203,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 setOnClickListener {
                     if (expandedProjectNodeIds.contains(nodeKey)) expandedProjectNodeIds.remove(nodeKey)
                     else expandedProjectNodeIds.add(nodeKey)
+                    persistExpandedProjectNodes()
                     renderProjectPanel(projectTreeNodes)
                 }
             }
@@ -1236,17 +1239,22 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
         }
     }
 
+    /** Loads persisted expanded-node ids once per process. Nothing persisted
+     *  (fresh install, or user never expanded a node) means the tree renders
+     *  fully collapsed — only root nodes visible. */
     private fun ensureExpandedProjectNodes(nodes: List<ProjectTreeNode>) {
-        if (expandedProjectNodeIds.isNotEmpty()) return
-        fun walk(list: List<ProjectTreeNode>) {
-            list.forEach { node ->
-                if (node.children.isNotEmpty()) {
-                    expandedProjectNodeIds.add(node.pathKey.ifBlank { node.id })
-                    walk(node.children)
-                }
-            }
-        }
-        walk(nodes)
+        if (expandedProjectNodeIdsLoaded) return
+        expandedProjectNodeIdsLoaded = true
+        expandedProjectNodeIds.addAll(
+            remoteListPrefs().getStringSet(PROJECT_TREE_EXPANDED_PREF, emptySet()).orEmpty()
+        )
+    }
+
+    private fun persistExpandedProjectNodes() {
+        remoteListPrefs()
+            .edit()
+            .putStringSet(PROJECT_TREE_EXPANDED_PREF, HashSet(expandedProjectNodeIds))
+            .apply()
     }
 
     /** Sessions-dialog project filter popover (docs/PROJECT_SESSION_FILTER.md).

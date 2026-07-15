@@ -256,7 +256,8 @@ let activeProjectSlotUrls = {};
 let projectTreeNodes = [];
 let isProjectPanelVisible = false;
 let isProjectTreeLoaded = false;
-const expandedProjectNodeIds = new Set();
+const PROJECT_TREE_EXPANDED_KEY = 'verity-project-tree-expanded';
+const expandedProjectNodeIds = new Set(readJsonCache(PROJECT_TREE_EXPANDED_KEY, []));
 let projectSlotUrlLoadGeneration = 0;
 const REMOTE_LIST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const PROJECT_TREE_CACHE_KEY = 'chat-aggregator-project-tree-v2';
@@ -2260,15 +2261,9 @@ function buildProjectTreeNodes(tags, tagParents) {
 }
 
 function ensureExpandedProjectNodes(nodes) {
-  if (expandedProjectNodeIds.size > 0) return;
-  const walk = (list) => {
-    list.forEach((node) => {
-      if (!node || !Array.isArray(node.children) || node.children.length === 0) return;
-      expandedProjectNodeIds.add(node.pathKey || node.id);
-      walk(node.children);
-    });
-  };
-  walk(Array.isArray(nodes) ? nodes : []);
+  // Default state is fully collapsed (roots only); expansion is restored from
+  // PROJECT_TREE_EXPANDED_KEY at declaration time and persisted on toggle in
+  // renderProjectTreeNode. No auto-expand-all here.
 }
 
 function findProjectNodeById(nodes, projectId) {
@@ -2357,6 +2352,7 @@ function updateProjectSelectorAppearance() {
 
 function renderProjectTreeNode(container, node, depth, opts = {}) {
   const expandedSet = opts.expandedSet || expandedProjectNodeIds;
+  const expandedStorageKey = opts.expandedStorageKey || PROJECT_TREE_EXPANDED_KEY;
   const rerender = opts.rerender || (() => renderProjectPanel(projectTreeNodes));
   const hasChildren = Array.isArray(node.children) && node.children.length > 0;
   const nodeKey = node.pathKey || node.id;
@@ -2378,6 +2374,7 @@ function renderProjectTreeNode(container, node, depth, opts = {}) {
       event.stopPropagation();
       if (expandedSet.has(nodeKey)) expandedSet.delete(nodeKey);
       else expandedSet.add(nodeKey);
+      writeJsonCache(expandedStorageKey, Array.from(expandedSet));
       rerender();
     });
   }
@@ -6614,7 +6611,8 @@ async function runMerge(isClarification = false, clarificationText = '', previou
   let sessionsNotice = { text: '', kind: 'info' };
   let sessionsSearchQuery = '';
   let sessionsProjectFilter = '';
-  const sessionsFilterExpandedIds = new Set();
+  const SESSIONS_FILTER_EXPANDED_KEY = 'verity-project-tree-expanded-sessions-filter';
+  const sessionsFilterExpandedIds = new Set(readJsonCache(SESSIONS_FILTER_EXPANDED_KEY, []));
   let sessionsProjectFilterQuery = '';
   const expandedSessionTitleIds = new Set();
   let sessionsListMemoryCache = null;
@@ -7285,6 +7283,7 @@ function renderSessionsProjectFilterTree() {
   const query = String(sessionsProjectFilterQuery || '').trim().toLowerCase();
   const opts = {
     expandedSet: sessionsFilterExpandedIds,
+    expandedStorageKey: SESSIONS_FILTER_EXPANDED_KEY,
     rerender: renderSessionsProjectFilterTree,
     isSelected: (node) => sessionsProjectFilter === node.id,
     onSelect: (node) => setSessionsProjectFilter(node.id),

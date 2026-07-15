@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.118.0
+
+- **Feature: project tree collapsed by default; expansion persists across restarts** (parity with mobile 2.9.5). Both trees — the main project panel and the Sessions-tab project filter — share `renderProjectTreeNode` with per-tree localStorage keys (`verity-project-tree-expanded`, `verity-project-tree-expanded-sessions-filter`); the old auto-expand-everything default is removed.
+
 ## 1.117.0
 
 - **Fix: Collect/Merge self-heal a stale session context instead of failing with P0001** (после серверного мерджа сессий 303/304 → 298 клиент слал протухшую пару session/note). The pre-collect chain-tail check no longer silently ignores an EMPTY tail: it now asks the server where the cached note lives NOW (`dream-get-note-session-id`), re-points the context to that session's tail, and (only if the note is gone) clears + force-refreshes the sessions list + re-resolves by open tabs. Network failures are fail-closed (context kept, operation aborts — never a duplicate session from a rejected context). One-shot P0001 retry around the ingest call as a race backstop. Merge persist tail-validates the restored context and REFUSES to bootstrap a new root from an unrepaired stale context (previously the merge result silently failed to save; now it either saves to the right session or says why not).

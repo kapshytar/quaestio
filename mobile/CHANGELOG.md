@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.5
+
+- **Feature (iOS + Android + desktop): project tree is collapsed by default; expansion persists across restarts.** iOS: main project picker now renders the same expansion-gated rows as the sessions filter (`visibleFilterTreeRows` + shared `filterExpandedIds`, persisted to UserDefaults `verity.mobile.projectTreeExpanded`; closing the sheet resets to the persisted state, not to empty). Android: `ensureExpandedProjectNodes` no longer auto-expands every parent node on first load — it loads the persisted set from SharedPreferences (`project_tree_expanded`); every toggle persists immediately. Desktop counterpart ships in desktop 1.118.0.
+
+
 ## 2.9.4
 
 - **Fix (iOS): the 2.9.2 duplicate-session fix actually works now (adversarial review found it incomplete).** 2.9.2 only patched the real-conversation *gate*; the fingerprint itself was still built from the live (home-page) URLs, so it never matched the stored snapshot and a duplicate session was still minted — and `hasCurrentQuestionContextForCurrentSlots` cleared the session link before restore even ran. Now `slotURLsForContextMatching()` substitutes a mid-navigation slot's pending target URL (`SlotWebViewModel.pendingNavigationTargetURL`, raw URL captured at load/forceLoad) for the transient home page in BOTH the fingerprint-restore path and the current-question matcher; real-ness checks go through the shared `extractConversationKey`/`conversationKeyTailIsReal` (the 2.9.2 regex duplicate, which false-positived on bare home targets like `chatgpt`, is removed). A redirect that commits a different target (chat → provider home) clears the pending URL so a session can't bind to a chat the webview never reached.
