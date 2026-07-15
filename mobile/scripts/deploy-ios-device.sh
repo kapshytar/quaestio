@@ -109,6 +109,7 @@ for device in devices:
     if pairing != "paired":
         continue
     tunnel = conn.get("tunnelState")  # "connected" | "disconnected" | "unavailable" | absent
+    transport = conn.get("transportType")  # "localNetwork" | "wired" | absent
     udid = device.get("hardwareProperties", {}).get("udid")
     name = device.get("deviceProperties", {}).get("name", "")
     identifier = device.get("identifier")
@@ -116,11 +117,16 @@ for device in devices:
     aliases = {value for value in [udid, name, identifier] if value}
     aliases.update(hostnames)
     entry = (device, aliases)
-    if tunnel is None or tunnel == "connected":
+    # tunnelState refers to the USB/Lightning CoreDevice tunnel, not WiFi.
+    # A device on localNetwork (WiFi-paired) is reachable even when tunnelState
+    # is "disconnected" — xcodebuild -showdestinations confirms it as a valid
+    # destination. Treat localNetwork paired devices as live.
+    is_live = (tunnel is None or tunnel == "connected" or transport == "localNetwork")
+    if is_live:
         # tunnelState absent = older Xcode without the field; treat as candidate.
         live_devices.append(entry)
     else:
-        # tunnelState present but NOT "connected" → device is stale/offline.
+        # tunnelState present, not connected, not local network → stale/offline.
         stale_devices.append(entry)
 
 if requested:

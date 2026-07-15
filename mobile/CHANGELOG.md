@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.3
+
+- **Fix (iOS): DeepSeek API key no longer lost on dev-build reinstall.** iOS can wipe the Keychain container when a development build is replaced via `xcrun devicectl device install app`. Key is now mirrored to UserDefaults (sandbox-scoped) on every save; `mergeApiKeyLoad` falls back to UserDefaults when Keychain returns empty. Clearing the key field clears both stores.
+
+
 ## 2.9.2
 
 - **Fix (iOS): session fingerprint restore no longer mints a new session when WKWebViews are still mid-navigation.** After `loadSession` or app relaunch the WebViews briefly sit on the service home page before reaching the real conversation URL; `fingerprintHasRealConversation` saw only the home page URL and returned `false`, so Collect could not attach to the existing session (e.g. 298) and created a new one (303) — same class as the 288/295 split bug. Fix: if a slot's current URL is not yet a real conversation, fall back to `SlotWebViewModel.pendingNavigationIsRealConversation` (new), which checks `loadedNavigationTarget` (already set to the target chat URL at `forceLoad` time) and treats the slot as real while the navigation is in flight.

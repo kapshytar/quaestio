@@ -410,6 +410,7 @@ struct MergeView: View {
     // either (they live in a separate SharedPreferences file from the auth session).
 
     private static let mergeApiKeyKeychainService = "verity.merge.apikey"
+    private static let mergeApiKeyUDPrefix = "verity.merge.apikey.ud."
 
     private func mergeApiKeyKeychainAccount(providerId: String) -> String {
         "merge.\(providerId).api_key"
@@ -419,17 +420,22 @@ struct MergeView: View {
         guard !providerId.isEmpty else { return }
         let account = mergeApiKeyKeychainAccount(providerId: providerId)
         let service = Self.mergeApiKeyKeychainService
+        let udKey = Self.mergeApiKeyUDPrefix + providerId
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
         SecItemDelete(query as CFDictionary)
+        UserDefaults.standard.removeObject(forKey: udKey)
         guard let data = key.data(using: .utf8), !key.isEmpty else { return }
         var add = query
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         SecItemAdd(add as CFDictionary, nil)
+        // Mirror to UserDefaults so the key survives dev-build reinstalls that
+        // wipe the Keychain container (iOS dev-install behaviour; sandbox-scoped).
+        UserDefaults.standard.set(key, forKey: udKey)
     }
 
     private func mergeApiKeyLoad(providerId: String) -> String {
@@ -444,11 +450,14 @@ struct MergeView: View {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let value = String(data: data, encoding: .utf8)
-        else { return "" }
-        return value
+        if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+           let data = item as? Data,
+           let value = String(data: data, encoding: .utf8),
+           !value.isEmpty {
+            return value
+        }
+        // Keychain miss (wiped on dev reinstall) — recover from UserDefaults backup.
+        return UserDefaults.standard.string(forKey: Self.mergeApiKeyUDPrefix + providerId) ?? ""
     }
 
     private var activityCard: some View {
