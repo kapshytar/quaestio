@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.2
+
+- **Fix (iOS): session fingerprint restore no longer mints a new session when WKWebViews are still mid-navigation.** After `loadSession` or app relaunch the WebViews briefly sit on the service home page before reaching the real conversation URL; `fingerprintHasRealConversation` saw only the home page URL and returned `false`, so Collect could not attach to the existing session (e.g. 298) and created a new one (303) — same class as the 288/295 split bug. Fix: if a slot's current URL is not yet a real conversation, fall back to `SlotWebViewModel.pendingNavigationIsRealConversation` (new), which checks `loadedNavigationTarget` (already set to the target chat URL at `forceLoad` time) and treats the slot as real while the navigation is in flight.
+
+
 ## 2.9.1
 
 - **Fix (Android): the home-overwrite guard now stops the navigation itself, for every provider.** Session load correctly hard-loaded the saved conversation, but a second unguarded path (`loadService` → `loadTrackedUrl`) still issued a raw `loadUrl` to the provider's default home right after — the tab sat on Claude home/new-chat for ~11s (where Send fills the composer but doesn't fire, different DOM) until claude.ai self-recovered. `rememberLoadUrl` now returns whether the URL was accepted and `loadTrackedUrl` skips `webView.loadUrl` when the home default would clobber a live conversation.

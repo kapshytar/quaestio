@@ -1722,7 +1722,16 @@ final class MobileAppState: ObservableObject {
             let slotIndex = Int(slotKey.replacingOccurrences(of: "slot-", with: ""))
             let serviceId = slots.first(where: { $0.id == slotIndex })?.serviceId ?? "unknown"
             let key = extractConversationKey(serviceId: serviceId, rawURL: rawURL)
-            return conversationKeyTailIsReal(key)
+            if conversationKeyTailIsReal(key) { return true }
+            // Fallback: slot is still navigating to its conversation target (e.g.
+            // right after loadSession / app relaunch). currentURL is momentarily
+            // on the service home page, but loadedNavigationTarget already points
+            // at the real chat — count the slot as real so fingerprint restore
+            // can still find session 298 instead of minting a new 303.
+            if let idx = slotIndex, let model = webModels[idx] {
+                return model.pendingNavigationIsRealConversation
+            }
+            return false
         }
     }
 

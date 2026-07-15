@@ -142,6 +142,17 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         }
     }
 
+    /// True when the slot is mid-navigation to a real conversation URL (e.g. after
+    /// loadSession or relaunch) but its currentURL is still the home page.
+    /// `loadedNavigationTarget` uses the same "serviceId:chatId" format as
+    /// extractConversationKey, so the tail regex check is identical.
+    var pendingNavigationIsRealConversation: Bool {
+        guard hasPendingNavigation, let target = loadedNavigationTarget else { return false }
+        let tail = target.contains(":") ? String(target[target.index(after: target.firstIndex(of: ":")!)...]) : target
+        guard !tail.isEmpty, tail != "temporary", tail != "no-url" else { return false }
+        return tail.range(of: #"^[a-z0-9][a-z0-9_-]{5,}$"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
     private func scheduleDisplayReady(after delayNs: UInt64, reason: String) {
         displayReadyTask?.cancel()
         displayReadyTask = Task { @MainActor [weak self] in
