@@ -1107,8 +1107,24 @@ function getSuppressSlotRestore() {
   catch (_) { return false; }
 }
 
-function restoreStoredQuestionContextForFingerprint(fingerprint) {
+// Mobile parity (Android fingerprintHasRealConversation): a stored session is
+// resurrected only when at least one enabled slot sits on a real chat id. Fresh
+// home pages after a relaunch hash to the same "empty" fingerprint the previous
+// session was minted with, so without this every new question glued onto it
+// (S327, 2026-09-24).
+function slotsHaveRealConversation(enabledSlots) {
+  const slots = Array.isArray(enabledSlots) ? enabledSlots : [];
+  return slots.some((slot) => {
+    const url = getWebviewCurrentUrl(slot);
+    if (!url) return false;
+    const serviceId = detectServiceByUrl(url) || slotConfig[slot] || 'unknown';
+    return conversationKeyTailIsReal(extractConversationKey(serviceId, url));
+  });
+}
+
+function restoreStoredQuestionContextForFingerprint(fingerprint, enabledSlots) {
   if (getSuppressSlotRestore()) return null;
+  if (!slotsHaveRealConversation(enabledSlots)) return null;
   const context = getStoredSessionContextForFingerprint(fingerprint);
   if (!context?.session_id) return null;
   activeSessionId = context.session_id;
@@ -4361,7 +4377,7 @@ async function sendToAll() {
   const enabledSlots = SLOTS.filter(slot => toggles[slot] && toggles[slot].checked);
   const sessionFingerprint = buildSessionFingerprint(enabledSlots);
   activeSessionFingerprint = sessionFingerprint;
-  let storedContext = restoreStoredQuestionContextForFingerprint(sessionFingerprint);
+  let storedContext = restoreStoredQuestionContextForFingerprint(sessionFingerprint, enabledSlots);
   if (!storedContext && !(Number.isInteger(activeSessionId) && activeSessionId > 0)) {
     // Exact-hash context miss AND no live in-memory session (slot set changed,
     // relaunch, cleared context): fall back to the iOS-parity per-slot snapshot
@@ -6060,7 +6076,7 @@ async function collectNowAggregationInner(manual = true) {
   const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
   const runtimeFingerprint = buildSessionFingerprint(enabledSlots);
   let restoredContext = runtimeFingerprint
-    ? restoreStoredQuestionContextForFingerprint(runtimeFingerprint)
+    ? restoreStoredQuestionContextForFingerprint(runtimeFingerprint, enabledSlots)
     : null;
   if (!restoredContext && !getCurrentQuestionSessionId()) {
     // Same fallback as sendToAll: per-slot snapshot resolver so a late Collect
@@ -6402,7 +6418,7 @@ async function executeMergeRequest(isClarification, clarificationText, previousS
     const enabledSlots = SLOTS.filter((slot) => toggles[slot]?.checked);
     const runtimeFingerprint = buildSessionFingerprint(enabledSlots);
     if (runtimeFingerprint) {
-      restoreStoredQuestionContextForFingerprint(runtimeFingerprint);
+      restoreStoredQuestionContextForFingerprint(runtimeFingerprint, enabledSlots);
     }
     if (!getCurrentQuestionSessionId()) {
       // Per-slot snapshot resolver fallback (see sendToAll) so a merge does not

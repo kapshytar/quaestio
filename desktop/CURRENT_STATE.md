@@ -7,6 +7,7 @@
 - `CHANGELOG.md`, dated handoff docs, and older session notes are historical context only.
 - `CLAUDE.md` is operational/task-entry guidance; if it disagrees with this file about current product behavior, treat that as a doc mismatch and update the docs instead of guessing.
 - 2026-07-03: this monorepo (`desktop/` + `mobile/`) is now under push-ritual doc-coverage enforcement — see `../.docs-coverage-map.txt` at the repo root and `rituals/push-ritual.sh` step `[4/6]`; pushing desktop code without a matching doc/CURRENT_STATE.md touch is blocked in strict mode.
+- 2026-09-24 (1.118.3): exact-fingerprint session restore requires at least one enabled slot on a real chat id (mobile parity); fresh home-page chats after relaunch no longer resurrect the previous session (S327 glue). Closes the desktop real-conversation parity gap.
 - 2026-07-15 (1.118.2): signed-in startup performs one background web-session reconcile only when the last refresh is at least 15 minutes old; it refreshes the saved index without rebinding the active session, and the Sessions list displays the persisted last web-sync time.
 - 2026-07-15 (1.118.1): ingest snapshots persist the backend-returned effective project tag, so a continuation remains displayed under its inherited session project even when the picker currently points elsewhere.
 - 2026-07-15 (1.118.0): project trees (main panel + sessions filter) collapsed by default, expansion persisted in localStorage per tree.
@@ -115,7 +116,7 @@
 - Aggregated overwrite must be exact-note overwrite via `aggregated_note_id`.
 - Merge ingest should also pass exact `aggregated_note_id`; `session_id` alone is not enough to identify the current question root in a multi-question session.
 - `session_id` must not be used as a proxy for "current question".
-- Continuing the same question after restart/device handoff is allowed again, but only when the current slot URLs match the stored question fingerprint.
+- Continuing the same question after restart/device handoff is allowed only when the current slot URLs match the stored question fingerprint AND at least one enabled slot is on a real chat id; empty/home-page chats always start a new session (owner decision 2026-09-24, mobile parity).
 - Desktop owns only thin client state; canonical note semantics live in Dream Tracker backend.
 
 ## Next Steps

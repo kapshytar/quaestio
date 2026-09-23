@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.118.3
+
+- **Fix: after a relaunch, fresh (empty) chats start a new session instead of gluing onto the last one.** The stored question context is restored by slot fingerprint only when at least one enabled slot is on a real chat id (Android `fingerprintHasRealConversation` parity). Before, home pages hashed to the same fingerprint the previous session was minted with, so a new question landed as a second Merge under S327.
+
 ## 1.118.2
 
 - **Sessions refresh from web once at startup when the last refresh is at least 15 minutes old.** The background reconcile updates only the saved session index, never the active question context, and the Sessions list now shows the persisted last web-sync time. There is no polling.
