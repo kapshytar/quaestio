@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.118.4
+
+- **Fix: Save Current right after a relaunch no longer overwrites the previous session's snapshot.** The manual save took the raw stored session id that survives relaunch; the bridge `save` updates a snapshot by `session_id`, so the old session's name and slot URLs were replaced by the fresh home pages. Save now uses only this run's session (ingest result, loaded session, or guarded restore); removed the dead `getCurrentSessionId` helper.
+
 ## 1.118.3
 
 - **Fix: after a relaunch, fresh (empty) chats start a new session instead of gluing onto the last one.** The stored question context is restored by slot fingerprint only when at least one enabled slot is on a real chat id (Android `fingerprintHasRealConversation` parity). Before, home pages hashed to the same fingerprint the previous session was minted with, so a new question landed as a second Merge under S327.

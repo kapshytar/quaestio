@@ -13,8 +13,9 @@ const vm = require('node:vm');
 const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'renderer.js'), 'utf8');
 
 function liftFunction(name) {
-  const start = SOURCE.indexOf(`function ${name}(`);
-  assert.ok(start >= 0, `function ${name} not found in renderer.js`);
+  const bare = SOURCE.indexOf(`function ${name}(`);
+  assert.ok(bare >= 0, `function ${name} not found in renderer.js`);
+  const start = SOURCE.startsWith('async ', bare - 6) ? bare - 6 : bare;
   const open = SOURCE.indexOf('{', SOURCE.indexOf(')', start));
   let depth = 0;
   for (let i = open; i < SOURCE.length; i += 1) {
@@ -74,4 +75,48 @@ test('a slot on a real chat id still continues the stored session', () => {
   });
   assert.strictEqual(restored?.session_id, 327);
   assert.strictEqual(activeSessionId, 327);
+});
+
+// Save Current right after a relaunch must not reuse the raw stored id: the
+// bridge 'save' UPDATEs an existing snapshot by session_id, so it would clobber
+// the previous session's name and slot URLs with the fresh home pages.
+async function saveWith(activeSessionId) {
+  const sent = [];
+  const sandbox = {
+    console: { log() {}, error() {} },
+    localStorage: {
+      getItem: (k) => (k === 'aggregated-ingest-session-id' ? '327' : null),
+      setItem() {},
+      removeItem() {}
+    },
+    window: { electronAPI: { saveSession: async (data) => { sent.push(data); return { id: 'row-1' }; } } },
+    AGGREGATED_SESSION_ID_KEY: 'aggregated-ingest-session-id',
+    SESSIONS_KEY: 'sessions',
+    SESSIONS_META_KEY: 'sessions-meta',
+    SLOTS: ['slot-1'],
+    webviews: { 'slot-1': { src: 'https://chatgpt.com/' } },
+    slotConfig: { 'slot-1': 'chatgpt' },
+    getCurrentSlotEnabledState: () => ({ 'slot-1': true }),
+    setSessionsNotice() {},
+    loadSessionsList: async () => [],
+    mergeSessionSnapshots: (a, b) => [...a, ...b],
+    updateSessionsUI: async () => {}
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(
+    `var activeSessionId = ${JSON.stringify(activeSessionId)}, activeAggregatedNoteId = null, activeProjectId = null, sessionsListMemoryCache = null;`,
+    sandbox
+  );
+  vm.runInContext(liftFunction('saveSessionSnapshot'), sandbox);
+  await vm.runInContext('saveSessionSnapshot()', sandbox);
+  assert.strictEqual(sent.length, 1);
+  return sent[0].sessionId;
+}
+
+test('manual Save after relaunch does not target the stale stored session', async () => {
+  assert.strictEqual(await saveWith(null), null);
+});
+
+test('manual Save inside a live session keeps that session id', async () => {
+  assert.strictEqual(await saveWith(330), 330);
 });

@@ -44,7 +44,7 @@ Key async functions:
 - `saveSessionSnapshot()` - Captures slot config/URLs/enabled state, saves to DB via IPC
 - `loadSessionsList()` - Async loads from database (or localStorage fallback if DB unavailable)
 - `deleteSession(sessionId)` - Async delete from database
-- `getCurrentSessionId()` - Helper to retrieve active session from localStorage
+- ~~`getCurrentSessionId()`~~ removed 2026-09-24 (1.118.4): Save uses the in-run `activeSessionId` only
 - `updateSessionsUI()` - Displays sessions from database with names and timestamps
 - `initSessionsTab()` - Initialize session UI and attach event listeners
 

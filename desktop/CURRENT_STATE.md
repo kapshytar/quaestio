@@ -7,6 +7,7 @@
 - `CHANGELOG.md`, dated handoff docs, and older session notes are historical context only.
 - `CLAUDE.md` is operational/task-entry guidance; if it disagrees with this file about current product behavior, treat that as a doc mismatch and update the docs instead of guessing.
 - 2026-07-03: this monorepo (`desktop/` + `mobile/`) is now under push-ritual doc-coverage enforcement — see `../.docs-coverage-map.txt` at the repo root and `rituals/push-ritual.sh` step `[4/6]`; pushing desktop code without a matching doc/CURRENT_STATE.md touch is blocked in strict mode.
+- 2026-09-24 (1.118.4): manual Save Current uses only the in-run session id (never the raw stored id that survives relaunch), so saving on fresh chats creates a new snapshot instead of overwriting the previous session's.
 - 2026-09-24 (1.118.3): exact-fingerprint session restore requires at least one enabled slot on a real chat id (mobile parity); fresh home-page chats after relaunch no longer resurrect the previous session (S327 glue). Closes the desktop real-conversation parity gap.
 - 2026-07-15 (1.118.2): signed-in startup performs one background web-session reconcile only when the last refresh is at least 15 minutes old; it refreshes the saved index without rebinding the active session, and the Sessions list displays the persisted last web-sync time.
 - 2026-07-15 (1.118.1): ingest snapshots persist the backend-returned effective project tag, so a continuation remains displayed under its inherited session project even when the picker currently points elsewhere.

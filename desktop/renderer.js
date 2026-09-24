@@ -6734,7 +6734,10 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null, p
     noteId: noteId ?? activeAggregatedNoteId ?? null
   });
   const sessionData = {
-    sessionId: ingestSessionId ?? getCurrentSessionId() ?? activeSessionId,
+    // Only this run's session (ingest result, loaded session or a guarded
+    // restore). The raw stored id survives relaunch; reading it here made a
+    // Save on fresh chats overwrite the previous session's snapshot (S327).
+    sessionId: ingestSessionId ?? activeSessionId,
     noteId: String(noteId || activeAggregatedNoteId || '').trim() || null,
     name: customName ||
       `Session ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`,
@@ -6974,15 +6977,6 @@ async function saveSessionSnapshot(customName, ingestSessionId, noteId = null, p
     sessionsListMemoryCache = Array.isArray(cachedSessions) ? cachedSessions : [];
     return sessionsListMemoryCache;
   }
-
-function getCurrentSessionId() {
-  try {
-    const raw = localStorage.getItem(AGGREGATED_SESSION_ID_KEY);
-    return raw ? Number(raw) : null;
-  } catch (_) {
-    return null;
-  }
-}
 
 async function loadSession(sessionId) {
   const sessions = await loadSessionsList();
