@@ -273,7 +273,7 @@
       // container as a reply candidate (grok/claude truncated-prompt bug).
       function isUserMessageElement(el) {
         if (!el) return false;
-        return !!el.closest('[data-message-author-role="user"], [data-testid*="user"]');
+        return !!el.closest('[data-message-author-role="user"], [data-testid*="user"], [data-content-search-unit-key$=":user"], [class~="group/user-message"]');
       }
 
       function isMetadataLikeText(text) {
@@ -385,6 +385,7 @@
       function findNearestPromptCandidate(selectedCandidate) {
         if (!selectedCandidate?.el) return null;
         const userSelectors = [
+          '[data-content-search-unit-key$=":user"]',
           '[data-message-author-role="user"]',
           '[data-testid*="user"]',
           '[class*="user"][class*="message"]',
@@ -433,6 +434,7 @@
       }
 
       const selectorEntries = [
+        ['[data-markdown-text-style="assistant-message"]', '[data-markdown-text-style="assistant-message"]'],
         ['[data-testid*="conversation-turn"]', '[data-testid*="conversation-turn"]'],
         ['[data-testid*="message-content"]', '[data-testid*="message-content"]'],
         ['[data-message-author-role="assistant"]', '[data-message-author-role="assistant"]'],
@@ -447,10 +449,15 @@
       if (serviceId === 'gemini') selectorEntries.unshift(['response-container', 'response-container'], ['model-response', 'model-response']);
       if (serviceId === 'grok') selectorEntries.unshift(['[class*="message-bubble"]', '[class*="message-bubble"]'], ['div[id^="response-"]', 'div[id^="response-"]']);
 
+      const chatGptReplies = serviceId === 'chatgpt'
+        ? Array.from(document.querySelectorAll('[data-markdown-text-style="assistant-message"]')).filter(visible)
+        : [];
+      const latestChatGptReply = chatGptReplies[chatGptReplies.length - 1];
       const candidates = [];
       selectorEntries.forEach(([sel, hint]) => {
         try {
           document.querySelectorAll(sel).forEach((el) => {
+            if (latestChatGptReply && el !== latestChatGptReply) return;
             if (!visible(el)) return;
             if (isComposerElement(el)) return;
             if (isUserMessageElement(el)) return;
@@ -473,7 +480,7 @@
         } catch (_) { }
       });
 
-      if (candidates.length === 0) {
+      if (candidates.length === 0 && !latestChatGptReply) {
         Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
           if (isComposerElement(el)) return;
           if (isUserMessageElement(el)) return;

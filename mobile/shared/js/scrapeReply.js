@@ -643,7 +643,7 @@
       // grok/claude Collect grabbing the user's own prompt text).
       function isUserMessageElement(el) {
         if (!el) return false;
-        return !!el.closest('[data-message-author-role="user"], [data-testid*="user"]');
+        return !!el.closest('[data-message-author-role="user"], [data-testid*="user"], [data-content-search-unit-key$=":user"], [class~="group/user-message"]');
       }
 
       function isMetadataLikeText(text) {
@@ -704,6 +704,7 @@
       function findPromptAnchor() {
         if (!promptText(sourcePrompt)) return null;
         const selectors = [
+          '[data-content-search-unit-key$=":user"]',
           '[data-message-author-role="user"]',
           '[data-testid*="user"]',
           '[data-testid*="prompt"]',
@@ -784,6 +785,7 @@
         if (!promptAnchor) return null;
         const target = promptText(sourcePrompt);
         const selectors = [
+          '[data-markdown-text-style="assistant-message"]',
           '[data-message-author-role="assistant"]',
           '[data-testid*="assistant"]',
           '[class*="assistant"]'
@@ -825,6 +827,7 @@
         if (!selectedEl) return null;
         const selectedRect = selectedEl.getBoundingClientRect ? selectedEl.getBoundingClientRect() : null;
         const selectors = [
+          '[data-content-search-unit-key$=":user"]',
           '[data-message-author-role="user"]',
           '[data-testid*="user"]',
           '[data-testid*="prompt"]',
@@ -1034,6 +1037,17 @@
       }
 
       function buildOverrideResult(rawReply) {
+        // iOS sanitizes a separately extracted reply. Keep the new ChatGPT DOM
+        // path subject to the same prompt association guard as direct scraping.
+        if (serviceId === 'chatgpt' && sourcePrompt) {
+          const replies = Array.from(document.querySelectorAll('[data-markdown-text-style="assistant-message"]')).filter(visible);
+          const latest = replies[replies.length - 1];
+          const promptCandidate = latest ? findPromptCandidateForReply(latest) : null;
+          if (promptCandidate?.raw && !promptMatchesCurrentSource(promptCandidate.raw)) {
+            return JSON.stringify({ success: false, error: 'Selected reply belongs to a previous prompt',
+              document_title: document.title || '', prompt_candidate: summarizePromptCandidate(promptCandidate) });
+          }
+        }
         const debugTrace = {
           raw_override_preview: (rawReply || '').slice(0, 120),
           raw_override_len: (rawReply || '').length,
@@ -1112,6 +1126,7 @@
       }
 
       const selectors = [
+        '[data-markdown-text-style="assistant-message"]',
         '[data-testid*="conversation-turn"]',
         '[data-testid*="message-content"]',
         '[data-message-author-role="assistant"]',

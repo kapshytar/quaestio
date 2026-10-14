@@ -79,6 +79,8 @@
 
 ## Stable Scrape Behavior
 
+- ChatGPT's new `data-markdown-text-style="assistant-message"` blocks are scoped to the last assistant reply; user search-unit wrappers are excluded. The whole-reply Copy button must be in the action toolbar of that reply's `data-turn-key` container, never a table or user turn. Legacy ChatGPT DOM remains supported.
+- The same ChatGPT DOM markers are supported by both mobile shared extractors; validation uses an offline desktop DOM snapshot, with device validation still pending.
 - Structured DOM-to-markdown extraction is active for provider replies.
 - Forensic artifacts now include:
   - trace JSON

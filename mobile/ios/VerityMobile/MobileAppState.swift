@@ -113,7 +113,10 @@ final class MobileAppState: ObservableObject {
             )
         }
         let restoredSlots = Self.loadPersistedSlots()
-        let slots = Self.merge(defaults: defaultSlots, restored: restoredSlots, presets: presets)
+        let slots = Self.slotsResetToPresetURLs(
+            slots: Self.merge(defaults: defaultSlots, restored: restoredSlots, presets: presets),
+            presets: presets
+        )
         let webModels = Dictionary(uniqueKeysWithValues: slots.map { slot -> (Int, SlotWebViewModel) in
             let model = SlotWebViewModel()
             return (slot.id, model)
@@ -126,7 +129,12 @@ final class MobileAppState: ObservableObject {
         self.mergeAggregationPolicy = mergeCatalog?.aggregationPolicy ?? Self.defaultMergeAggregationPolicy
         self.slotUserAgentPresets = Self.loadPersistedUserAgentPresets(validSlots: slots)
         Self.applyServiceDefaultUserAgentPresets(to: &self.slotUserAgentPresets, validSlots: slots)
-        self.lastUserPrompt = Self.loadPersistedLastUserPrompt()
+        // A new process starts a fresh workspace, like Android's onCreate.
+        // Saved sessions remain available through explicit Load; background
+        // resume keeps this same MobileAppState instance and its context.
+        sessionManager.replaceParallelIngestState(.empty)
+        self.lastUserPrompt = ""
+        persistLastUserPrompt("")
         self.globalPhoneZoomPercent = Self.loadPersistedGlobalPhoneZoomPercent()
         let parallelState = sessionManager.getParallelIngestState()
         if self.lastUserPrompt.isEmpty, !parallelState.sourcePrompt.isEmpty {
@@ -137,10 +145,6 @@ final class MobileAppState: ObservableObject {
         self.projectTreeNodes = Self.loadPersistedProjectTree()
         self.sessionsLastWebSyncAt = Self.loadPersistedSessionsLoadedAt()
         self.sessionIndicatorText = Self.makeSessionIndicator(from: parallelState)
-        if !hasActiveSessionLink() {
-            self.slots = Self.slotsResetToPresetURLs(slots: self.slots, presets: presets)
-        }
-
         applyAllSlotPresentationPresets()
 
         for slot in slots {

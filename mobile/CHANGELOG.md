@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.9.9
+
+- iOS cold launch starts on provider home pages without the previous session/note/prompt. Saved sessions, provider settings and authentication are preserved; explicit Load and ordinary background resume keep their existing behavior.
+
+
+## 2.9.8
+
+- Support ChatGPT's new assistant markdown and user search-unit markers in the shared direct scraper (Android) and raw extractor (iOS). Preserve prompt-scoped validation and legacy selectors. Offline Chromium regression passes; device install/verification remains pending.
+
+
 ## 2.9.7
 
 - **Sessions refresh from web once at startup when the last refresh is at least 15 minutes old (iOS + Android).** Reconciliation is background-only, preserves local offline sessions, and never rebinds the active question context. The Sessions list shows the persisted last successful web-sync time; failed loads no longer advance that timestamp. There is no polling.

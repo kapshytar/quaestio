@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.118.5
+
+- Recognize ChatGPT's new assistant markdown and user search-unit markers; collect the last reply and scope whole-reply Copy to its turn toolbar. Add offline Chromium regression for desktop and both mobile extraction paths.
+
 ## 1.118.4
 
 - **Fix: Save Current right after a relaunch no longer overwrites the previous session's snapshot.** The manual save took the raw stored session id that survives relaunch; the bridge `save` updates a snapshot by `session_id`, so the old session's name and slot URLs were replaced by the fresh home pages. Save now uses only this run's session (ingest result, loaded session, or guarded restore); removed the dead `getCurrentSessionId` helper.

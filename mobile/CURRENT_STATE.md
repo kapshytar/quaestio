@@ -2,6 +2,7 @@
 
 ## Document Authority
 
+- 2026-10-02 (2.9.9 / 302): iOS cold launch clears the prior active question context and loads provider home URLs; saved sessions remain available via Load. Cross-client launch contract: `Verity/docs/domains/SESSION_AND_INGEST_RULES.md`, Session restore rule. Build and device installation succeeded; installed 302 verified. Launch blocked by locked iPhone, force-quit verification handed to owner.
 - This file is the authoritative summary of the current functional state and migration intent for `chat-aggregator-mobile`.
 - Root docs in `Verity/` still win for workspace-wide or cross-repo rules.
 - Integration keys, Supabase MCP access, OAuth state, and secret-file locations are tracked in:
@@ -82,6 +83,7 @@
 
 ## In Progress
 
+- ChatGPT DOM compatibility: both shared extractors recognize `data-markdown-text-style="assistant-message"` and user search-unit wrappers; legacy selectors and prompt-scoped reply validation remain active. Offline Chromium regression covers Android's direct scraper and iOS's raw-extractor path; physical device verification is pending.
 - Android-first is temporary because the original mobile implementation started there first.
 - The intended steady state is shared-first, where shared mobile logic becomes the source of truth for both Android and iOS.
 - Shared JS boundaries are still being finalized against real provider behavior.

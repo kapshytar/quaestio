@@ -118,10 +118,10 @@ for device in devices:
     aliases.update(hostnames)
     entry = (device, aliases)
     # tunnelState refers to the USB/Lightning CoreDevice tunnel, not WiFi.
-    # A device on localNetwork (WiFi-paired) is reachable even when tunnelState
+    # A paired wired or localNetwork device can be reachable even when tunnelState
     # is "disconnected" — xcodebuild -showdestinations confirms it as a valid
-    # destination. Treat localNetwork paired devices as live.
-    is_live = (tunnel is None or tunnel == "connected" or transport == "localNetwork")
+    # destination. Treat both transports as candidates; verify with Xcode below.
+    is_live = (tunnel is None or tunnel == "connected" or transport in ("localNetwork", "wired"))
     if is_live:
         # tunnelState absent = older Xcode without the field; treat as candidate.
         live_devices.append(entry)
@@ -249,6 +249,9 @@ PY
 }
 
 DEVICE_UDID="$(resolve_device_udid "$DEVICE_INPUT")"
+if ! _udid_is_available_destination "$DEVICE_UDID" "$PROJECT_PATH" "$SCHEME"; then
+  _device_not_available "$DEVICE_UDID"
+fi
 DESTINATION="id=$DEVICE_UDID"
 
 echo "Building $APP_NAME for device $DEVICE_UDID..."

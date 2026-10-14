@@ -743,12 +743,24 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
     }
     function inExcludedArea(el) {
       if (!el) return true;
+      // The new ChatGPT page wraps both the thread and input in composer classes.
+      // Only a full-reply Copy button in the last assistant unit is eligible.
+      if (sid === 'chatgpt' && document.querySelector('[data-markdown-text-style="assistant-message"]')) {
+        const replies = Array.from(document.querySelectorAll('[data-markdown-text-style="assistant-message"]')).filter(hasLayout);
+        const turn = replies.pop()?.closest('[data-turn-key]');
+        return !turn || el.closest('[data-turn-key]') !== turn || !el.closest('.turn-action-controls') || labelOf(el).toLowerCase() !== 'copy';
+      }
       // Exclude buttons inside text input elements or inside a user-message
       // container (mirrors DOM-scrape isUserMessageElement guard: never copy
       // from the user's own turn).
       return !!el.closest('textarea, [contenteditable="true"], [role="textbox"], [data-testid*="composer"], [class*="composer"], [data-message-author-role="user"], [data-testid*="user"]');
     }
     function messageContainer(el) {
+      if (sid === 'chatgpt') {
+        const turn = el?.closest?.('[data-turn-key]');
+        const reply = turn?.querySelector('[data-markdown-text-style="assistant-message"]');
+        if (reply) return reply;
+      }
       // Try specific message selectors first
       const specific = el?.closest?.('[data-message-author-role="assistant"], [data-testid*="assistant"], [class*="assistant"][class*="message"], article, [class*="response"], [class*="answer"], [id^="response-"], model-response, response-container, [class*="message-bubble"], [class*="prose"]');
       if (specific) return specific;
@@ -814,7 +826,7 @@ async function tryCopyLatestAssistantReply(slot, serviceId = '') {
           if (!el || seen.has(el)) return;
           seen.add(el);
           // Skip excluded-area check for ChatGPT's exact copy button (data-testid="copy-turn-action-button")
-          const isExactChatGPT = sel === '[data-testid="copy-turn-action-button"]';
+          const isExactChatGPT = sid === 'chatgpt' && sel === '[data-testid="copy-turn-action-button"]' && !document.querySelector('[data-markdown-text-style="assistant-message"]');
           if (!isExactChatGPT && inExcludedArea(el)) { rejected.push({ sel, reason: 'excluded-area', tag: el.tagName, label: labelOf(el).slice(0, 40) }); return; }
           if (!hasLayout(el)) { rejected.push({ sel, reason: 'no-layout', tag: el.tagName, label: labelOf(el).slice(0, 40) }); return; }
           const label = labelOf(el);
@@ -5248,7 +5260,7 @@ async function getLatestAssistantReply(slot) {
     // mobile/shared/js/scrapeReply.js isUserMessageElement).
     function isUserMessageElement(el) {
       if (!el) return false;
-      return !!el.closest('[data-message-author-role="user"], [data-testid*="user"]');
+      return !!el.closest('[data-message-author-role="user"], [data-testid*="user"], [data-content-search-unit-key$=":user"], [class~="group/user-message"]');
     }
 
     function isMetadataLikeText(text) {
@@ -5323,6 +5335,7 @@ async function getLatestAssistantReply(slot) {
     function findNearestPromptCandidate(selectedCandidate) {
       if (!selectedCandidate?.el) return null;
       const userSelectors = [
+        '[data-content-search-unit-key$=":user"]',
         '[data-message-author-role="user"]',
         '[data-testid*="user"]',
         '[class*="user"][class*="message"]',
@@ -5400,10 +5413,17 @@ async function getLatestAssistantReply(slot) {
     if (serviceId === 'gemini') selectorEntries.unshift(['response-container', 'response-container'], ['model-response', 'model-response']);
     if (serviceId === 'grok') selectorEntries.unshift(['[class*="message-bubble"]', '[class*="message-bubble"]'], ['div[id^="response-"]', 'div[id^="response-"]']);
 
+    const chatGptReplies = serviceId === 'chatgpt'
+      ? Array.from(document.querySelectorAll('[data-markdown-text-style="assistant-message"]')).filter(visible)
+      : [];
+    const latestChatGptReply = chatGptReplies[chatGptReplies.length - 1];
+    if (latestChatGptReply) selectorEntries.unshift(['[data-markdown-text-style="assistant-message"]', '[data-markdown-text-style="assistant-message"]']);
+
     const candidates = [];
     selectorEntries.forEach(([sel, hint]) => {
       try {
         document.querySelectorAll(sel).forEach((el) => {
+          if (latestChatGptReply && el !== latestChatGptReply) return;
           if (!visible(el)) return;
           if (isComposerElement(el)) return;
           if (isUserMessageElement(el)) return;
@@ -5427,7 +5447,7 @@ async function getLatestAssistantReply(slot) {
       } catch (_) {}
     });
 
-    if (candidates.length === 0) {
+    if (candidates.length === 0 && !latestChatGptReply) {
       Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
         if (isComposerElement(el)) return;
         if (isUserMessageElement(el)) return;
