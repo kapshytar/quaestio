@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.119.0
+
+- Commit milestone: complete ChatGPT/Claude collection and exact Claude first-send control.
+
+
+## 1.118.6
+
+- Claude first-send selection accepts only exact Send labels and waits for the mobile editor to enable Send; scheduled-task/project controls cannot substitute for it. Offline send regression covers first and repeat sends, missing Send, and generic-fallback mutation.
+- Preserve full Claude replies through display: contents wrappers; collect all text blocks of the last assistant turn and exclude status/timestamp text. Offline Chromium regression covers complete source text, legacy markup and hidden-content rejection.
+
+
 ## 1.118.5
 
 - Recognize ChatGPT's new assistant markdown and user search-unit markers; collect the last reply and scope whole-reply Copy to its turn toolbar. Add offline Chromium regression for desktop and both mobile extraction paths.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.10.0
+
+- Commit milestone: shared ChatGPT/Claude collectors, exact Claude send control and iOS cold launch. Phones currently have 2.9.10 (303); device behavior acceptance remains open.
+
+
+## 2.9.10
+
+- Claude first-send selection accepts only exact Send labels and waits for the mobile editor to enable Send; scheduled-task/project controls cannot substitute for it. Offline send regression covers first and repeat sends, missing Send, and generic-fallback mutation.
+- Preserve full Claude replies through display: contents wrappers; collect all text blocks of the last assistant turn and exclude status/timestamp text. Offline Chromium regression covers complete source text, legacy markup and hidden-content rejection.
+
+
 ## 2.9.9
 
 - iOS cold launch starts on provider home pages without the previous session/note/prompt. Saved sessions, provider settings and authentication are preserved; explicit Load and ordinary background resume keep their existing behavior.

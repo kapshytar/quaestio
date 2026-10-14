@@ -79,6 +79,10 @@
 
 ## Stable Scrape Behavior
 
+- Claude send-button selection implements the exact-send-label rule in [mobile/CURRENT_STATE.md](../mobile/CURRENT_STATE.md), Stable. Desktop keeps its existing Enter/form fallback; mobile keeps its existing readiness polling.
+
+- Claude collection traverses visible children of boxless `display: contents` wrappers. A wrapper with no rectangle must not erase its reply; `display: none`, hidden visibility and action controls remain excluded. All visible `data-perf-reply-text` bodies inside the last Claude assistant turn are collected in document order (including continuations after tools), excluding status/timestamp text; legacy markup keeps the existing candidate fallback.
+
 - ChatGPT's new `data-markdown-text-style="assistant-message"` blocks are scoped to the last assistant reply; user search-unit wrappers are excluded. The whole-reply Copy button must be in the action toolbar of that reply's `data-turn-key` container, never a table or user turn. Legacy ChatGPT DOM remains supported.
 - The same ChatGPT DOM markers are supported by both mobile shared extractors; validation uses an offline desktop DOM snapshot, with device validation still pending.
 - Structured DOM-to-markdown extraction is active for provider replies.

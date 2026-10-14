@@ -96,11 +96,19 @@
     }
   }
 
-  function findSendButton(inputEl, selectors) {
+  function findSendButton(inputEl, selectors, serviceId) {
     for (const sel of selectors.button || []) {
-      const btn = document.querySelector(sel);
-      if (btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' && isVisible(btn)) return btn;
+      const matches = serviceId === 'claude'
+        ? Array.from(document.querySelectorAll(sel))
+        : [document.querySelector(sel)];
+      for (const btn of matches) {
+        if (serviceId === 'claude' && !/^(send message|send)$/i.test(btn?.getAttribute('aria-label') || '')) continue;
+        if (btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' && isVisible(btn)) return btn;
+      }
     }
+    // Before Claude enables Send, generic scoring can select scheduled-task
+    // or project controls instead ("task" contains "ask"). Keep polling Send.
+    if (serviceId === 'claude') return null;
 
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
     let best = null;
@@ -174,7 +182,7 @@
         setTimeout(() => {
           fillInput(inputEl, message, serviceId);
           setTimeout(() => {
-            const btn = findSendButton(inputEl, selectors);
+            const btn = findSendButton(inputEl, selectors, serviceId);
             if (btn) {
               btn.click();
             } else {
@@ -193,7 +201,7 @@
         const maxWait = serviceId === 'deepseek' ? 2000 : 1500;
         const start = Date.now();
         const trySubmit = () => {
-          const btn = findSendButton(inputEl, selectors);
+          const btn = findSendButton(inputEl, selectors, serviceId);
           if (btn) {
             btn.click();
             return;

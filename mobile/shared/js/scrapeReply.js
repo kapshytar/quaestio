@@ -123,7 +123,10 @@
           const el = node;
           const tag = (el.tagName || '').toUpperCase();
           if (shouldSkipElement(el)) return;
-          if (!visible(el) && el !== rootEl) return;
+          if (el !== rootEl && !visible(el)) {
+            const style = window.getComputedStyle(el);
+            if (style.display !== 'contents' || style.visibility === 'hidden') return;
+          }
 
           if (tag === 'BR') {
             parts.push('\n');
@@ -1142,6 +1145,14 @@
       if (serviceId === 'gemini') selectors.unshift('model-response', 'response-container');
       if (serviceId === 'grok') selectors.unshift('div[id^="response-"]', '[class*="message-bubble"]');
 
+      const claudeTurns = serviceId === 'claude'
+        ? Array.from(document.querySelectorAll('[data-testid="assistant-message"]')).filter(visible)
+        : [];
+      const latestClaudeTurn = claudeTurns[claudeTurns.length - 1];
+      const claudeReplyBodies = Array.from(latestClaudeTurn?.querySelectorAll('[data-perf-reply-text]') || []).filter(visible);
+      const exactClaudeReply = claudeReplyBodies.length ? latestClaudeTurn : null;
+      if (exactClaudeReply) selectors.unshift('[data-testid="assistant-message"]');
+
       const candidates = [];
       if (rawReplyOverride.trim()) {
         return buildOverrideResult(rawReplyOverride);
@@ -1149,10 +1160,13 @@
       selectors.forEach((sel) => {
         try {
           document.querySelectorAll(sel).forEach((el) => {
+            if (exactClaudeReply && el !== exactClaudeReply) return;
             if (!visible(el)) return;
             if (isComposerElement(el)) return;
             if (isUserMessageElement(el)) return;
-            const raw = extractStructuredText(el);
+            const raw = el === exactClaudeReply
+              ? claudeReplyBodies.map(extractStructuredText).filter(Boolean).join('\n\n')
+              : extractStructuredText(el);
             const flat = flatText(raw);
             if (flat.length < 20 || isMetadataLikeText(flat)) return;
             const rect = el.getBoundingClientRect();
@@ -1162,7 +1176,7 @@
         } catch (_) { }
       });
 
-      if (candidates.length === 0) {
+      if (candidates.length === 0 && !exactClaudeReply) {
         Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
           if (isComposerElement(el)) return;
           if (isUserMessageElement(el)) return;

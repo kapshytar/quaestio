@@ -157,7 +157,10 @@
           if (node.nodeType !== Node.ELEMENT_NODE) return;
           const el = node;
           if (shouldSkipElement(el)) return;
-          if (el !== rootEl && !visible(el)) return;
+          if (el !== rootEl && !visible(el)) {
+            const style = window.getComputedStyle(el);
+            if (style.display !== 'contents' || style.visibility === 'hidden') return;
+          }
 
           const tag = (el.tagName || '').toUpperCase();
           if (tag === 'BR') {
@@ -453,15 +456,26 @@
         ? Array.from(document.querySelectorAll('[data-markdown-text-style="assistant-message"]')).filter(visible)
         : [];
       const latestChatGptReply = chatGptReplies[chatGptReplies.length - 1];
+
+      const claudeTurns = serviceId === 'claude'
+        ? Array.from(document.querySelectorAll('[data-testid="assistant-message"]')).filter(visible)
+        : [];
+      const latestClaudeTurn = claudeTurns[claudeTurns.length - 1];
+      const claudeReplyBodies = Array.from(latestClaudeTurn?.querySelectorAll('[data-perf-reply-text]') || []).filter(visible);
+      const exactClaudeReply = claudeReplyBodies.length ? latestClaudeTurn : null;
+      const exactReply = latestChatGptReply || exactClaudeReply;
+      if (exactClaudeReply) selectorEntries.unshift(['[data-testid="assistant-message"]', '[data-testid="assistant-message"]']);
       const candidates = [];
       selectorEntries.forEach(([sel, hint]) => {
         try {
           document.querySelectorAll(sel).forEach((el) => {
-            if (latestChatGptReply && el !== latestChatGptReply) return;
+            if (exactReply && el !== exactReply) return;
             if (!visible(el)) return;
             if (isComposerElement(el)) return;
             if (isUserMessageElement(el)) return;
-            const raw = extractStructuredText(el);
+            const raw = el === exactClaudeReply
+              ? claudeReplyBodies.map(extractStructuredText).filter(Boolean).join('\n\n')
+              : extractStructuredText(el);
             const flat = flatText(raw);
             if (flat.length < 20 || isMetadataLikeText(flat)) return;
             const rect = el.getBoundingClientRect();
@@ -480,7 +494,7 @@
         } catch (_) { }
       });
 
-      if (candidates.length === 0 && !latestChatGptReply) {
+      if (candidates.length === 0 && !exactReply) {
         Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
           if (isComposerElement(el)) return;
           if (isUserMessageElement(el)) return;

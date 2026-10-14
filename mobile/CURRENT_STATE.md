@@ -2,6 +2,8 @@
 
 ## Document Authority
 
+- 2026-10-13 (2.9.10 / 303): both shared reply extractors implement the desktop Claude contents-wrapper/body-selection contract (desktop/CURRENT_STATE.md → Stable Scrape Behavior). Offline Chromium parity verified; Android and iPhone 303 installed; both installed versions verified. Android launched. iPhone launch refused by iOS security; local code signature verification passes and device provisioning profile is valid through 2026-10-20. Owner asked to confirm developer trust/open manually and verify behavior.
+
 - 2026-10-02 (2.9.9 / 302): iOS cold launch clears the prior active question context and loads provider home URLs; saved sessions remain available via Load. Cross-client launch contract: `Verity/docs/domains/SESSION_AND_INGEST_RULES.md`, Session restore rule. Build and device installation succeeded; installed 302 verified. Launch blocked by locked iPhone, force-quit verification handed to owner.
 - This file is the authoritative summary of the current functional state and migration intent for `chat-aggregator-mobile`.
 - Root docs in `Verity/` still win for workspace-wide or cross-repo rules.
@@ -22,6 +24,8 @@
 - 2026-07-06 (2.8.10): Collect streaming-completion guard on both clients — a slot is ready only when its scraped text is non-empty AND unchanged across two consecutive polls (iOS `MobileAppState.collectLatestRepliesForMerge`, Android `MergeFragment` text-stability gate over the stop-button READY check). iOS session restore now links a late Collect to the tail of the note chain (not the root) and accepts a full slot-URL fingerprint match without a prompt-name match (prompt match kept as a preference) — fixes mid-stream reply stubs, turn-1 answers overwritten by a late re-collect, and duplicate-session splits when continuing a conversation.
 
 ## Stable
+
+- Claude sending uses only enabled buttons with exact send labels (Send message / Send). While the editor is enabling the first Send button, the shared send script waits; it must never substitute project/settings/scheduled-task controls from the generic fallback. The same rule applies to desktop send selection.
 
 - `chat-aggregator-mobile` now exists as a separate git repo inside the `Verity` workspace.
 - The repo now contains a running iOS device-tested MVP shell, but it is still not a shipping mobile app.
