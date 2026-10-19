@@ -25,6 +25,8 @@
 
 ## Stable
 
+- Optional Qwen, GLM, Kimi and MiniMax web-chat providers follow the desktop provider expansion contract (desktop/CURRENT_STATE.md, 2026-10-19). Shared send uses observed controls; GLM collectors exclude reasoning and reject absent answers. Catalog/selector parity and offline Chromium behavior are verified; authenticated Qwen/Kimi/MiniMax collection and device behavior are unverified. No new phone installation.
+
 - Claude sending uses only enabled buttons with exact send labels (Send message / Send). While the editor is enabling the first Send button, the shared send script waits; it must never substitute project/settings/scheduled-task controls from the generic fallback. The same rule applies to desktop send selection.
 
 - `chat-aggregator-mobile` now exists as a separate git repo inside the `Verity` workspace.

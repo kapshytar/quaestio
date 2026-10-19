@@ -102,6 +102,42 @@ object ServiceConfig {
                     "button.bg-sideBar"
                 )
             )
+        ),
+        "qwen" to AiService(
+            id = "qwen",
+            name = "Qwen",
+            url = "https://chat.qwen.ai",
+            selectors = ServiceSelectors(
+                textarea = listOf("textarea.message-input-textarea"),
+                button = listOf("button.send-button[aria-label=\"Send\"]")
+            )
+        ),
+        "glm" to AiService(
+            id = "glm",
+            name = "GLM",
+            url = "https://chat.z.ai",
+            selectors = ServiceSelectors(
+                textarea = listOf("textarea#chat-input"),
+                button = listOf("button#send-message-button")
+            )
+        ),
+        "kimi" to AiService(
+            id = "kimi",
+            name = "Kimi",
+            url = "https://www.kimi.ai/en/",
+            selectors = ServiceSelectors(
+                contenteditable = listOf("div.chat-input-editor[contenteditable=\"true\"][role=\"textbox\"]"),
+                button = listOf(".send-button-container:not(.disabled)")
+            )
+        ),
+        "minimax" to AiService(
+            id = "minimax",
+            name = "MiniMax",
+            url = "https://agent.minimax.io/",
+            selectors = ServiceSelectors(
+                contenteditable = listOf("div.tiptap.ProseMirror.rich-text-editor[contenteditable=\"true\"]"),
+                button = listOf("button[aria-label=\"Send message\"]")
+            )
         )
     )
 
@@ -124,6 +160,10 @@ object ServiceConfig {
             "grok.com" in u || "grok.x.com" in u -> "grok"
             "deepseek.com" in u -> "deepseek"
             "perplexity.ai" in u -> "perplexity"
+            "chat.qwen.ai" in u -> "qwen"
+            "chat.z.ai" in u -> "glm"
+            "kimi.ai" in u || "kimi.com" in u -> "kimi"
+            "minimax.io" in u -> "minimax"
             else -> null
         }
     }
@@ -135,6 +175,10 @@ object ServiceConfig {
         "google.com", "googleapis.com", "gstatic.com",
         "grok.com",
         "deepseek.com",
-        "perplexity.ai"
+        "perplexity.ai",
+        "qwen.ai",
+        "z.ai",
+        "kimi.ai", "kimi.com",
+        "minimax.io"
     )
 }

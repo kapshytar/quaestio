@@ -106,9 +106,10 @@
         if (btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' && isVisible(btn)) return btn;
       }
     }
-    // Before Claude enables Send, generic scoring can select scheduled-task
-    // or project controls instead ("task" contains "ask"). Keep polling Send.
+    // Providers with verified send controls must keep polling those controls;
+    // generic scoring can select scheduled-task/project controls instead.
     if (serviceId === 'claude') return null;
+    if (['qwen', 'glm', 'kimi', 'minimax'].includes(serviceId)) return null;
 
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
     let best = null;

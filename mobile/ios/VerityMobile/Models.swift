@@ -78,6 +78,14 @@ enum ServiceIconCatalog {
             domain = "https://chat.deepseek.com"
         case "perplexity":
             domain = "https://www.perplexity.ai"
+        case "qwen":
+            domain = "https://chat.qwen.ai"
+        case "glm":
+            domain = "https://chat.z.ai"
+        case "kimi":
+            domain = "https://www.kimi.ai"
+        case "minimax":
+            domain = "https://agent.minimax.io"
         default:
             return nil
         }

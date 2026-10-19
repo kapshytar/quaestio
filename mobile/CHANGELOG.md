@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.0
+
+- Add optional Qwen, GLM (Z.ai), Kimi international and MiniMax web providers; retain default slots. Match observed composer/send controls and scope GLM collection to the last response after the latest question, exclude thinking text, and recognize the live GLM stop control. Cross-client catalog checks and offline Chromium tests pass; authenticated Qwen/Kimi/MiniMax collection and device behavior remain unverified. No deployment.
+
 ## 2.10.0
 
 - Commit milestone: shared ChatGPT/Claude collectors, exact Claude send control and iOS cold launch. Phones currently have 2.9.10 (303); device behavior acceptance remains open.

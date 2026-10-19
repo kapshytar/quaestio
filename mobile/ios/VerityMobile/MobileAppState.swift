@@ -1840,6 +1840,8 @@ final class MobileAppState: ObservableObject {
             chatID = firstAfter("s") ?? firstAfter("chat")
         case "perplexity":
             chatID = firstAfter("search")
+        case "glm":
+            chatID = firstAfter("c") ?? firstAfter("chat")
         case "grok":
             chatID = firstAfter("c") ?? firstAfter("chat")
         case "gemini":

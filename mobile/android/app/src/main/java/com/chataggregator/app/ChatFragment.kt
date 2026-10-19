@@ -745,6 +745,7 @@ $shared
     if (sid === 'claude') checks.push('[aria-label="Stop Response"]');
     if (sid === 'gemini') checks.push('.stop-button');
     if (sid === 'deepseek') checks.push('.stop-button');
+    if (sid === 'glm') checks.push('button > span.block.size-3.rounded-xs');
     if (sid === 'perplexity') checks.push('[aria-label*="stop" i]');
     if (sid === 'grok') checks.push('[aria-label*="Stop" i]');
 

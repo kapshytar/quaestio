@@ -1009,6 +1009,7 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
             );
             if (sid === 'gemini') { checks.push('mat-icon[data-mat-icon-name="stop_circle"]', 'button[data-test-id="stop-button"]', '.stop-button'); }
             if (sid === 'deepseek') checks.push('.stop-button');
+            if (sid === 'glm') checks.push('button > span.block.size-3.rounded-xs');
             if (sid === 'perplexity') checks.push('[aria-label*="stop" i]');
             if (sid === 'grok') checks.push('[aria-label*="Stop" i]');
 
@@ -1241,6 +1242,18 @@ final class SlotWebViewModel: NSObject, ObservableObject, WKNavigationDelegate, 
         case "chat.deepseek.com":
             serviceID = "deepseek"
             conversationKey = firstAfter("s") ?? firstAfter("chat")
+        case "chat.qwen.ai":
+            serviceID = "qwen"
+            conversationKey = nil
+        case "chat.z.ai":
+            serviceID = "glm"
+            conversationKey = firstAfter("c") ?? firstAfter("chat")
+        case "www.kimi.ai", "kimi.ai", "www.kimi.com", "kimi.com":
+            serviceID = "kimi"
+            conversationKey = nil
+        case "agent.minimax.io":
+            serviceID = "minimax"
+            conversationKey = nil
         default:
             conversationKey = nil
         }

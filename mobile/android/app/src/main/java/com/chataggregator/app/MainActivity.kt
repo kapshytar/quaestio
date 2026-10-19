@@ -623,6 +623,10 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
             "grok" -> "https://grok.com"
             "deepseek" -> "https://chat.deepseek.com"
             "perplexity" -> "https://www.perplexity.ai"
+            "qwen" -> "https://chat.qwen.ai"
+            "glm" -> "https://chat.z.ai"
+            "kimi" -> "https://www.kimi.ai"
+            "minimax" -> "https://agent.minimax.io"
             else -> return null
         }
         return "https://www.google.com/s2/favicons?sz=64&domain_url=$domain"
@@ -2841,6 +2845,7 @@ class MainActivity : AppCompatActivity(), PlayBillingManager.Listener {
                 "claude" -> chatId = firstAfter("chat")
                 "deepseek" -> chatId = firstAfter("s") ?: firstAfter("chat")
                 "perplexity" -> chatId = firstAfter("search")
+                "glm" -> chatId = firstAfter("c") ?: firstAfter("chat")
                 "grok" -> chatId = firstAfter("c") ?: firstAfter("chat")
                 "gemini" -> chatId = firstAfter("chat")
             }

@@ -80,6 +80,38 @@ const SERVICE_PRESETS = {
         'button.bg-sideBar'
       ]
     }
+  },
+  qwen: {
+    name: 'Qwen',
+    url: 'https://chat.qwen.ai',
+    selectors: {
+      textarea: ['textarea.message-input-textarea'],
+      button: ['button.send-button[aria-label="Send"]']
+    }
+  },
+  glm: {
+    name: 'GLM',
+    url: 'https://chat.z.ai',
+    selectors: {
+      textarea: ['textarea#chat-input'],
+      button: ['button#send-message-button']
+    }
+  },
+  kimi: {
+    name: 'Kimi',
+    url: 'https://www.kimi.ai/en/',
+    selectors: {
+      contenteditable: ['div.chat-input-editor[contenteditable="true"][role="textbox"]'],
+      button: ['.send-button-container:not(.disabled)']
+    }
+  },
+  minimax: {
+    name: 'MiniMax',
+    url: 'https://agent.minimax.io/',
+    selectors: {
+      contenteditable: ['div.tiptap.ProseMirror.rich-text-editor[contenteditable="true"]'],
+      button: ['button[aria-label="Send message"]']
+    }
   }
 };
 
@@ -107,6 +139,10 @@ function detectServiceByUrl(url) {
   if (u.includes('grok.com') || u.includes('grok.x.com')) return 'grok';
   if (u.includes('deepseek.com')) return 'deepseek';
   if (u.includes('perplexity.ai')) return 'perplexity';
+  if (u.includes('chat.qwen.ai')) return 'qwen';
+  if (u.includes('chat.z.ai')) return 'glm';
+  if (u.includes('kimi.ai') || u.includes('kimi.com')) return 'kimi';
+  if (u.includes('minimax.io')) return 'minimax';
   return null;
 }
 
@@ -123,7 +159,11 @@ function serviceIconMarkup(serviceId, faviconUrl) {
     gemini: { bg: '#2563eb', fg: '#ffffff', glyph: 'G' },
     grok: { bg: '#7c3aed', fg: '#ffffff', glyph: 'X' },
     deepseek: { bg: '#0f766e', fg: '#ffffff', glyph: 'D' },
-    perplexity: { bg: '#0f172a', fg: '#ffffff', glyph: 'P' }
+    perplexity: { bg: '#0f172a', fg: '#ffffff', glyph: 'P' },
+    qwen: { bg: '#4f46e5', fg: '#ffffff', glyph: 'Q' },
+    glm: { bg: '#0891b2', fg: '#ffffff', glyph: 'Z' },
+    kimi: { bg: '#334155', fg: '#ffffff', glyph: 'K' },
+    minimax: { bg: '#e11d48', fg: '#ffffff', glyph: 'M' }
   }[sid] || { bg: '#756858', fg: '#f4efe4', glyph: '?' };
 
   return `
@@ -669,6 +709,8 @@ async function isSlotStillGenerating(slot, serviceId = '') {
         'button[aria-label="Stop generating"]'
       );
     }
+
+    if (sid === 'glm') checks.push('button > span.block.size-3.rounded-xs');
 
     // Generic: only match explicit "Stop generating" / "Stop response" buttons
     checks.push(
@@ -1363,6 +1405,8 @@ function extractConversationKey(serviceId, rawUrl) {
       chatId = firstAfter('s') || firstAfter('chat');
     } else if (sid === 'perplexity') {
       chatId = firstAfter('search');
+    } else if (sid === 'glm') {
+      chatId = firstAfter('c') || firstAfter('chat');
     } else if (sid === 'grok') {
       chatId = firstAfter('c') || firstAfter('chat');
     } else if (sid === 'gemini') {
@@ -4261,6 +4305,7 @@ async function sendMessage(slot, text) {
          && (serviceId !== 'claude' || /^(send message|send)$/i.test(btn.getAttribute('aria-label') || '')));
        if (explicitVisible) return explicitVisible;
        if (serviceId === 'claude') return null;
+       if (['qwen', 'glm', 'kimi', 'minimax'].includes(serviceId)) return null;
 
        const candidates = Array.from(document.querySelectorAll('button,[role="button"]'));
        return candidates.find((btn) => {
@@ -5069,6 +5114,7 @@ async function getLatestAssistantReply(slot) {
       const tag = (el.tagName || '').toUpperCase();
       if (['BUTTON', 'SVG', 'PATH', 'STYLE', 'SCRIPT', 'NOSCRIPT', 'MAT-ICON', 'USER-QUERY'].includes(tag)) return true;
       if (el.getAttribute('aria-hidden') === 'true') return true;
+      if (serviceId === 'glm' && el.classList?.contains('thinking-chain-container')) return true;
       const className = String(el.className || '');
       return /table-footer|action-button|copy-button|buttons-container|response-container-header|response-container-footer/i.test(className)
         || !!el.closest('.table-footer, [hide-from-message-actions]');
@@ -5246,7 +5292,7 @@ async function getLatestAssistantReply(slot) {
 
       walk(rootEl);
       const structured = normalizeText(parts.join(''));
-      if (structured) return structured;
+      if (structured || serviceId === 'glm') return structured;
       return normalizeText(rootEl.innerText || rootEl.textContent);
     }
 
@@ -5429,7 +5475,15 @@ async function getLatestAssistantReply(slot) {
     const latestClaudeTurn = claudeTurns[claudeTurns.length - 1];
     const claudeReplyBodies = Array.from(latestClaudeTurn?.querySelectorAll('[data-perf-reply-text]') || []).filter(visible);
     const exactClaudeReply = claudeReplyBodies.length ? latestClaudeTurn : null;
-    const exactReply = latestChatGptReply || exactClaudeReply;
+    const glmUsers = serviceId === 'glm' ? Array.from(document.querySelectorAll('.user-message')).filter(visible) : [];
+    const latestGlmUser = glmUsers[glmUsers.length - 1];
+    const glmReplies = serviceId === 'glm'
+      ? Array.from(document.querySelectorAll('[id="response-content-container"] > .markdown-prose')).filter(visible)
+        .filter(el => !latestGlmUser || (latestGlmUser.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING))
+      : [];
+    const exactGlmReply = glmReplies[glmReplies.length - 1];
+    const exactReply = latestChatGptReply || exactClaudeReply || exactGlmReply;
+    if (serviceId === 'glm') selectorEntries.splice(0, selectorEntries.length, ['[id="response-content-container"] > .markdown-prose', '[id="response-content-container"] > .markdown-prose']);
     if (exactClaudeReply) selectorEntries.unshift(['[data-testid="assistant-message"]', '[data-testid="assistant-message"]']);
     if (latestChatGptReply) selectorEntries.unshift(['[data-markdown-text-style="assistant-message"]', '[data-markdown-text-style="assistant-message"]']);
 
@@ -5437,6 +5491,7 @@ async function getLatestAssistantReply(slot) {
     selectorEntries.forEach(([sel, hint]) => {
       try {
         document.querySelectorAll(sel).forEach((el) => {
+          if (serviceId === 'glm' && el !== exactGlmReply) return;
           if (exactReply && el !== exactReply) return;
           if (!visible(el)) return;
           if (isComposerElement(el)) return;
@@ -5463,7 +5518,7 @@ async function getLatestAssistantReply(slot) {
       } catch (_) {}
     });
 
-    if (candidates.length === 0 && !exactReply) {
+    if (candidates.length === 0 && !exactReply && serviceId !== 'glm') {
       Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
         if (isComposerElement(el)) return;
         if (isUserMessageElement(el)) return;

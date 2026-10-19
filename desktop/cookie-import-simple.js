@@ -41,7 +41,8 @@ async function importCookiesFromJSON(jsonPath) {
     'gemini.google.com', 'aistudio.google.com',
     'x.com', 'twitter.com', 'grok.com',
     'deepseek.com',
-    'perplexity.ai'
+    'perplexity.ai',
+    'qwen.ai', 'z.ai', 'kimi.ai', 'kimi.com', 'minimax.io'
   ];
 
   let imported = 0;

@@ -97,6 +97,66 @@
           "button.bg-sideBar"
         ]
       }
+    },
+    "qwen": {
+      "id": "qwen",
+      "name": "Qwen",
+      "url": "https://chat.qwen.ai",
+      "phoneZoomPercent": 90,
+      "selectors": {
+        "textarea": [
+          "textarea.message-input-textarea"
+        ],
+        "contenteditable": [],
+        "button": [
+          "button.send-button[aria-label=\"Send\"]"
+        ]
+      }
+    },
+    "glm": {
+      "id": "glm",
+      "name": "GLM",
+      "url": "https://chat.z.ai",
+      "phoneZoomPercent": 90,
+      "selectors": {
+        "textarea": [
+          "textarea#chat-input"
+        ],
+        "contenteditable": [],
+        "button": [
+          "button#send-message-button"
+        ]
+      }
+    },
+    "kimi": {
+      "id": "kimi",
+      "name": "Kimi",
+      "url": "https://www.kimi.ai/en/",
+      "phoneZoomPercent": 90,
+      "selectors": {
+        "textarea": [],
+        "contenteditable": [
+          "div.chat-input-editor[contenteditable=\"true\"][role=\"textbox\"]"
+        ],
+        "button": [
+          ".send-button-container:not(.disabled)"
+        ]
+      }
+    },
+    "minimax": {
+      "id": "minimax",
+      "name": "MiniMax",
+      "url": "https://agent.minimax.io/",
+      "phoneZoomPercent": 90,
+      "selectors": {
+        "textarea": [],
+        "contenteditable": [
+          "div.tiptap.ProseMirror.rich-text-editor[contenteditable=\"true\"]"
+        ],
+        "button": [
+          "button[aria-label=\"Send message\"]"
+        ]
+      }
     }
   }
 }

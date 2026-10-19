@@ -82,6 +82,7 @@
         const tag = (el.tagName || '').toUpperCase();
         if (['BUTTON', 'SVG', 'PATH', 'STYLE', 'SCRIPT', 'NOSCRIPT', 'MAT-ICON', 'USER-QUERY'].includes(tag)) return true;
         if (el.getAttribute('aria-hidden') === 'true') return true;
+        if (serviceId === 'glm' && el.classList?.contains('thinking-chain-container')) return true;
         const className = String(el.className || '');
         return /table-footer|action-button|copy-button|buttons-container|response-container-header|response-container-footer/i.test(className)
           || !!el.closest('.table-footer, [hide-from-message-actions]');
@@ -259,7 +260,7 @@
 
         walk(rootEl);
         const structured = normalizeText(parts.join(''));
-        if (structured) return structured;
+        if (structured || serviceId === 'glm') return structured;
         return normalizeText(rootEl.innerText || rootEl.textContent);
       }
 
@@ -463,12 +464,22 @@
       const latestClaudeTurn = claudeTurns[claudeTurns.length - 1];
       const claudeReplyBodies = Array.from(latestClaudeTurn?.querySelectorAll('[data-perf-reply-text]') || []).filter(visible);
       const exactClaudeReply = claudeReplyBodies.length ? latestClaudeTurn : null;
-      const exactReply = latestChatGptReply || exactClaudeReply;
+      const glmUsers = serviceId === 'glm' ? Array.from(document.querySelectorAll('.user-message')).filter(visible) : [];
+      const latestGlmUser = glmUsers[glmUsers.length - 1];
+      const glmReplies = serviceId === 'glm'
+        ? Array.from(document.querySelectorAll('[id="response-content-container"] > .markdown-prose')).filter(visible)
+          .filter(el => !latestGlmUser || (latestGlmUser.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING))
+        : [];
+      const glmPromptMatches = !sourcePrompt || (latestGlmUser && flatText(extractStructuredText(latestGlmUser)).toLowerCase() === flatText(sourcePrompt).toLowerCase());
+      const exactGlmReply = glmPromptMatches ? glmReplies[glmReplies.length - 1] : null;
+      const exactReply = latestChatGptReply || exactClaudeReply || exactGlmReply;
+      if (serviceId === 'glm') selectorEntries.splice(0, selectorEntries.length, ['[id="response-content-container"] > .markdown-prose', '[id="response-content-container"] > .markdown-prose']);
       if (exactClaudeReply) selectorEntries.unshift(['[data-testid="assistant-message"]', '[data-testid="assistant-message"]']);
       const candidates = [];
       selectorEntries.forEach(([sel, hint]) => {
         try {
           document.querySelectorAll(sel).forEach((el) => {
+            if (serviceId === 'glm' && el !== exactGlmReply) return;
             if (exactReply && el !== exactReply) return;
             if (!visible(el)) return;
             if (isComposerElement(el)) return;
@@ -494,7 +505,7 @@
         } catch (_) { }
       });
 
-      if (candidates.length === 0 && !exactReply) {
+      if (candidates.length === 0 && !exactReply && serviceId !== 'glm') {
         Array.from(document.querySelectorAll('article, div')).filter(visible).forEach((el) => {
           if (isComposerElement(el)) return;
           if (isUserMessageElement(el)) return;

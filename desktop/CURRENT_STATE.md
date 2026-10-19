@@ -17,6 +17,8 @@
 
 ## Stable
 
+- 2026-10-19 provider expansion contract: Qwen (chat.qwen.ai), GLM (chat.z.ai), Kimi (www.kimi.ai), and MiniMax (agent.minimax.io) are optional web-chat providers alongside DeepSeek. Reuse existing slot/send/collect/session mechanisms across desktop, iOS and Android; keep the four default slots unchanged. Availability and censorship are properties of the hosted service, not guaranteed by this catalog. Catalogs and observed send controls are implemented on all three clients; GLM collection is scoped to the latest response body and excludes thinking-chain content. Offline Chromium verification covers send controls and GLM extraction across desktop/Android/iOS. Live Qwen is blocked on age confirmation; Kimi/MiniMax require sign-in. Their authenticated send/collection/session identity and censorship remain unverified.
+
 - Cross-cutting ecosystem rules are now split into root handoff docs:
   - `SYSTEM_CAPABILITIES.md`
   - `SESSION_AND_INGEST_RULES.md`
