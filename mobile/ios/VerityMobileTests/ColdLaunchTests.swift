@@ -42,10 +42,20 @@ final class ColdLaunchTests: XCTestCase {
         initial.loadSession(local)
         XCTAssertEqual(manager.getParallelIngestState().sessionId, local.sessionId)
         XCTAssertEqual(initial.slots.map(\.url), initial.slots.map { urls["slot-\($0.id)"]! })
-        // Background resume uses this same object: no constructor, no reset.
+        // The loaded context exists before constructing the next app state.
         XCTAssertEqual(initial.activeProjectId, "saved-project")
         XCTAssertEqual(initial.lastUserPrompt, local.name)
 
+        let store = SharedWebViewEnvironment.websiteDataStore
+        XCTAssertTrue(store.isPersistent)
+        let cookie = try XCTUnwrap(HTTPCookie(properties: [
+            .domain: "cold-launch-regression.invalid", .path: "/", .name: "auth-sentinel",
+            .value: "synthetic-test-value", .expires: Date().addingTimeInterval(3600)
+        ]))
+        await store.httpCookieStore.setCookie(cookie)
+
+        // Seed after the final suspension: live WebView URL callbacks can
+        // otherwise overwrite standard defaults while cookie storage is awaited.
         // Seed every stale context field, including a note-backed session's tail.
         manager.replaceParallelIngestState(ParallelIngestState(sessionId: 277,
             activeNoteId: "question-tail", sourcePrompt: "stale prompt", externalChatId: "old-chat",
@@ -57,14 +67,9 @@ final class ColdLaunchTests: XCTestCase {
         defaults.set("stale prompt", forKey: "verity.mobile.lastUserPrompt")
         defaults.set(Date().timeIntervalSince1970, forKey: "verity.mobile.sessionsLoadedAt")
 
-        let store = SharedWebViewEnvironment.websiteDataStore
-        XCTAssertTrue(store.isPersistent)
-        let cookie = try XCTUnwrap(HTTPCookie(properties: [
-            .domain: "cold-launch-regression.invalid", .path: "/", .name: "auth-sentinel",
-            .value: "synthetic-test-value", .expires: Date().addingTimeInterval(3600)
-        ]))
-        await store.httpCookieStore.setCookie(cookie)
-
+        let persistedSlots = try JSONDecoder().decode([SlotState].self,
+            from: XCTUnwrap(defaults.data(forKey: "verity.mobile.slots")))
+        XCTAssertFalse(persistedSlots[0].isEnabled, "Fixture must reach startup intact")
         let restarted = MobileAppState()
         XCTAssertEqual(manager.getParallelIngestState(), .empty)
         XCTAssertNil(restarted.activeProjectId)

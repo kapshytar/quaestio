@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add iOS cold-launch regression coverage for fresh context, saved sessions and persistent WebView cookies, plus a simulator CI job and reproducible iPhone acceptance steps. Production startup behavior is unchanged; device acceptance remains open.
+- Add iOS cold-launch regression coverage for fresh context, saved sessions and persistent WebView cookies, plus simulator CI and iPhone acceptance steps in the existing iOS README. Production startup behavior is unchanged; device acceptance remains open.
 
 ## 2.11.0
 
