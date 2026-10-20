@@ -1,0 +1,34 @@
+name: iOS regression tests
+on:
+  pull_request:
+    paths:
+      - 'mobile/ios/**'
+      - 'mobile/shared/**'
+      - 'mobile/project.yml'
+      - 'mobile/scripts/bootstrap-ios.sh'
+      - '.github/workflows/ios-regression.yml'
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate Xcode project
+        run: bash mobile/scripts/bootstrap-ios.sh
+      - name: Select available iPhone simulator
+        run: |
+          simulator_id=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for runtime,devices in data["devices"].items() if "iOS" in runtime for d in devices if d["name"].startswith("iPhone")))')
+          echo "IOS_SIMULATOR_ID=$simulator_id" >> "$GITHUB_ENV"
+      - name: Run existing auth gates and cold launch regression
+        run: |
+          xcodebuild test -project mobile/VerityMobile.xcodeproj \
+            -scheme VerityMobile -destination "platform=iOS Simulator,id=$IOS_SIMULATOR_ID" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO \
+            -resultBundlePath TestResults.xcresult
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-test-results
+          path: TestResults.xcresult
+          if-no-files-found: ignore

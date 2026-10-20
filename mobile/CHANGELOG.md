@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add iOS cold-launch regression coverage for fresh context, saved sessions and persistent WebView cookies, plus simulator CI and iPhone acceptance steps in the existing iOS README. Production startup behavior is unchanged; device acceptance remains open.
+
 ## 2.11.0
 
 - Add optional Qwen, GLM (Z.ai), Kimi international and MiniMax web providers; retain default slots. Match observed composer/send controls and scope GLM collection to the last response after the latest question, exclude thinking text, and recognize the live GLM stop control. Cross-client catalog checks and offline Chromium tests pass; authenticated Qwen/Kimi/MiniMax collection and device behavior remain unverified. No deployment.
